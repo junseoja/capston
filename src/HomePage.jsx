@@ -1,62 +1,79 @@
-import { useState } from 'react'
+import { useState } from "react";
 
 function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
-  const today = new Date()
-  const dayIndex = today.getDay()
-  const date = today.getDate()
-  const days = ['일', '월', '화', '수', '목', '금', '토']
+  const today = new Date();
+  const dayIndex = today.getDay();
+  const date = today.getDate();
+  const days = ["일", "월", "화", "수", "목", "금", "토"];
 
-  const [time, setTime] = useState('morning')
-  const [proofInputs, setProofInputs] = useState({})
-  const [openProofId, setOpenProofId] = useState(null)
+  const [time, setTime] = useState("morning");
+  const [proofInputs, setProofInputs] = useState({});
+  const [proofFiles, setProofFiles] = useState({});
+  const [openProofId, setOpenProofId] = useState(null);
 
-  const filteredRoutines = routines.filter((routine) => routine.time === time)
+  const filteredRoutines = routines.filter((routine) => routine.time === time);
 
   const getTimeTitle = () => {
-    if (time === 'morning') {
+    if (time === "morning") {
       return {
-        title: '🌅 아침 루틴',
-        range: '06:00 ~ 11:59',
-      }
+        title: "🌅 아침 루틴",
+        range: "06:00 ~ 11:59",
+      };
     }
 
-    if (time === 'lunch') {
+    if (time === "lunch") {
       return {
-        title: '🍱 점심 루틴',
-        range: '12:00 ~ 17:59',
-      }
+        title: "🍱 점심 루틴",
+        range: "12:00 ~ 17:59",
+      };
     }
 
     return {
-      title: '🌙 저녁 루틴',
-      range: '18:00 ~ 05:59',
-    }
-  }
+      title: "🌙 저녁 루틴",
+      range: "18:00 ~ 05:59",
+    };
+  };
 
   const getModeText = (mode) => {
-    return mode === 'check' ? '체크 루틴' : '상세 루틴'
-  }
+    return mode === "check" ? "체크 루틴" : "상세 루틴";
+  };
 
   const handleProofChange = (id, value) => {
     setProofInputs((prev) => ({
       ...prev,
       [id]: value,
-    }))
-  }
+    }));
+  };
+
+  const handleFileChange = (id, fileList) => {
+    const selectedFiles = Array.from(fileList);
+
+    const previewFiles = selectedFiles.map((file) => ({
+      name: file.name,
+      type: file.type,
+      url: URL.createObjectURL(file),
+    }));
+
+    setProofFiles((prev) => ({
+      ...prev,
+      [id]: previewFiles,
+    }));
+  };
 
   const handleDetailSubmit = (id) => {
-    const proofText = proofInputs[id]?.trim()
+    const proofText = proofInputs[id]?.trim() || "";
+    const selectedFiles = proofFiles[id] || [];
 
-    if (!proofText) {
-      alert('인증 내용을 입력해주세요.')
-      return
+    if (!proofText && selectedFiles.length === 0) {
+      alert("인증 글이나 사진/영상을 추가해주세요.");
+      return;
     }
 
-    onCompleteDetail(id, proofText)
-    setOpenProofId(null)
-  }
+    onCompleteDetail(id, proofText, selectedFiles);
+    setOpenProofId(null);
+  };
 
-  const currentSection = getTimeTitle()
+  const currentSection = getTimeTitle();
 
   return (
     <div className="home">
@@ -64,7 +81,7 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
         {days.map((day, index) => (
           <div
             key={index}
-            className={index === dayIndex ? 'day active' : 'day'}
+            className={index === dayIndex ? "day active" : "day"}
           >
             <p>{day}</p>
             <p>{date - dayIndex + index}</p>
@@ -74,20 +91,20 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
 
       <div className="time-tabs">
         <button
-          className={time === 'morning' ? 'active-time-tab' : ''}
-          onClick={() => setTime('morning')}
+          className={time === "morning" ? "active-time-tab" : ""}
+          onClick={() => setTime("morning")}
         >
           아침
         </button>
         <button
-          className={time === 'lunch' ? 'active-time-tab' : ''}
-          onClick={() => setTime('lunch')}
+          className={time === "lunch" ? "active-time-tab" : ""}
+          onClick={() => setTime("lunch")}
         >
           점심
         </button>
         <button
-          className={time === 'dinner' ? 'active-time-tab' : ''}
-          onClick={() => setTime('dinner')}
+          className={time === "dinner" ? "active-time-tab" : ""}
+          onClick={() => setTime("dinner")}
         >
           저녁
         </button>
@@ -100,12 +117,16 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
         </h2>
 
         {filteredRoutines.length === 0 ? (
-          <p className="empty-routine-text">이 시간대에 등록된 루틴이 아직 없어요.</p>
+          <p className="empty-routine-text">
+            이 시간대에 등록된 루틴이 아직 없어요.
+          </p>
         ) : (
           <div className="home-routine-list">
             {filteredRoutines.map((routine) => (
               <div
-                className={`home-routine-card ${routine.completed ? 'home-routine-card-completed' : ''}`}
+                className={`home-routine-card ${
+                  routine.completed ? "home-routine-card-completed" : ""
+                }`}
                 key={routine.id}
               >
                 <div className="home-routine-card-left">
@@ -119,7 +140,7 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                   </p>
 
                   <p className="home-routine-desc">
-                    {routine.description || '루틴 설명이 아직 없습니다.'}
+                    {routine.description || "루틴 설명이 아직 없습니다."}
                   </p>
 
                   <div className="home-routine-meta">
@@ -134,15 +155,40 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                       <p className="home-complete-text">
                         완료 시간: {routine.completedAt}
                       </p>
+
                       {routine.proofText && (
                         <p className="home-proof-text">
                           인증 내용: {routine.proofText}
                         </p>
                       )}
+
+                      {routine.proofFiles && routine.proofFiles.length > 0 && (
+                        <div className="proof-preview-list completed-proof-preview-list">
+                          {routine.proofFiles.map((file, index) => (
+                            <div key={index} className="proof-preview-item">
+                              {file.type.startsWith("image/") ? (
+                                <img
+                                  src={file.url}
+                                  alt={`인증 파일 ${index + 1}`}
+                                  className="proof-preview-media"
+                                />
+                              ) : file.type.startsWith("video/") ? (
+                                <video
+                                  src={file.url}
+                                  controls
+                                  className="proof-preview-media"
+                                />
+                              ) : (
+                                <p className="proof-file-name">{file.name}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <>
-                      {routine.routineMode === 'check' ? (
+                      {routine.routineMode === "check" ? (
                         <button
                           className="routine-check-btn home-action-btn"
                           onClick={() => onCompleteCheck(routine.id)}
@@ -166,11 +212,49 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                             <div className="proof-box">
                               <textarea
                                 placeholder="오늘 어떻게 실천했는지 적어주세요"
-                                value={proofInputs[routine.id] || ''}
+                                value={proofInputs[routine.id] || ""}
                                 onChange={(e) =>
                                   handleProofChange(routine.id, e.target.value)
                                 }
                               ></textarea>
+
+                              <label className="proof-file-label">
+                                사진 / 영상 추가
+                                <input
+                                  type="file"
+                                  accept="image/*,video/*"
+                                  multiple
+                                  onChange={(e) =>
+                                    handleFileChange(routine.id, e.target.files)
+                                  }
+                                />
+                              </label>
+
+                              {proofFiles[routine.id]?.length > 0 && (
+                                <div className="proof-preview-list">
+                                  {proofFiles[routine.id].map((file, index) => (
+                                    <div
+                                      key={index}
+                                      className="proof-preview-item"
+                                    >
+                                      {file.type.startsWith("image/") ? (
+                                        <img
+                                          src={file.url}
+                                          alt={`미리보기 ${index + 1}`}
+                                          className="proof-preview-media"
+                                        />
+                                      ) : (
+                                        <video
+                                          src={file.url}
+                                          controls
+                                          className="proof-preview-media"
+                                        />
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
                               <button
                                 className="proof-save-btn"
                                 onClick={() => handleDetailSubmit(routine.id)}
@@ -190,7 +274,7 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
         )}
       </div>
     </div>
-  )
+  );
 }
 
-export default HomePage
+export default HomePage;

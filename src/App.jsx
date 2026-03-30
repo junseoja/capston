@@ -13,6 +13,7 @@ function App() {
   const [authPage, setAuthPage] = useState("login");
   const today = new Date();
   const month = today.getMonth() + 1;
+
   const [routines, setRoutines] = useState([
     {
       id: 1,
@@ -26,6 +27,7 @@ function App() {
       completed: false,
       completedAt: "",
       proofText: "",
+      proofFiles: [],
     },
     {
       id: 2,
@@ -39,6 +41,7 @@ function App() {
       completed: false,
       completedAt: "",
       proofText: "",
+      proofFiles: [],
     },
     {
       id: 3,
@@ -52,6 +55,7 @@ function App() {
       completed: false,
       completedAt: "",
       proofText: "",
+      proofFiles: [],
     },
   ]);
 
@@ -64,6 +68,7 @@ function App() {
         completed: false,
         completedAt: "",
         proofText: "",
+        proofFiles: [],
       },
     ]);
   };
@@ -84,12 +89,12 @@ function App() {
               completed: true,
               completedAt: timeText,
             }
-          : routine,
-      ),
+          : routine
+      )
     );
   };
 
-  const completeDetailRoutine = (id, proofText) => {
+  const completeDetailRoutine = (id, proofText, proofFiles) => {
     const now = new Date();
     const timeText = now.toLocaleTimeString("ko-KR", {
       hour: "2-digit",
@@ -105,9 +110,10 @@ function App() {
               completed: true,
               completedAt: timeText,
               proofText,
+              proofFiles,
             }
-          : routine,
-      ),
+          : routine
+      )
     );
   };
 
@@ -128,6 +134,7 @@ function App() {
 
     if (page === "feed") return <FeedPage />;
     if (page === "mypage") return <MyPage />;
+
     return (
       <HomePage
         routines={routines}

@@ -292,7 +292,73 @@ button {
 .proof-box textarea:focus {
   border-color: #4f46e5;
 }
+/* ===== 상세 루틴 인증 (사진/영상 업로드 UI) ===== */
 
+/* 파일 업로드 버튼처럼 보이게 하는 라벨 */
+.proof-file-label {
+  display: inline-flex; /* 내부 텍스트 중앙 정렬 */
+  align-items: center;
+  justify-content: center;
+
+  width: fit-content; /* 내용 크기만큼만 */
+  padding: 12px 16px; /* 버튼 크기 */
+
+  background-color: #eef2ff; /* 연보라 배경 */
+  color: #4338ca; /* 보라 글씨 */
+
+  border-radius: 10px; /* 둥근 버튼 */
+  font-size: 14px;
+  font-weight: 600;
+
+  cursor: pointer; /* 마우스 올리면 클릭 느낌 */
+}
+
+/* 실제 input[type="file"]는 숨김 (라벨 클릭으로 동작) */
+.proof-file-label input {
+  display: none;
+}
+
+/* 업로드한 파일 미리보기 전체 영역 */
+.proof-preview-list {
+  display: flex; /* 가로 배치 */
+  flex-wrap: wrap; /* 넘치면 줄바꿈 */
+  gap: 12px; /* 아이템 간 간격 */
+}
+
+/* 미리보기 하나 (사진/영상 박스) */
+.proof-preview-item {
+  width: 120px; /* 정사각형 크기 */
+  height: 120px;
+
+  border-radius: 12px; /* 둥근 모서리 */
+  overflow: hidden; /* 이미지 넘치면 잘라냄 */
+
+  border: 1px solid #dbe4ff; /* 테두리 */
+  background-color: #f8fafc; /* 기본 배경 */
+}
+
+/* 이미지 / 영상 공통 스타일 */
+.proof-preview-media {
+  width: 100%;
+  height: 100%;
+
+  object-fit: cover; /* 비율 유지하면서 꽉 채우기 */
+  display: block;
+}
+
+/* 완료된 후 보여지는 미리보기 (위쪽 여백 추가) */
+.completed-proof-preview-list {
+  margin-top: 12px;
+}
+
+/* 이미지/영상이 아닌 파일일 경우 파일 이름 표시 */
+.proof-file-name {
+  padding: 12px;
+  font-size: 13px;
+  color: #4b5563;
+
+  word-break: break-all; /* 긴 파일명 줄바꿈 */
+}
 /*ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 
 /*여기부터 로그인 페이지 css----------------------------*/
