@@ -2,9 +2,18 @@ import { useState } from "react";
 
 function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
   const today = new Date();
-  const dayIndex = today.getDay();
-  const date = today.getDate();
+  const dayIndex = today.getDay(); // 오늘 요일 (0~6)
   const days = ["일", "월", "화", "수", "목", "금", "토"];
+
+  // ✅ 주간 날짜를 Date 객체로 계산 (버그 해결 핵심)
+  const weekDates = days.map((_, index) => {
+    const newDate = new Date(today);
+    newDate.setDate(today.getDate() - dayIndex + index);
+    return newDate;
+  });
+
+  // ✅ 현재 월 (자동으로 3월 → 4월 넘어감)
+  
 
   const [time, setTime] = useState("morning");
   const [proofInputs, setProofInputs] = useState({});
@@ -13,31 +22,22 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
 
   const filteredRoutines = routines.filter((routine) => routine.time === time);
 
+  // 시간대 제목
   const getTimeTitle = () => {
     if (time === "morning") {
-      return {
-        title: "🌅 아침 루틴",
-        range: "06:00 ~ 11:59",
-      };
+      return { title: "🌅 아침 루틴", range: "06:00 ~ 11:59" };
     }
-
     if (time === "lunch") {
-      return {
-        title: "🍱 점심 루틴",
-        range: "12:00 ~ 17:59",
-      };
+      return { title: "🍱 점심 루틴", range: "12:00 ~ 17:59" };
     }
-
-    return {
-      title: "🌙 저녁 루틴",
-      range: "18:00 ~ 05:59",
-    };
+    return { title: "🌙 저녁 루틴", range: "18:00 ~ 05:59" };
   };
 
   const getModeText = (mode) => {
     return mode === "check" ? "체크 루틴" : "상세 루틴";
   };
 
+  // 인증 글 입력
   const handleProofChange = (id, value) => {
     setProofInputs((prev) => ({
       ...prev,
@@ -45,6 +45,7 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
     }));
   };
 
+  // 파일 선택
   const handleFileChange = (id, fileList) => {
     const selectedFiles = Array.from(fileList);
 
@@ -60,6 +61,7 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
     }));
   };
 
+  // 상세 루틴 완료
   const handleDetailSubmit = (id) => {
     const proofText = proofInputs[id]?.trim() || "";
     const selectedFiles = proofFiles[id] || [];
@@ -77,18 +79,22 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
 
   return (
     <div className="home">
+     
+
+      {/* ✅ 요일 + 날짜 */}
       <div className="week">
-        {days.map((day, index) => (
+        {weekDates.map((weekDate, index) => (
           <div
             key={index}
             className={index === dayIndex ? "day active" : "day"}
           >
-            <p>{day}</p>
-            <p>{date - dayIndex + index}</p>
+            <p>{days[index]}</p>
+            <p>{weekDate.getDate()}</p> {/* 여기 핵심 수정 */}
           </div>
         ))}
       </div>
 
+      {/* 시간 탭 */}
       <div className="time-tabs">
         <button
           className={time === "morning" ? "active-time-tab" : ""}
@@ -110,10 +116,14 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
         </button>
       </div>
 
+      {/* 루틴 영역 */}
       <div className="routine-content">
         <h2 className="home-section-title">
           {currentSection.title}
-          <span className="home-section-time"> {currentSection.range}</span>
+          <span className="home-section-time">
+            {" "}
+            {currentSection.range}
+          </span>
         </h2>
 
         {filteredRoutines.length === 0 ? (
@@ -129,10 +139,13 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                 }`}
                 key={routine.id}
               >
+                {/* 왼쪽 정보 */}
                 <div className="home-routine-card-left">
                   <div className="home-routine-card-top">
                     <h3>{routine.title}</h3>
-                    <span className="home-routine-badge">{routine.category}</span>
+                    <span className="home-routine-badge">
+                      {routine.category}
+                    </span>
                   </div>
 
                   <p className="home-routine-type">
@@ -149,6 +162,7 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                   </div>
                 </div>
 
+                {/* 오른쪽 버튼 */}
                 <div className="home-routine-card-right">
                   {routine.completed ? (
                     <div className="home-complete-box">
@@ -162,32 +176,34 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                         </p>
                       )}
 
-                      {routine.proofFiles && routine.proofFiles.length > 0 && (
-                        <div className="proof-preview-list completed-proof-preview-list">
-                          {routine.proofFiles.map((file, index) => (
-                            <div key={index} className="proof-preview-item">
-                              {file.type.startsWith("image/") ? (
-                                <img
-                                  src={file.url}
-                                  alt={`인증 파일 ${index + 1}`}
-                                  className="proof-preview-media"
-                                />
-                              ) : file.type.startsWith("video/") ? (
-                                <video
-                                  src={file.url}
-                                  controls
-                                  className="proof-preview-media"
-                                />
-                              ) : (
-                                <p className="proof-file-name">{file.name}</p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      {routine.proofFiles &&
+                        routine.proofFiles.length > 0 && (
+                          <div className="proof-preview-list completed-proof-preview-list">
+                            {routine.proofFiles.map((file, index) => (
+                              <div key={index} className="proof-preview-item">
+                                {file.type.startsWith("image/") ? (
+                                  <img
+                                    src={file.url}
+                                    alt=""
+                                    className="proof-preview-media"
+                                  />
+                                ) : file.type.startsWith("video/") ? (
+                                  <video
+                                    src={file.url}
+                                    controls
+                                    className="proof-preview-media"
+                                  />
+                                ) : (
+                                  <p>{file.name}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                     </div>
                   ) : (
                     <>
+                      {/* 체크 루틴 */}
                       {routine.routineMode === "check" ? (
                         <button
                           className="routine-check-btn home-action-btn"
@@ -196,12 +212,15 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                           오늘 완료
                         </button>
                       ) : (
+                        /* 상세 루틴 */
                         <div className="home-detail-action">
                           <button
                             className="routine-detail-btn home-action-btn"
                             onClick={() =>
                               setOpenProofId(
-                                openProofId === routine.id ? null : routine.id
+                                openProofId === routine.id
+                                  ? null
+                                  : routine.id
                               )
                             }
                           >
@@ -214,9 +233,12 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                                 placeholder="오늘 어떻게 실천했는지 적어주세요"
                                 value={proofInputs[routine.id] || ""}
                                 onChange={(e) =>
-                                  handleProofChange(routine.id, e.target.value)
+                                  handleProofChange(
+                                    routine.id,
+                                    e.target.value
+                                  )
                                 }
-                              ></textarea>
+                              />
 
                               <label className="proof-file-label">
                                 사진 / 영상 추가
@@ -225,39 +247,46 @@ function HomePage({ routines, onCompleteCheck, onCompleteDetail }) {
                                   accept="image/*,video/*"
                                   multiple
                                   onChange={(e) =>
-                                    handleFileChange(routine.id, e.target.files)
+                                    handleFileChange(
+                                      routine.id,
+                                      e.target.files
+                                    )
                                   }
                                 />
                               </label>
 
                               {proofFiles[routine.id]?.length > 0 && (
                                 <div className="proof-preview-list">
-                                  {proofFiles[routine.id].map((file, index) => (
-                                    <div
-                                      key={index}
-                                      className="proof-preview-item"
-                                    >
-                                      {file.type.startsWith("image/") ? (
-                                        <img
-                                          src={file.url}
-                                          alt={`미리보기 ${index + 1}`}
-                                          className="proof-preview-media"
-                                        />
-                                      ) : (
-                                        <video
-                                          src={file.url}
-                                          controls
-                                          className="proof-preview-media"
-                                        />
-                                      )}
-                                    </div>
-                                  ))}
+                                  {proofFiles[routine.id].map(
+                                    (file, index) => (
+                                      <div
+                                        key={index}
+                                        className="proof-preview-item"
+                                      >
+                                        {file.type.startsWith("image/") ? (
+                                          <img
+                                            src={file.url}
+                                            alt=""
+                                            className="proof-preview-media"
+                                          />
+                                        ) : (
+                                          <video
+                                            src={file.url}
+                                            controls
+                                            className="proof-preview-media"
+                                          />
+                                        )}
+                                      </div>
+                                    )
+                                  )}
                                 </div>
                               )}
 
                               <button
                                 className="proof-save-btn"
-                                onClick={() => handleDetailSubmit(routine.id)}
+                                onClick={() =>
+                                  handleDetailSubmit(routine.id)
+                                }
                               >
                                 인증 완료
                               </button>
