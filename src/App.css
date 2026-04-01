@@ -1,0 +1,862 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: #f5f7fb;
+  color: #1f2937;
+}
+
+button {
+  font-family: inherit;
+}
+
+.app {
+  min-height: 100vh;
+}
+
+.topbar {
+  width: 100%;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 18px 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+}
+
+.logo {
+  font-size: 24px;
+  font-weight: bold;
+  color: #4f46e5;
+}
+
+.nav {
+  display: flex;
+  gap: 12px;
+}
+
+.nav button {
+  border: none;
+  background-color: #eef2ff;
+  color: #4338ca;
+  padding: 10px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.nav button:hover {
+  background-color: #dbe4ff;
+}
+
+.page-container {
+  max-width: 1100px;
+  margin: 40px auto;
+  padding: 0 20px;
+}
+
+.page-box {
+  background-color: #ffffff;
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+}
+
+.page-title {
+  margin-top: 0;
+  font-size: 32px;
+  color: #111827;
+}
+
+.page-text {
+  font-size: 18px;
+  color: #6b7280;
+  line-height: 1.6;
+}
+/*여기부터 홈페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+/* 홈 페이지 전체를 세로로 배치하고 각 영역 사이 간격을 주는 부분 */
+.home {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* 요일 */
+.week {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+/* 요일 하나하나의 기본 박스 */
+.day {
+  text-align: center;
+  padding: 10px;
+  border-radius: 10px;
+  width: 50px;
+}
+/* 오늘 날짜에 해당하는 요일 박스의 활성화 상태 */
+.day.active {
+  background-color: #4f46e5;
+  color: white;
+}
+
+/* 아침, 점심, 저녁 시간 탭 전체 영역 */
+.time-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 0;
+}
+/* 시간 탭 버튼의 기본 스타일 */
+.time-tabs button {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background-color: #eef2ff;
+  cursor: pointer;
+  font-weight: bold;
+  color: #4338ca;
+}
+/* 시간 탭 버튼에 마우스를 올렸을 때 스타일 */
+.time-tabs button:hover {
+  background-color: #dbe4ff;
+}
+/* 현재 선택된 시간 탭 버튼의 활성화 스타일 */
+.active-time-tab {
+  background-color: #4f46e5 !important;
+  color: white !important;
+}
+
+/* 루틴 내용 전체를 감싸는 흰색 박스 */
+.routine-content {
+  background-color: white;
+  padding: 24px;
+  border-radius: 16px;
+}
+/* 아침 루틴, 점심 루틴, 저녁 루틴 제목 스타일 */
+.home-section-title {
+  margin: 0 0 18px;
+  font-size: 24px;
+  text-align: left;
+  color: #111827;
+}
+/* 해당 시간대에 루틴이 없을 때 보여주는 안내 문구 */
+.empty-routine-text {
+  margin: 0;
+  color: #6b7280;
+  text-align: left;
+}
+
+/* 홈 화면에서 루틴 카드들을 2열로 배치하는 영역 */
+.home-routine-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+/* 홈 화면의 루틴 카드 하나의 기본 스타일 */
+.home-routine-card {
+  background-color: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 20px;
+  text-align: left;
+}
+/* 완료된 루틴 카드의 배경색과 테두리를 바꾸는 스타일 */
+.home-routine-card-completed {
+  border: 1px solid #c7d2fe;
+  background-color: #eef2ff;
+}
+/* 루틴 카드 상단에서 제목과 카테고리를 양쪽으로 배치하는 부분 */
+.home-routine-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+/* 루틴 카드 제목 글씨 스타일 */
+.home-routine-card h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #111827;
+}
+/* 루틴 카테고리 뱃지 스타일 */
+.home-routine-badge {
+  background-color: #eef2ff;
+  color: #4338ca;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* 체크 루틴, 상세 루틴 종류를 보여주는 글씨 스타일 */
+.home-routine-type {
+  margin: 0 0 8px;
+  color: #4f46e5;
+  font-size: 14px;
+  font-weight: 600;
+}
+/* 루틴 설명 문장 스타일 */
+.home-routine-desc {
+  margin: 0 0 14px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+/* 목표, 반복 주기 같은 정보 태그들을 감싸는 영역 */
+.home-routine-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+/* 목표, 반복 주기 같은 정보 태그 하나하나의 스타일 */
+.home-routine-meta span {
+  background-color: #eef2ff;
+  color: #4338ca;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+/* 루틴 완료 후 완료 시간과 인증 내용을 감싸는 박스 */
+.home-complete-box {
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  border: 1px solid #dbe4ff;
+}
+/* 완료 시간 텍스트 스타일 */
+.home-complete-text {
+  margin: 0;
+  font-size: 14px;
+  color: #3730a3;
+  font-weight: 700;
+}
+/* 상세 루틴 인증 내용 텍스트 스타일 */
+.home-proof-text {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #4b5563;
+  line-height: 1.5;
+}
+/* 상세 루틴의 인증하기 버튼과 인증 완료 버튼 기본 스타일 */
+.routine-detail-btn,
+.proof-save-btn {
+  border: none;
+  background-color: #4f46e5;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+/* 상세 루틴의 인증하기 버튼과 인증 완료 버튼에 마우스를 올렸을 때 스타일 */
+.routine-detail-btn:hover,
+.proof-save-btn:hover {
+  background-color: #4338ca;
+}
+/* 완료된 버튼의 비활성화 느낌을 주는 스타일 */
+.completed-btn {
+  background-color: #a5b4fc;
+  cursor: default;
+}
+/* 상세 루틴 인증 입력창과 버튼을 세로로 묶는 영역 */
+.proof-box {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* 상세 루틴 인증 글을 입력하는 textarea 스타일 */
+.proof-box textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 14px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  font-size: 14px;
+  resize: vertical;
+  outline: none;
+}
+/* 상세 루틴 인증 textarea를 클릭했을 때 테두리 색 변경 */
+.proof-box textarea:focus {
+  border-color: #4f46e5;
+}
+/*ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+
+/*여기부터 로그인 페이지 css----------------------------*/
+.login-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 70vh;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background-color: #ffffff;
+  border-radius: 20px;
+  padding: 40px 32px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+}
+
+.login-title {
+  margin: 0 0 10px;
+  font-size: 32px;
+  color: #111827;
+  text-align: center;
+}
+
+.login-subtitle {
+  margin: 0 0 30px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 16px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-form input {
+  padding: 14px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  font-size: 15px;
+  outline: none;
+  background-color: #ffffff;
+  color: #111827;
+}
+
+.login-form input:focus {
+  border-color: #4f46e5;
+}
+
+.login-form button {
+  background-color: #4f46e5;
+  color: white;
+  border: none;
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-form button:hover {
+  background-color: #4338ca;
+}
+
+.login-footer {
+  margin-top: 20px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.login-footer span {
+  color: #4f46e5;
+  font-weight: 600;
+}
+
+/* 회원가입 페이지 css ----------------------------*/
+
+.signup-container {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+}
+
+/* 회원가입 제목 검은색 */
+.signup-title {
+  color: #111827;
+  text-align: center;
+}
+
+/* 회원가입 박스 */
+.signup-box {
+  width: 620px;
+  max-width: 100%;
+  background-color: #ffffff;
+  border-radius: 20px;
+  padding: 40px 32px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+}
+
+/* 회원가입 폼 중앙 정렬 */
+.signup-form {
+  align-items: center;
+}
+
+.signup-form > input,
+.signup-form > button,
+.signup-form > select,
+.signup-form > .input-with-button,
+.signup-form > .birth-row {
+  width: 100%;
+}
+
+/* input + 버튼 한 줄 */
+.input-with-button {
+  display: flex;
+  gap: 10px;
+}
+
+.input-with-button input {
+  flex: 1;
+}
+
+/* 중복체크 버튼 */
+.check-btn {
+  white-space: nowrap;
+  background-color: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.check-btn:hover {
+  background-color: #e0e7ff;
+}
+
+/* 생년월일 한 줄 */
+.birth-row {
+  display: flex;
+  gap: 10px;
+}
+
+.birth-row select {
+  flex: 1;
+  padding: 14px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  font-size: 15px;
+  outline: none;
+  background-color: #ffffff;
+  color: #111827;
+}
+
+/* 성별 셀렉트 */
+.gender-select {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  font-size: 15px;
+  outline: none;
+  background-color: #ffffff;
+  color: #111827;
+}
+
+/* 기본 input 스타일 */
+.signup-form input {
+  width: 100%;
+}
+
+/* footer 중앙 정렬 */
+.login-footer {
+  text-align: center;
+}
+
+.login-footer span {
+  color: #4f46e5;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-footer span:hover {
+  text-decoration: underline;
+}
+
+.form-group {
+  width: 100%;
+}
+
+.signup-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  text-align: left;
+}
+
+/*여기까지 루틴 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+/*루틴 페이지 cssㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+.routine-page {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.routine-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #ffffff;
+  padding: 30px;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+}
+
+.routine-title {
+  margin: 0 0 8px;
+  font-size: 30px;
+  color: #111827;
+}
+
+.routine-subtitle {
+  margin: 0;
+  color: #6b7280;
+  font-size: 16px;
+}
+
+.routine-add-btn {
+  border: none;
+  background-color: #4f46e5;
+  color: white;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.routine-add-btn:hover {
+  background-color: #4338ca;
+}
+
+.routine-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.routine-card {
+  background-color: #ffffff;
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+.routine-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  gap: 12px;
+}
+
+.routine-card h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #111827;
+}
+
+.routine-card p {
+  margin: 0 0 20px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.routine-badge {
+  background-color: #eef2ff;
+  color: #4338ca;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.routine-check-btn {
+  width: 100%;
+  border: none;
+  background-color: #e0e7ff;
+  color: #3730a3;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.routine-check-btn:hover {
+  background-color: #c7d2fe;
+}
+/*여기까지 루틴 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+/*피드 페이지 css----------------------------*/
+.feed-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.feed-header {
+  background-color: #ffffff;
+  padding: 30px;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+}
+
+.feed-title {
+  margin: 0 0 8px;
+  font-size: 30px;
+  color: #111827;
+}
+
+.feed-subtitle {
+  margin: 0;
+  color: #6b7280;
+  font-size: 16px;
+}
+
+.feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.feed-card {
+  display: flex;
+  gap: 20px;
+  background-color: #ffffff;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+.feed-image {
+  min-width: 140px;
+  height: 140px;
+  border-radius: 16px;
+  background-color: #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.feed-content {
+  flex: 1;
+}
+
+.feed-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.feed-top h3 {
+  margin: 0;
+  font-size: 22px;
+  color: #111827;
+}
+
+.feed-top span {
+  color: #9ca3af;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.feed-user {
+  margin: 0 0 10px;
+  color: #4f46e5;
+  font-weight: 600;
+}
+
+.feed-text {
+  margin: 0;
+  color: #6b7280;
+  line-height: 1.6;
+}
+/*여기까지 루틴 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+/*마이 페이지 cssㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+.mypage {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.mypage-profile {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background-color: #ffffff;
+  padding: 28px 30px;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+}
+
+.profile-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background-color: #4f46e5;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.profile-info h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  color: #111827;
+}
+
+.profile-info p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 16px;
+}
+
+.mypage-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.stat-card {
+  background-color: #ffffff;
+  padding: 24px;
+  border-radius: 18px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+.stat-card h3 {
+  margin: 0 0 12px;
+  font-size: 17px;
+  color: #6b7280;
+}
+
+.stat-card p {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.mypage-history {
+  background-color: #ffffff;
+  padding: 28px;
+  border-radius: 20px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+.mypage-history h2 {
+  margin: 0 0 20px;
+  font-size: 24px;
+  color: #111827;
+}
+
+.history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 18px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.history-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.history-item h4 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #111827;
+}
+
+.history-item p {
+  margin: 0;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.history-item span {
+  color: #9ca3af;
+  font-size: 14px;
+  white-space: nowrap;
+}
+/*여기까지 마이페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+/*루틴 페이지 ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+.routine-form-box {
+  background-color: #ffffff;
+  padding: 28px;
+  border-radius: 20px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+.routine-form-box h2 {
+  margin: 0 0 20px;
+  font-size: 24px;
+  color: #111827;
+}
+
+.routine-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.routine-form input,
+.routine-form select,
+.routine-form textarea {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+}
+
+.routine-form textarea {
+  min-height: 120px;
+  resize: none;
+}
+
+.routine-form input:focus,
+.routine-form select:focus,
+.routine-form textarea:focus {
+  border-color: #4f46e5;
+}
+/*루틴 저장버튼*/
+.routine-save-btn {
+  border: none;
+  background-color: #4f46e5;
+  color: white;
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.routine-save-btn:hover {
+  background-color: #4338ca;
+}
