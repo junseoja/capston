@@ -151,7 +151,7 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
             [fieldName]: message,
         }));
     };
-    
+
     // 입력값 변경 처리
     const handleInputChange = (fieldName, value) => {
         setFormData((prev) => ({
@@ -282,46 +282,134 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                 <h1 className="signup-title">회원가입</h1>
                 <p className="login-subtitle">루틴 메이트와 함께 갓생을 시작해보세요</p>
 
-                <form className="login-form signup-form">
+                <form className="login-form signup-form" onSubmit={handleSubmit}>
+                    {/* 아이디 */}
                     <div className="form-group">
-                        <label className="signup-label">아이디</label>
-                        <div className="input-with-button">
-                            <input type="text" placeholder="아이디를 입력하세요" />
-                            <button type="button" className="check-btn">중복체크</button>
+                        <div className="signup-label-row">
+                            <label className="signup-label">아이디</label>
+                            {fieldErrors.userId ? (
+                                <span className="signup-error">{fieldErrors.userId}</span>
+                            ) : checkStatus.userId.checked ? (
+                                <span className="signup-success">{checkStatus.userId.message}</span>
+                            ) : null}
                         </div>
-                    </div>
 
-                    <div className="form-group">
-                        <label className="signup-label">비밀번호</label>
-                        <input type="password" placeholder="비밀번호를 입력하세요" />
-                    </div>
-
-                    <div className="form-group">
-                        <label className="signup-label">비밀번호 확인</label>
-                        <input type="password" placeholder="비밀번호를 다시 입력하세요" />
-                    </div>
-
-                    <div className="form-group">
-                        <label className="signup-label">닉네임</label>
                         <div className="input-with-button">
-                            <input type="text" placeholder="닉네임을 입력하세요" />
-                            <button type="button" className="check-btn">중복체크</button>
+                            <input
+                                type="text"
+                                placeholder="5~15자 영문 소문자, 숫자"
+                                value={formData.userId}
+                                onChange={(e) => handleInputChange("userId", e.target.value)}
+                                onBlur={() => handleBlur("userId")}
+                                maxLength={15}
+                                className={fieldErrors.userId ? "input-error" : ""}
+                            />
+                            <button
+                                type="button"
+                                className={`check-btn ${checkStatus.userId.checked ? "check-btn-success" : ""}`}
+                                onClick={() => handleDuplicateCheck("userId")}
+                            >
+                                중복체크
+                            </button>
                         </div>
+                        <p className="signup-hint">특수문자와 대문자는 사용할 수 없습니다.</p>
                     </div>
+
+                    {/* 비밀번호 */}
                     <div className="form-group">
-                        <label className="signup-label">생년월일</label>
-                        <div className="birth-row"> {/*생년월일 선택을 위한 드롭다운 메뉴*/}
+                        <div className="signup-label-row">
+                            <label className="signup-label">비밀번호</label>
+                            {fieldErrors.password && (
+                                <span className="signup-error">{fieldErrors.password}</span>
+                            )}
+                        </div>
+
+                        <input
+                            type="password"
+                            placeholder="8~16자 영문, 숫자, 특수문자 조합"
+                            value={formData.password}
+                            onChange={(e) => handleInputChange("password", e.target.value)}
+                            onBlur={() => handleBlur("password")}
+                            maxLength={16}
+                            className={fieldErrors.password ? "input-error" : ""}
+                        />
+                    </div>
+
+                    {/* 비밀번호 확인 */}
+                    <div className="form-group">
+                        <div className="signup-label-row">
+                            <label className="signup-label">비밀번호 확인</label>
+                            {fieldErrors.confirmPassword && (
+                                <span className="signup-error">{fieldErrors.confirmPassword}</span>
+                            )}
+                        </div>
+
+                        <input
+                            type="password"
+                            placeholder="비밀번호를 다시 입력하세요"
+                            value={formData.confirmPassword}
+                            onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                            onBlur={() => handleBlur("confirmPassword")}
+                            maxLength={16}
+                            className={fieldErrors.confirmPassword ? "input-error" : ""}
+                        />
+                    </div>
+
+                    {/* 닉네임 */}
+                    <div className="form-group">
+                        <div className="signup-label-row">
+                            <label className="signup-label">닉네임</label>
+                            {fieldErrors.nickname ? (
+                                <span className="signup-error">{fieldErrors.nickname}</span>
+                            ) : checkStatus.nickname.checked ? (
+                                <span className="signup-success">{checkStatus.nickname.message}</span>
+                            ) : null}
+                        </div>
+
+                        <div className="input-with-button">
+                            <input
+                                type="text"
+                                placeholder="2~10자 한글, 영문, 숫자"
+                                value={formData.nickname}
+                                onChange={(e) => handleInputChange("nickname", e.target.value)}
+                                onBlur={() => handleBlur("nickname")}
+                                maxLength={10}
+                                className={fieldErrors.nickname ? "input-error" : ""}
+                            />
+                            <button
+                                type="button"
+                                className={`check-btn ${checkStatus.nickname.checked ? "check-btn-success" : ""}`}
+                                onClick={() => handleDuplicateCheck("nickname")}
+                            >
+                                중복체크
+                            </button>
+                        </div>
+                        <p className="signup-hint">공백과 특수문자는 사용할 수 없습니다.</p>
+                    </div>
+
+                    {/* 생년월일 */}
+                    <div className="form-group">
+                        <div className="signup-label-row">
+                            <label className="signup-label">생년월일</label>
+                            {fieldErrors.birth && (
+                                <span className="signup-error">{fieldErrors.birth}</span>
+                            )}
+                        </div>
+
+                        <div className="birth-row">
                             <select
-                                value={selectedYear} // 선택된 연도 값
-                                onChange={(e) => { // 년이 변경되면 선택된 연도 상태 업데이트 및 일 선택 초기화
+                                value={selectedYear}
+                                onChange={(e) => {
                                     setSelectedYear(e.target.value)
                                     setSelectedDay('')
+                                    if (fieldErrors.birth) updateFieldError("birth", "")
                                 }}
+                                className={fieldErrors.birth ? "input-error" : ""}
                             >
-                                <option value="" hidden>년</option> {/* 기본 옵션으로 '년' 표시, 선택되지 않도록 hidden 속성 추가 */}
-                                {years.map((year) => ( // 연도 배열을 순회하며 옵션 생성
-                                    <option key={year} value={year}> {/* 옵션의 key와 value는 연도로 설정 */}
-                                        {year} {/* 옵션으로 표시되는 텍스트는 연도 */}
+                                <option value="" hidden>년</option>
+                                {years.map((year) => (
+                                    <option key={year} value={year}>
+                                        {year}
                                     </option>
                                 ))}
                             </select>
@@ -331,7 +419,9 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                                 onChange={(e) => {
                                     setSelectedMonth(e.target.value)
                                     setSelectedDay('')
+                                    if (fieldErrors.birth) updateFieldError("birth", "")
                                 }}
+                                className={fieldErrors.birth ? "input-error" : ""}
                             >
                                 <option value="" hidden>월</option>
                                 {months.map((month) => (
@@ -343,7 +433,11 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
 
                             <select
                                 value={selectedDay}
-                                onChange={(e) => setSelectedDay(e.target.value)}
+                                onChange={(e) => {
+                                    setSelectedDay(e.target.value)
+                                    if (fieldErrors.birth) updateFieldError("birth", "")
+                                }}
+                                className={fieldErrors.birth ? "input-error" : ""}
                             >
                                 <option value="" hidden>일</option>
                                 {days.map((day) => (
@@ -355,21 +449,48 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                         </div>
                     </div>
 
+                    {/* 성별 */}
                     <div className="form-group">
-                        <label className="signup-label">성별</label>
-                        <select className="gender-select" defaultValue="">
+                        <div className="signup-label-row">
+                            <label className="signup-label">성별</label>
+                            {fieldErrors.gender && (
+                                <span className="signup-error">{fieldErrors.gender}</span>
+                            )}
+                        </div>
+
+                        <select
+                            className={`gender-select ${fieldErrors.gender ? "input-error" : ""}`}
+                            value={formData.gender}
+                            onChange={(e) => handleInputChange("gender", e.target.value)}
+                            onBlur={() => handleBlur("gender")}
+                        >
                             <option value="" hidden>성별</option>
                             <option value="male">남</option>
                             <option value="female">여</option>
                         </select>
                     </div>
 
+                    {/* 이메일 */}
                     <div className="form-group">
-                        <label className="signup-label">이메일</label>
-                        <input type="email" placeholder="이메일을 입력하세요" />
+                        <div className="signup-label-row">
+                            <label className="signup-label">이메일</label>
+                            {fieldErrors.email && (
+                                <span className="signup-error">{fieldErrors.email}</span>
+                            )}
+                        </div>
+
+                        <input
+                            type="email"
+                            placeholder="example@email.com"
+                            value={formData.email}
+                            onChange={(e) => handleInputChange("email", e.target.value)}
+                            onBlur={() => handleBlur("email")}
+                            maxLength={50}
+                            className={fieldErrors.email ? "input-error" : ""}
+                        />
                     </div>
 
-                    <button type="button">회원가입</button>
+                    <button type="submit">회원가입</button>
                 </form>
 
                 <p className="login-footer">
