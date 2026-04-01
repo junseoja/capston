@@ -11,6 +11,18 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [page, setPage] = useState("home");
   const [authPage, setAuthPage] = useState("login");
+  //회원가입 시 중복체크를 할 수 있도록 임시 사용자 목록 상태 추가
+  const [users, setUsers] = useState([
+    {
+      id: 1,
+      userId: "test123",
+      password: "test123",
+      nickname: "테스트",
+      email: "demo@routine.com",
+      gender: "female",
+      birth: "2000-01-01",
+    },
+  ]);
   const today = new Date();
   const month = today.getMonth() + 1;
 
@@ -85,10 +97,10 @@ function App() {
       prev.map((routine) =>
         routine.id === id
           ? {
-              ...routine,
-              completed: true,
-              completedAt: timeText,
-            }
+            ...routine,
+            completed: true,
+            completedAt: timeText,
+          }
           : routine
       )
     );
@@ -106,15 +118,29 @@ function App() {
       prev.map((routine) =>
         routine.id === id
           ? {
-              ...routine,
-              completed: true,
-              completedAt: timeText,
-              proofText,
-              proofFiles,
-            }
+            ...routine,
+            completed: true,
+            completedAt: timeText,
+            proofText,
+            proofFiles,
+          }
           : routine
       )
     );
+  };
+
+  // 회원가입 완료 시 사용자 목록에 저장하는 함수
+  const handleSignup = (newUser) => {
+    setUsers((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        ...newUser,
+      },
+    ]);
+
+    alert(`${newUser.nickname}님, 회원가입이 완료되었습니다.`);
+    setAuthPage("login");
   };
 
   const renderPage = () => {
@@ -156,7 +182,12 @@ function App() {
           )}
 
           {authPage === "signup" && (
-            <SignupPage onBackToLogin={() => setAuthPage("login")} />
+            <SignupPage
+              // 회원가입 페이지에 기존 사용자 목록 전달
+              existingUsers={users}
+              // 회원가입 성공 시 실행할 함수 전달
+              onSignup={handleSignup}
+              onBackToLogin={() => setAuthPage("login")} />
           )}
         </main>
       </div>
