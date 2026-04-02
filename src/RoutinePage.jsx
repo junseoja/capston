@@ -110,7 +110,7 @@ function RoutinePage({ routines, onAddRoutine }) {
 
             <input
               type="text"
-              placeholder="목표 시간 또는 횟수를 입력하세요"
+              placeholder="목표 시간을 입력하세요"
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
             />

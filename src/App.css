@@ -1,7 +1,7 @@
 * {
   box-sizing: border-box;
 }
-
+/*css 색 이상함*/
 body {
   margin: 0;
   font-family: Arial, sans-serif;
@@ -243,6 +243,25 @@ button {
   background-color: #ffffff;
   border: 1px solid #dbe4ff;
 }
+.home-complete-box {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  border: 1px solid #dbe4ff;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease,
+    transform 0.2s ease;
+}
+.home-complete-box:hover {
+  background-color: #f8faff;
+  border-color: #c7d2fe;
+}
+
+.home-complete-box:active {
+  transform: scale(0.99);
+}
 
 /* 완료 시간 텍스트 스타일 */
 .home-complete-text {
@@ -292,6 +311,7 @@ button {
 .proof-box textarea:focus {
   border-color: #4f46e5;
 }
+
 /* ===== 상세 루틴 인증 (사진/영상 업로드 UI) ===== */
 
 /* 파일 업로드 버튼처럼 보이게 하는 라벨 */
@@ -359,6 +379,7 @@ button {
 
   word-break: break-all; /* 긴 파일명 줄바꿈 */
 }
+
 /*ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 
 /*여기부터 로그인 페이지 css----------------------------*/

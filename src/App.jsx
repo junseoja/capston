@@ -29,7 +29,7 @@ function App() {
   const [routines, setRoutines] = useState([
     {
       id: 1,
-      title: "아침 물 1잔 마시기",
+      title: "아침 물 마시기",
       category: "건강",
       goal: "1잔",
       repeat: "매일",
@@ -128,6 +128,22 @@ function App() {
       )
     );
   };
+   // 완료 취소
+  const cancelRoutineCompletion = (id) => {
+    setRoutines((prev) =>
+      prev.map((routine) =>
+        routine.id === id
+          ? {
+              ...routine,
+              completed: false,
+              completedAt: "",
+              proofText: "",
+              proofFiles: [],
+            }
+          : routine
+      )
+    );
+  };
 
   // 회원가입 완료 시 사용자 목록에 저장하는 함수
   const handleSignup = (newUser) => {
@@ -150,6 +166,7 @@ function App() {
           routines={routines}
           onCompleteCheck={completeCheckRoutine}
           onCompleteDetail={completeDetailRoutine}
+          onCancelComplete={cancelRoutineCompletion}
         />
       );
     }
