@@ -278,11 +278,6 @@ button {
   line-height: 1.5;
 }
 
-/* 상세 루틴의 인증하기 버튼과 인증 완료 버튼에 마우스를 올렸을 때 스타일 */
-.routine-detail-btn:hover,
-.proof-save-btn:hover {
-  background-color: #4338ca;
-}
 /* 완료된 버튼의 비활성화 느낌을 주는 스타일 */
 .completed-btn {
   background-color: #a5b4fc;
@@ -636,6 +631,26 @@ button {
   color: #047857;
   border-color: #a7f3d0;
 }
+.routine-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+/*루틴 삭제 버튼*/
+.routine-delete-btn {
+  border: none;
+   background-color: #fee2e2 !important;
+  color: #dc2626 !important;
+  padding: 12px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.routine-delete-btn:hover {
+  background-color: #fecaca;
+}
 
 /*여기까지 로그인 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 /*루틴 페이지 cssㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
@@ -682,38 +697,72 @@ button {
   background-color: #4338ca;
 }
 
+/* 루틴 목록: 한 줄씩 세로 배치 */
 .routine-list {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
+
+/* 루틴 카드: 홈페이지처럼 가로형 */
 .routine-card {
-  background-color: #ffffff;
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 24px;
+  background-color: #f8fafc;
+  border: 1px solid #e5e7eb;
   border-radius: 18px;
-  padding: 24px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  padding: 22px 24px;
+  text-align: left;
+}
+.routine-card-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.routine-card-right {
+  width: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .routine-card-top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
+  align-items: flex-start;
   gap: 12px;
+  margin-bottom: 10px;
 }
 
 .routine-card h3 {
   margin: 0;
-  font-size: 20px;
+  font-size: 24px;
   color: #111827;
+  word-break: keep-all;
 }
 
 .routine-card p {
-  margin: 0 0 20px;
+  margin: 12px 0 0 0;
+  font-size: 15px;
   color: #6b7280;
   line-height: 1.5;
 }
+
+.routine-card button {
+  margin-top: 18px;
+  align-self: flex-start;
+  border: none;
+  background-color: #4f46e5;
+  color: white;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+} 
 
 .routine-badge {
   background-color: #eef2ff;
@@ -724,6 +773,33 @@ button {
   font-weight: 600;
   white-space: nowrap;
 }
+.routine-card-type {
+  margin: 0 0 8px;
+  color: #4f46e5;
+  font-size: 14px;
+  font-weight: 600;
+}
+.routine-card-desc {
+  margin: 0 0 14px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.routine-card-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.routine-card-meta span {
+  background-color: #eef2ff;
+  color: #4338ca;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
 
 .routine-check-btn,
 .routine-detail-btn,
@@ -738,9 +814,12 @@ button {
 }
 
 
-.routine-check-btn:hover {
+.routine-check-btn:hover,
+.routine-detail-btn:hover,
+.proof-save-btn:hover {
   background-color: #4338ca;
 }
+
 .routine-form-box {
   background-color: #ffffff;
   padding: 28px;

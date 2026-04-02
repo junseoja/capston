@@ -1,25 +1,25 @@
-import { useState } from 'react'
+import { useState } from "react";
 
-function RoutinePage({ routines, onAddRoutine }) {
-  const [showForm, setShowForm] = useState(false)
+function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
+  const [showForm, setShowForm] = useState(false);
 
-  const [title, setTitle] = useState('')
-  const [category, setCategory] = useState('')
-  const [goal, setGoal] = useState('')
-  const [repeat, setRepeat] = useState('')
-  const [description, setDescription] = useState('')
-  const [time, setTime] = useState('morning')
-  const [routineMode, setRoutineMode] = useState('check')
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("");
+  const [goal, setGoal] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [description, setDescription] = useState("");
+  const [time, setTime] = useState("morning");
+  const [routineMode, setRoutineMode] = useState("check");
 
   const handleSave = () => {
     if (!title.trim()) {
-      alert('루틴 제목을 입력해주세요.')
-      return
+      alert("루틴 제목을 입력해주세요.");
+      return;
     }
 
     if (!category) {
-      alert('카테고리를 선택해주세요.')
-      return
+      alert("카테고리를 선택해주세요.");
+      return;
     }
 
     onAddRoutine({
@@ -30,27 +30,27 @@ function RoutinePage({ routines, onAddRoutine }) {
       description,
       time,
       routineMode,
-    })
+    });
 
-    setTitle('')
-    setCategory('')
-    setGoal('')
-    setRepeat('')
-    setDescription('')
-    setTime('morning')
-    setRoutineMode('check')
-    setShowForm(false)
-  }
+    setTitle("");
+    setCategory("");
+    setGoal("");
+    setRepeat("");
+    setDescription("");
+    setTime("morning");
+    setRoutineMode("check");
+    setShowForm(false);
+  };
 
   const getTimeText = (time) => {
-    if (time === 'morning') return '아침'
-    if (time === 'lunch') return '점심'
-    return '저녁'
-  }
+    if (time === "morning") return "아침";
+    if (time === "lunch") return "점심";
+    return "저녁";
+  };
 
   const getModeText = (mode) => {
-    return mode === 'check' ? '체크 루틴' : '상세 루틴'
-  }
+    return mode === "check" ? "체크 루틴" : "상세 루틴";
+  };
 
   return (
     <div className="routine-page">
@@ -66,7 +66,7 @@ function RoutinePage({ routines, onAddRoutine }) {
           className="routine-add-btn"
           onClick={() => setShowForm(!showForm)}
         >
-          {showForm ? '닫기' : '+ 루틴 추가'}
+          {showForm ? "닫기" : "+ 루틴 추가"}
         </button>
       </div>
 
@@ -82,7 +82,10 @@ function RoutinePage({ routines, onAddRoutine }) {
               onChange={(e) => setTitle(e.target.value)}
             />
 
-            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            >
               <option value="">루틴 카테고리 선택</option>
               <option value="기상">기상</option>
               <option value="운동">운동</option>
@@ -138,35 +141,61 @@ function RoutinePage({ routines, onAddRoutine }) {
       <div className="routine-list">
         {routines.map((routine) => (
           <div className="routine-card" key={routine.id}>
-            <div className="routine-card-top">
-              <h3>{routine.title}</h3>
-              <span className="routine-badge">{routine.category}</span>
+            <div className="routine-card-left">
+              <div className="routine-card-top">
+                <h3>{routine.title}</h3>
+                <span className="routine-badge">{routine.category}</span>
+              </div>
+
+              <p className="routine-card-type">
+                {getModeText(routine.routineMode)}
+              </p>
+
+              <p className="routine-card-desc">
+                {routine.description || "루틴 설명이 아직 없습니다."}
+              </p>
+
+              <div className="routine-card-meta">
+                <span>{getTimeText(routine.time)}</span>
+                {routine.goal && <span>{routine.goal}</span>}
+                {routine.repeat && <span>{routine.repeat}</span>}
+              </div>
             </div>
 
-            <p>{routine.description || '루틴 설명이 아직 없습니다.'}</p>
+            <div className="routine-card-right">
+              <div className="routine-card-actions">
+                <button
+                  className={`routine-check-btn ${
+                    routine.completed ? "completed-btn" : ""
+                  }`}
+                  disabled
+                >
+                  {routine.completed
+                    ? `완료 ${routine.completedAt}`
+                    : routine.routineMode === "check"
+                      ? "체크 루틴"
+                      : "상세 루틴"}
+                </button>
 
-            <div className="home-routine-meta">
-              <span>{getTimeText(routine.time)}</span>
-              <span>{getModeText(routine.routineMode)}</span>
-              {routine.goal && <span>{routine.goal}</span>}
-              {routine.repeat && <span>{routine.repeat}</span>}
+                <button
+                  className="routine-delete-btn"
+                  onClick={() => {
+                    const isConfirmed =
+                      window.confirm("이 루틴을 삭제하시겠습니까?");
+                    if (isConfirmed) {
+                      onDeleteRoutine(routine.id);
+                    }
+                  }}
+                >
+                  루틴 삭제
+                </button>
+              </div>
             </div>
-
-            <button
-              className={`routine-check-btn ${routine.completed ? 'completed-btn' : ''}`}
-              disabled
-            >
-              {routine.completed
-                ? `완료 ${routine.completedAt}`
-                : routine.routineMode === 'check'
-                ? '체크 루틴'
-                : '상세 루틴'}
-            </button>
           </div>
         ))}
       </div>
     </div>
-  )
+  );
 }
 
-export default RoutinePage
+export default RoutinePage;

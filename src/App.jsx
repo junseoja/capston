@@ -11,7 +11,8 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [page, setPage] = useState("home");
   const [authPage, setAuthPage] = useState("login");
-  //회원가입 시 중복체크를 할 수 있도록 임시 사용자 목록 상태 추가
+
+  // 회원가입 시 중복체크를 할 수 있도록 임시 사용자 목록 상태 추가
   const [users, setUsers] = useState([
     {
       id: 1,
@@ -23,6 +24,7 @@ function App() {
       birth: "2000-01-01",
     },
   ]);
+
   const today = new Date();
   const month = today.getMonth() + 1;
 
@@ -71,6 +73,7 @@ function App() {
     },
   ]);
 
+  // 새 루틴 추가
   const addRoutine = (newRoutine) => {
     setRoutines((prev) => [
       ...prev,
@@ -85,6 +88,7 @@ function App() {
     ]);
   };
 
+  // 체크 루틴 완료
   const completeCheckRoutine = (id) => {
     const now = new Date();
     const timeText = now.toLocaleTimeString("ko-KR", {
@@ -97,15 +101,16 @@ function App() {
       prev.map((routine) =>
         routine.id === id
           ? {
-            ...routine,
-            completed: true,
-            completedAt: timeText,
-          }
+              ...routine,
+              completed: true,
+              completedAt: timeText,
+            }
           : routine
       )
     );
   };
 
+  // 상세 루틴 완료
   const completeDetailRoutine = (id, proofText, proofFiles) => {
     const now = new Date();
     const timeText = now.toLocaleTimeString("ko-KR", {
@@ -118,17 +123,18 @@ function App() {
       prev.map((routine) =>
         routine.id === id
           ? {
-            ...routine,
-            completed: true,
-            completedAt: timeText,
-            proofText,
-            proofFiles,
-          }
+              ...routine,
+              completed: true,
+              completedAt: timeText,
+              proofText,
+              proofFiles,
+            }
           : routine
       )
     );
   };
-   // 완료 취소
+
+  // 완료 취소
   const cancelRoutineCompletion = (id) => {
     setRoutines((prev) =>
       prev.map((routine) =>
@@ -143,6 +149,11 @@ function App() {
           : routine
       )
     );
+  };
+
+  // 루틴 삭제
+  const deleteRoutine = (id) => {
+    setRoutines((prev) => prev.filter((routine) => routine.id !== id));
   };
 
   // 회원가입 완료 시 사용자 목록에 저장하는 함수
@@ -172,7 +183,13 @@ function App() {
     }
 
     if (page === "routine") {
-      return <RoutinePage routines={routines} onAddRoutine={addRoutine} />;
+      return (
+        <RoutinePage
+          routines={routines}
+          onAddRoutine={addRoutine}
+          onDeleteRoutine={deleteRoutine}
+        />
+      );
     }
 
     if (page === "feed") return <FeedPage />;
@@ -183,6 +200,7 @@ function App() {
         routines={routines}
         onCompleteCheck={completeCheckRoutine}
         onCompleteDetail={completeDetailRoutine}
+        onCancelComplete={cancelRoutineCompletion}
       />
     );
   };
@@ -200,11 +218,10 @@ function App() {
 
           {authPage === "signup" && (
             <SignupPage
-              // 회원가입 페이지에 기존 사용자 목록 전달
               existingUsers={users}
-              // 회원가입 성공 시 실행할 함수 전달
               onSignup={handleSignup}
-              onBackToLogin={() => setAuthPage("login")} />
+              onBackToLogin={() => setAuthPage("login")}
+            />
           )}
         </main>
       </div>

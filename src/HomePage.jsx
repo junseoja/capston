@@ -223,7 +223,7 @@ function HomePage({
                           {openProofId === routine.id && (
                             <div className="proof-box">
                               <textarea
-                                placeholder="오늘 어떻게 실천했는지 적어주세요"
+                                placeholder="오늘 하루를 기록해보세요"
                                 value={proofInputs[routine.id] || ""}
                                 onChange={(e) =>
                                   handleProofChange(routine.id, e.target.value)
