@@ -1,4 +1,4 @@
-import { useState } from 'react' //리액트의 useState 훅을 사용하여 상태 관리를 위해 import
+import { useState } from 'react' // 리액트의 useState 훅을 사용하여 상태 관리를 위해 import
 
 // 검사용 정규식 및 함수
 // 아이디: 영문 소문자 + 숫자만 허용
@@ -16,7 +16,6 @@ const SPECIAL_CHAR_REGEX = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]/;
 // 아이디 검사 함수
 function validateUserId(userId) {
     const trimmedId = userId.trim();
-
     if (!trimmedId) return "아이디를 입력하세요.";
     if (trimmedId.length < 5 || trimmedId.length > 15) {
         return "아이디는 5자 이상 15자 이하로 입력하세요.";
@@ -24,14 +23,12 @@ function validateUserId(userId) {
     if (!ID_REGEX.test(trimmedId)) {
         return "아이디는 영문 소문자와 숫자만 사용할 수 있습니다.";
     }
-
     return "";
 }
 
 // 닉네임 검사 함수
 function validateNickname(nickname) {
     const trimmedNickname = nickname.trim();
-
     if (!trimmedNickname) return "닉네임을 입력하세요.";
     if (trimmedNickname.length < 2 || trimmedNickname.length > 10) {
         return "닉네임은 2자 이상 10자 이하로 입력하세요.";
@@ -39,7 +36,6 @@ function validateNickname(nickname) {
     if (!NICKNAME_REGEX.test(trimmedNickname)) {
         return "닉네임은 한글, 영문, 숫자만 사용할 수 있습니다.";
     }
-
     return "";
 }
 
@@ -61,7 +57,6 @@ function validatePassword(password) {
     if (!SPECIAL_CHAR_REGEX.test(password)) {
         return "비밀번호에는 특수문자가 최소 1개 이상 포함되어야 합니다.";
     }
-
     return "";
 }
 
@@ -69,32 +64,29 @@ function validatePassword(password) {
 function validatePasswordConfirm(password, confirmPassword) {
     if (!confirmPassword) return "비밀번호 확인을 입력하세요.";
     if (password !== confirmPassword) return "비밀번호가 일치하지 않습니다.";
-
     return "";
 }
 
 // 이메일 검사 함수
 function validateEmail(email) {
     const trimmedEmail = email.trim();
-
     if (!trimmedEmail) return "이메일을 입력하세요.";
     if (!EMAIL_REGEX.test(trimmedEmail)) {
         return "올바른 이메일 형식으로 입력하세요.";
     }
-
     return "";
 }
 
-function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
-    const currentYear = new Date().getFullYear() // 현재 연도 계산
-    const years = Array.from({ length: 100 }, (_, i) => currentYear - i) // 100년 전부터 현재까지의 연도 배열 생성
-    const months = Array.from({ length: 12 }, (_, i) => i + 1) // 1월부터 12월까지의 월 배열 생성
+function SignupPage({ onBackToLogin }) {
+    // ✅ onSignup 제거 - 직접 fetch 처리로 변경
+    const currentYear = new Date().getFullYear()
+    const years = Array.from({ length: 100 }, (_, i) => currentYear - i)
+    const months = Array.from({ length: 12 }, (_, i) => i + 1)
 
-    const [selectedYear, setSelectedYear] = useState('') // 선택된 연도 상태 관리
-    const [selectedMonth, setSelectedMonth] = useState('') // 선택된 월 상태 관리
-    const [selectedDay, setSelectedDay] = useState('') // 선택된 일 상태 관리
+    const [selectedYear, setSelectedYear] = useState('')
+    const [selectedMonth, setSelectedMonth] = useState('')
+    const [selectedDay, setSelectedDay] = useState('')
 
-    // 회원가입 입력값 전체 상태
     const [formData, setFormData] = useState({
         userId: '',
         password: '',
@@ -104,23 +96,20 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
         gender: '',
     })
 
-    // 각 입력칸 에러 메시지 저장
     const [fieldErrors, setFieldErrors] = useState({})
 
-    // 아이디/닉네임 중복체크 상태 저장
     const [checkStatus, setCheckStatus] = useState({
         userId: { checked: false, message: '' },
         nickname: { checked: false, message: '' },
     })
 
-    // 년, 월이 선택되면 해당 월의 마지막 날짜 계산
     const lastDay =
         selectedYear && selectedMonth
-            ? new Date(selectedYear, selectedMonth, 0).getDate() // 해당 월의 마지막 날짜 계산
+            ? new Date(selectedYear, selectedMonth, 0).getDate()
             : 31
 
-    const days = Array.from({ length: lastDay }, (_, i) => i + 1) // 1일부터 마지막 날짜까지의 일 배열 생성
-    // 필드별 검사 함수 통합
+    const days = Array.from({ length: lastDay }, (_, i) => i + 1)
+
     const validateField = (fieldName, fieldValue = formData[fieldName]) => {
         if (fieldName === "userId") return validateUserId(fieldValue);
         if (fieldName === "password") return validatePassword(fieldValue);
@@ -129,22 +118,19 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
         }
         if (fieldName === "nickname") return validateNickname(fieldValue);
         if (fieldName === "email") return validateEmail(fieldValue);
-
         if (fieldName === "birth") {
             if (!selectedYear || !selectedMonth || !selectedDay) {
                 return "생년월일을 모두 선택하세요.";
             }
             return "";
         }
-
         if (fieldName === "gender") {
             if (!formData.gender) return "성별을 선택하세요.";
             return "";
         }
-
         return "";
     };
-    // 특정 칸에 에러 메시지 업데이트
+
     const updateFieldError = (fieldName, message) => {
         setFieldErrors((prev) => ({
             ...prev,
@@ -152,24 +138,20 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
         }));
     };
 
-    // 입력값 변경 처리
     const handleInputChange = (fieldName, value) => {
         setFormData((prev) => ({
             ...prev,
             [fieldName]: value,
         }));
 
-        // 입력 중이면 기존 에러 메시지 제거
         if (fieldErrors[fieldName]) {
             updateFieldError(fieldName, "");
         }
 
-        // 비밀번호가 바뀌면 비밀번호 확인 에러도 초기화
         if (fieldName === "password" && fieldErrors.confirmPassword) {
             updateFieldError("confirmPassword", "");
         }
 
-        // 아이디/닉네임을 수정하면 중복체크 다시 해야 하므로 초기화
         if (fieldName === "userId" || fieldName === "nickname") {
             setCheckStatus((prev) => ({
                 ...prev,
@@ -177,17 +159,16 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
             }));
         }
     };
-    // 입력창에 포커스가 빠질 떄 검사
+
     const handleBlur = (fieldName) => {
         updateFieldError(fieldName, validateField(fieldName));
     };
 
-    //아이디 / 닉네임 중복체크 
-    const handleDuplicateCheck = (fieldName) => {
+    const handleDuplicateCheck = async (fieldName) => {
+        // ✅ async 추가 - 백엔드로 중복체크 요청
         const value = formData[fieldName];
         const validationMessage = validateField(fieldName, value);
 
-        //  형식이 틀리면 중복체크 전에 막기
         if (validationMessage) {
             updateFieldError(fieldName, validationMessage);
             setCheckStatus((prev) => ({
@@ -197,43 +178,46 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
             return;
         }
 
-        const normalizedValue = value.trim().toLowerCase();
-
-        const isDuplicate = existingUsers.some((user) => {
-            const compareValue = fieldName === "userId" ? user.userId : user.nickname;
-            return compareValue.toLowerCase() === normalizedValue;
-        });
-
-        if (isDuplicate) {
-            updateFieldError(
-                fieldName,
-                fieldName === "userId"
-                    ? "이미 사용 중인 아이디입니다."
-                    : "이미 사용 중인 닉네임입니다."
+        // ✅ 변경 - 백엔드로 중복체크 요청
+        try {
+            const response = await fetch(
+                `http://localhost:3000/check-duplicate?field=${fieldName}&value=${value.trim()}`,
+                { credentials: "include" }
             );
+            const result = await response.json();
 
-            setCheckStatus((prev) => ({
-                ...prev,
-                [fieldName]: { checked: false, message: "" },
-            }));
-            return;
-        }
-
-        //  중복이 아니면 성공 상태 저장
-        updateFieldError(fieldName, "");
-        setCheckStatus((prev) => ({
-            ...prev,
-            [fieldName]: {
-                checked: true,
-                message:
+            if (result.isDuplicate) {
+                updateFieldError(
+                    fieldName,
                     fieldName === "userId"
-                        ? "사용 가능한 아이디입니다."
-                        : "사용 가능한 닉네임입니다.",
-            },
-        }));
+                        ? "이미 사용 중인 아이디입니다."
+                        : "이미 사용 중인 닉네임입니다."
+                );
+                setCheckStatus((prev) => ({
+                    ...prev,
+                    [fieldName]: { checked: false, message: "" },
+                }));
+            } else {
+                updateFieldError(fieldName, "");
+                setCheckStatus((prev) => ({
+                    ...prev,
+                    [fieldName]: {
+                        checked: true,
+                        message:
+                            fieldName === "userId"
+                                ? "사용 가능한 아이디입니다."
+                                : "사용 가능한 닉네임입니다.",
+                    },
+                }));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("서버 오류가 발생했습니다.");
+        }
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
+        // ✅ async 추가 - 백엔드로 회원가입 요청
         e.preventDefault();
 
         const nextErrors = {
@@ -246,36 +230,52 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
             gender: validateField("gender"),
         };
 
-        //  중복체크 안 했으면 제출 막기
         if (!checkStatus.userId.checked) {
             nextErrors.userId = nextErrors.userId || "아이디 중복체크를 완료하세요.";
         }
-
         if (!checkStatus.nickname.checked) {
-            nextErrors.nickname =
-                nextErrors.nickname || "닉네임 중복체크를 완료하세요.";
+            nextErrors.nickname = nextErrors.nickname || "닉네임 중복체크를 완료하세요.";
         }
 
         setFieldErrors(nextErrors);
-
         const hasError = Object.values(nextErrors).some(Boolean);
         if (hasError) return;
 
-        const birth = `${selectedYear}-${String(selectedMonth).padStart(
-            2,
-            "0"
-        )}-${String(selectedDay).padStart(2, "0")}`;
+        // ✅ 추가 - 백엔드로 회원가입 요청
+        try {
+            const response = await fetch("http://localhost:3000/signup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include", // 쿠키 포함
+                body: JSON.stringify({
+                    id: formData.userId.trim(),
+                    password: formData.password,
+                    nickname: formData.nickname.trim(),
+                    email: formData.email.trim(),
+                    // ✅ 추가 - male/female → 남/여 변환 (DB ENUM 형식에 맞게)
+                    gender: formData.gender === "male" ? "남" : formData.gender === "female" ? "여" : "기타",
+                    birth: {
+                        year: selectedYear,
+                        month: selectedMonth,
+                        day: selectedDay,
+                    },
+                }),
+            });
 
-        // 최종 회원가입 데이터 전달
-        onSignup({
-            userId: formData.userId.trim(),
-            password: formData.password,
-            nickname: formData.nickname.trim(),
-            email: formData.email.trim(),
-            gender: formData.gender,
-            birth,
-        });
+            const result = await response.json();
+
+            if (result.success) {
+                alert("회원가입 성공!");
+                onBackToLogin(); // 로그인 페이지로 이동
+            } else {
+                alert(result.message || "회원가입 실패");
+            }
+        } catch (error) {
+            console.error(error);
+            alert("서버 오류가 발생했습니다.");
+        }
     };
+
     return (
         <div className="signup-container">
             <div className="signup-box">
@@ -293,7 +293,6 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                                 <span className="signup-success">{checkStatus.userId.message}</span>
                             ) : null}
                         </div>
-
                         <div className="input-with-button">
                             <input
                                 type="text"
@@ -323,7 +322,6 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                                 <span className="signup-error">{fieldErrors.password}</span>
                             )}
                         </div>
-
                         <input
                             type="password"
                             placeholder="8~16자 영문, 숫자, 특수문자 조합"
@@ -343,7 +341,6 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                                 <span className="signup-error">{fieldErrors.confirmPassword}</span>
                             )}
                         </div>
-
                         <input
                             type="password"
                             placeholder="비밀번호를 다시 입력하세요"
@@ -365,7 +362,6 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                                 <span className="signup-success">{checkStatus.nickname.message}</span>
                             ) : null}
                         </div>
-
                         <div className="input-with-button">
                             <input
                                 type="text"
@@ -395,7 +391,6 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                                 <span className="signup-error">{fieldErrors.birth}</span>
                             )}
                         </div>
-
                         <div className="birth-row">
                             <select
                                 value={selectedYear}
@@ -408,12 +403,9 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                             >
                                 <option value="" hidden>년</option>
                                 {years.map((year) => (
-                                    <option key={year} value={year}>
-                                        {year}
-                                    </option>
+                                    <option key={year} value={year}>{year}</option>
                                 ))}
                             </select>
-
                             <select
                                 value={selectedMonth}
                                 onChange={(e) => {
@@ -425,12 +417,9 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                             >
                                 <option value="" hidden>월</option>
                                 {months.map((month) => (
-                                    <option key={month} value={month}>
-                                        {month}
-                                    </option>
+                                    <option key={month} value={month}>{month}</option>
                                 ))}
                             </select>
-
                             <select
                                 value={selectedDay}
                                 onChange={(e) => {
@@ -441,9 +430,7 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                             >
                                 <option value="" hidden>일</option>
                                 {days.map((day) => (
-                                    <option key={day} value={day}>
-                                        {day}
-                                    </option>
+                                    <option key={day} value={day}>{day}</option>
                                 ))}
                             </select>
                         </div>
@@ -457,7 +444,6 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                                 <span className="signup-error">{fieldErrors.gender}</span>
                             )}
                         </div>
-
                         <select
                             className={`gender-select ${fieldErrors.gender ? "input-error" : ""}`}
                             value={formData.gender}
@@ -478,7 +464,6 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
                                 <span className="signup-error">{fieldErrors.email}</span>
                             )}
                         </div>
-
                         <input
                             type="email"
                             placeholder="example@email.com"
@@ -502,27 +487,3 @@ function SignupPage({ onBackToLogin, onSignup, existingUsers = [] }) {
 }
 
 export default SignupPage
-
-/* validateUserId
-→ 아이디 규칙 검사
-validateNickname
-→ 닉네임 규칙 검사
-validatePassword
-→ 비밀번호 길이/조합 검사
-validatePasswordConfirm
-→ 비밀번호 확인 일치 검사
-validateEmail
-→ 이메일 형식 검사
-validateField
-→ 필드 이름에 따라 적절한 검사 함수 연결
-updateFieldError
-→ 특정 입력칸의 에러 메시지 갱신
-handleInputChange
-→ 입력값 변경 + 에러 초기화 + 중복체크 초기화
-handleBlur
-→ 입력창에서 나갈 때 즉시 검사
-handleDuplicateCheck
-→ 아이디/닉네임 중복체크
-handleSubmit
-→ 회원가입 버튼 눌렀을 때 전체 검사 후 부모로 데이터 전달
-*/

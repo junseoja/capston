@@ -67,4 +67,19 @@ router.post("/logout", (req, res) => {
     return res.json({ success: true, message: "로그아웃 완료" });
 });
 
-module.exports = router;
+// routes/login.js 에 추가
+//중복체크 API
+router.get("/check-duplicate", async (req, res) => {
+    const { field, value } = req.query;
+
+    const user = await findUser(value);
+
+    if (field === "userId") {
+        return res.json({ isDuplicate: !!user });
+    }
+
+    // 닉네임 중복체크는 FastAPI에 별도 추가 필요
+    return res.json({ isDuplicate: false });
+});
+
+module.exports = { router, sessions }; // ✅ sessions 추가 export
