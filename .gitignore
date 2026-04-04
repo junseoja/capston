@@ -22,3 +22,19 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+# 환경변수 (DB 비밀번호 등 절대 올리면 안됨!)
+.env
+*.env
+
+# Python 가상환경
+venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# 기타
+.DS_Store

@@ -1,7 +1,7 @@
 * {
   box-sizing: border-box;
 }
-
+/*css 색 이상함*/
 body {
   margin: 0;
   font-family: Arial, sans-serif;
@@ -60,24 +60,6 @@ button {
   padding: 0 20px;
 }
 
-.page-box {
-  background-color: #ffffff;
-  border-radius: 20px;
-  padding: 40px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
-}
-
-.page-title {
-  margin-top: 0;
-  font-size: 32px;
-  color: #111827;
-}
-
-.page-text {
-  font-size: 18px;
-  color: #6b7280;
-  line-height: 1.6;
-}
 /*여기부터 홈페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 /* 홈 페이지 전체를 세로로 배치하고 각 영역 사이 간격을 주는 부분 */
 .home {
@@ -104,7 +86,10 @@ button {
   background-color: #4f46e5;
   color: white;
 }
-
+.home-action-btn {
+  width: 100%;
+  min-width: 180px;
+}
 /* 아침, 점심, 저녁 시간 탭 전체 영역 */
 .time-tabs {
   display: flex;
@@ -145,6 +130,12 @@ button {
   text-align: left;
   color: #111827;
 }
+.home-section-time {
+  font-size: 16px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
 /* 해당 시간대에 루틴이 없을 때 보여주는 안내 문구 */
 .empty-routine-text {
   margin: 0;
@@ -154,22 +145,37 @@ button {
 
 /* 홈 화면에서 루틴 카드들을 2열로 배치하는 영역 */
 .home-routine-list {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 /* 홈 화면의 루틴 카드 하나의 기본 스타일 */
 .home-routine-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 24px;
   background-color: #f8fafc;
   border: 1px solid #e5e7eb;
   border-radius: 18px;
-  padding: 20px;
+  padding: 22px 24px;
   text-align: left;
 }
 /* 완료된 루틴 카드의 배경색과 테두리를 바꾸는 스타일 */
 .home-routine-card-completed {
   border: 1px solid #c7d2fe;
   background-color: #eef2ff;
+}
+.home-routine-card-left {
+  flex: 1;
+  min-width: 0;
+}
+.home-routine-card-right {
+  width: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 /* 루틴 카드 상단에서 제목과 카테고리를 양쪽으로 배치하는 부분 */
 .home-routine-card-top {
@@ -179,11 +185,13 @@ button {
   gap: 12px;
   margin-bottom: 10px;
 }
+
 /* 루틴 카드 제목 글씨 스타일 */
 .home-routine-card h3 {
   margin: 0;
-  font-size: 20px;
+  font-size: 24px;
   color: #111827;
+  word-break: keep-all;
 }
 /* 루틴 카테고리 뱃지 스타일 */
 .home-routine-badge {
@@ -213,7 +221,7 @@ button {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 /* 목표, 반복 주기 같은 정보 태그 하나하나의 스타일 */
 .home-routine-meta span {
@@ -224,14 +232,37 @@ button {
   padding: 6px 10px;
   border-radius: 999px;
 }
+.home-detail-action {
+  width: 100%;
+}
 /* 루틴 완료 후 완료 시간과 인증 내용을 감싸는 박스 */
 .home-complete-box {
-  margin-top: 12px;
+  width: 100%;
   padding: 14px;
   border-radius: 12px;
   background-color: #ffffff;
   border: 1px solid #dbe4ff;
 }
+.home-complete-box {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  border: 1px solid #dbe4ff;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease,
+    transform 0.2s ease;
+}
+.home-complete-box:hover {
+  background-color: #f8faff;
+  border-color: #c7d2fe;
+}
+
+.home-complete-box:active {
+  transform: scale(0.99);
+}
+
 /* 완료 시간 텍스트 스타일 */
 .home-complete-text {
   margin: 0;
@@ -246,22 +277,7 @@ button {
   color: #4b5563;
   line-height: 1.5;
 }
-/* 상세 루틴의 인증하기 버튼과 인증 완료 버튼 기본 스타일 */
-.routine-detail-btn,
-.proof-save-btn {
-  border: none;
-  background-color: #4f46e5;
-  color: white;
-  padding: 12px 16px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
-}
-/* 상세 루틴의 인증하기 버튼과 인증 완료 버튼에 마우스를 올렸을 때 스타일 */
-.routine-detail-btn:hover,
-.proof-save-btn:hover {
-  background-color: #4338ca;
-}
+
 /* 완료된 버튼의 비활성화 느낌을 주는 스타일 */
 .completed-btn {
   background-color: #a5b4fc;
@@ -274,6 +290,7 @@ button {
   flex-direction: column;
   gap: 10px;
 }
+
 /* 상세 루틴 인증 글을 입력하는 textarea 스타일 */
 .proof-box textarea {
   width: 100%;
@@ -289,6 +306,75 @@ button {
 .proof-box textarea:focus {
   border-color: #4f46e5;
 }
+
+/* ===== 상세 루틴 인증 (사진/영상 업로드 UI) ===== */
+
+/* 파일 업로드 버튼처럼 보이게 하는 라벨 */
+.proof-file-label {
+  display: inline-flex; /* 내부 텍스트 중앙 정렬 */
+  align-items: center;
+  justify-content: center;
+
+  width: fit-content; /* 내용 크기만큼만 */
+  padding: 12px 16px; /* 버튼 크기 */
+
+  background-color: #eef2ff; /* 연보라 배경 */
+  color: #4338ca; /* 보라 글씨 */
+
+  border-radius: 10px; /* 둥근 버튼 */
+  font-size: 14px;
+  font-weight: 600;
+
+  cursor: pointer; /* 마우스 올리면 클릭 느낌 */
+}
+
+/* 실제 input[type="file"]는 숨김 (라벨 클릭으로 동작) */
+.proof-file-label input {
+  display: none;
+}
+
+/* 업로드한 파일 미리보기 전체 영역 */
+.proof-preview-list {
+  display: flex; 
+  flex-wrap: wrap; 
+  gap: 12px; 
+}
+
+/* 미리보기 하나 (사진/영상 박스) */
+.proof-preview-item {
+  width: 120px; 
+  height: 120px;
+
+  border-radius: 12px; 
+  overflow: hidden; 
+
+  border: 1px solid #dbe4ff; 
+  background-color: #f8fafc; 
+}
+
+/* 이미지 / 영상 공통 스타일 */
+.proof-preview-media {
+  width: 100%;
+  height: 100%;
+
+  object-fit: cover; /* 비율 유지하면서 꽉 채우기 */
+  display: block;
+}
+
+/* 완료된 후 보여지는 미리보기 (위쪽 여백 추가) */
+.completed-proof-preview-list {
+  margin-top: 12px;
+}
+
+/* 이미지/영상이 아닌 파일일 경우 파일 이름 표시 */
+.proof-file-name {
+  padding: 12px;
+  font-size: 13px;
+  color: #4b5563;
+
+  word-break: break-all; /* 긴 파일명 줄바꿈 */
+}
+
 /*ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 
 /*여기부터 로그인 페이지 css----------------------------*/
@@ -497,7 +583,76 @@ button {
   text-align: left;
 }
 
-/*여기까지 루틴 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+/* 각 입력 영역을 묶는 래퍼 */
+.form-group {
+  width: 100%;
+}
+
+/* 라벨과 에러/성공 문구를 한 줄에 정렬 */
+.signup-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 에러 문구 스타일 */
+.signup-error {
+  font-size: 12px;
+  font-weight: 600;
+  color: #dc2626;
+  text-align: right;
+}
+
+/* 성공 문구 스타일 */
+.signup-success {
+  font-size: 12px;
+  font-weight: 600;
+  color: #059669;
+  text-align: right;
+}
+
+/* 입력 안내 문구 스타일 */
+.signup-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+  text-align: left;
+}
+
+/* 에러가 있는 input/select 빨간 테두리 */
+.input-error {
+  border-color: #ef4444 !important;
+}
+
+/* 중복체크 성공 시 버튼 스타일 */
+.check-btn-success {
+  background-color: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+.routine-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+/*루틴 삭제 버튼*/
+.routine-delete-btn {
+  border: none;
+   background-color: #fee2e2 !important;
+  color: #dc2626 !important;
+  padding: 12px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.routine-delete-btn:hover {
+  background-color: #fecaca;
+}
+
+/*여기까지 로그인 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 /*루틴 페이지 cssㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 .routine-page {
   display: flex;
@@ -542,38 +697,72 @@ button {
   background-color: #4338ca;
 }
 
+/* 루틴 목록: 한 줄씩 세로 배치 */
 .routine-list {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
+
+/* 루틴 카드: 홈페이지처럼 가로형 */
 .routine-card {
-  background-color: #ffffff;
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 24px;
+  background-color: #f8fafc;
+  border: 1px solid #e5e7eb;
   border-radius: 18px;
-  padding: 24px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  padding: 22px 24px;
+  text-align: left;
+}
+.routine-card-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.routine-card-right {
+  width: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .routine-card-top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
+  align-items: flex-start;
   gap: 12px;
+  margin-bottom: 10px;
 }
 
 .routine-card h3 {
   margin: 0;
-  font-size: 20px;
+  font-size: 24px;
   color: #111827;
+  word-break: keep-all;
 }
 
 .routine-card p {
-  margin: 0 0 20px;
+  margin: 12px 0 0 0;
+  font-size: 15px;
   color: #6b7280;
   line-height: 1.5;
 }
+
+.routine-card button {
+  margin-top: 18px;
+  align-self: flex-start;
+  border: none;
+  background-color: #4f46e5;
+  color: white;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+} 
 
 .routine-badge {
   background-color: #eef2ff;
@@ -584,22 +773,110 @@ button {
   font-weight: 600;
   white-space: nowrap;
 }
+.routine-card-type {
+  margin: 0 0 8px;
+  color: #4f46e5;
+  font-size: 14px;
+  font-weight: 600;
+}
+.routine-card-desc {
+  margin: 0 0 14px;
+  color: #6b7280;
+  line-height: 1.5;
+}
 
-.routine-check-btn {
-  width: 100%;
+.routine-card-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.routine-card-meta span {
+  background-color: #eef2ff;
+  color: #4338ca;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+
+.routine-check-btn,
+.routine-detail-btn,
+.proof-save-btn {
   border: none;
-  background-color: #e0e7ff;
-  color: #3730a3;
-  padding: 12px 14px;
+  background-color: #4f46e5;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+
+.routine-check-btn:hover,
+.routine-detail-btn:hover,
+.proof-save-btn:hover {
+  background-color: #4338ca;
+}
+
+.routine-form-box {
+  background-color: #ffffff;
+  padding: 28px;
+  border-radius: 20px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+.routine-form-box h2 {
+  margin: 0 0 20px;
+  font-size: 24px;
+  color: #111827;
+}
+
+.routine-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.routine-form input,
+.routine-form select,
+.routine-form textarea {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+}
+
+.routine-form textarea {
+  min-height: 120px;
+  resize: none;
+}
+
+.routine-form input:focus,
+.routine-form select:focus,
+.routine-form textarea:focus {
+  border-color: #4f46e5;
+}
+/*루틴 저장버튼*/
+.routine-save-btn {
+  border: none;
+  background-color: #4f46e5;
+  color: white;
+  padding: 14px 16px;
   border-radius: 12px;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
 }
 
-.routine-check-btn:hover {
-  background-color: #c7d2fe;
+.routine-save-btn:hover {
+  background-color: #4338ca;
 }
+
 /*여기까지 루틴 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 /*피드 페이지 css----------------------------*/
 .feed-page {
@@ -689,7 +966,7 @@ button {
   color: #6b7280;
   line-height: 1.6;
 }
-/*여기까지 루틴 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+/*여기까지 피드 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 /*마이 페이지 cssㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
 .mypage {
   display: flex;
@@ -803,60 +1080,3 @@ button {
   white-space: nowrap;
 }
 /*여기까지 마이페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
-/*루틴 페이지 ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
-.routine-form-box {
-  background-color: #ffffff;
-  padding: 28px;
-  border-radius: 20px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-}
-
-.routine-form-box h2 {
-  margin: 0 0 20px;
-  font-size: 24px;
-  color: #111827;
-}
-
-.routine-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.routine-form input,
-.routine-form select,
-.routine-form textarea {
-  width: 100%;
-  padding: 14px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  font-size: 15px;
-  font-family: inherit;
-  outline: none;
-}
-
-.routine-form textarea {
-  min-height: 120px;
-  resize: none;
-}
-
-.routine-form input:focus,
-.routine-form select:focus,
-.routine-form textarea:focus {
-  border-color: #4f46e5;
-}
-/*루틴 저장버튼*/
-.routine-save-btn {
-  border: none;
-  background-color: #4f46e5;
-  color: white;
-  padding: 14px 16px;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.routine-save-btn:hover {
-  background-color: #4338ca;
-}
