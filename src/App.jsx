@@ -25,6 +25,9 @@ function App() {
     },
   ]);
 
+  // 피드 페이지에서 사용할 게시글 상태 (임시 데이터)
+  const [feedPosts, setFeedPosts] = useState([]);
+
   const today = new Date();
   const month = today.getMonth() + 1;
 
@@ -101,59 +104,91 @@ function App() {
       prev.map((routine) =>
         routine.id === id
           ? {
-              ...routine,
-              completed: true,
-              completedAt: timeText,
-            }
+            ...routine,
+            completed: true,
+            completedAt: timeText,
+          }
           : routine
       )
     );
   };
 
+
   // 상세 루틴 완료
-  const completeDetailRoutine = (id, proofText, proofFiles) => {
+  const completeDetailRoutine = (id, proofText, proofFiles, uploadToFeed) => {
     const now = new Date();
+
     const timeText = now.toLocaleTimeString("ko-KR", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
     });
 
+    const dateText = now.toLocaleDateString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+
+    const targetRoutine = routines.find((routine) => routine.id === id);
+
     setRoutines((prev) =>
       prev.map((routine) =>
         routine.id === id
           ? {
-              ...routine,
-              completed: true,
-              completedAt: timeText,
-              proofText,
-              proofFiles,
-            }
+            ...routine,
+            completed: true,
+            completedAt: timeText,
+            proofText,
+            proofFiles,
+          }
           : routine
       )
     );
+
+    if (uploadToFeed && targetRoutine) {
+      setFeedPosts((prev) => [
+        {
+          id: Date.now(),
+          routineId: id,
+          routineTitle: targetRoutine.title,
+          routineDescription: targetRoutine.description,
+          category: targetRoutine.category,
+          userName: users[0]?.nickname || "나",
+          content: proofText,
+          files: proofFiles,
+          createdAt: dateText,
+          createdTime: timeText,
+        },
+        ...prev,
+      ]);
+    }
   };
 
-  // 완료 취소
+  // 루틴 완료 취소
   const cancelRoutineCompletion = (id) => {
     setRoutines((prev) =>
       prev.map((routine) =>
         routine.id === id
           ? {
-              ...routine,
-              completed: false,
-              completedAt: "",
-              proofText: "",
-              proofFiles: [],
-            }
+            ...routine,
+            completed: false,
+            completedAt: "",
+            proofText: "",
+            proofFiles: [],
+          }
           : routine
       )
     );
+
+    // 피드에서도 해당 게시글 삭제
+    setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
   };
 
   // 루틴 삭제
   const deleteRoutine = (id) => {
     setRoutines((prev) => prev.filter((routine) => routine.id !== id));
+    setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
   };
 
   // 회원가입 완료 시 사용자 목록에 저장하는 함수
@@ -192,7 +227,7 @@ function App() {
       );
     }
 
-    if (page === "feed") return <FeedPage />;
+    if (page === "feed") return <FeedPage feedPosts={feedPosts} />;
     if (page === "mypage") return <MyPage />;
 
     return (

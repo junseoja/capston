@@ -16,11 +16,17 @@ function HomePage({
     return newDate;
   });
 
+  // 시간대 상태 관리
   const [time, setTime] = useState("morning");
+  // 인증 글과 파일 상태 관리
   const [proofInputs, setProofInputs] = useState({});
+  // 루틴별로 파일 상태를 객체 형태로 관리 (예: { routineId: [file1, file2] })
   const [proofFiles, setProofFiles] = useState({});
+  // 루틴 완료 (체크형)
+  const [uploadChecks, setUploadChecks] = useState({});
+  // 인증 박스 열림 상태 관리
   const [openProofId, setOpenProofId] = useState(null);
-
+  // 루틴 완료 (체크형)
   const filteredRoutines = routines.filter((routine) => routine.time === time);
 
   const getTimeTitle = () => {
@@ -44,6 +50,14 @@ function HomePage({
     }));
   };
 
+  // 체크박스 변경 함수 (ui랑 실제 데이터 연결)
+  const handleUploadCheckChange = (id, checked) => {
+    setUploadChecks((prev) => ({
+      ...prev,
+      [id]: checked,
+    }));
+  };
+
   const handleFileChange = (id, fileList) => {
     const selectedFiles = Array.from(fileList);
 
@@ -59,16 +73,22 @@ function HomePage({
     }));
   };
 
+  // 상세 루틴 인증 제출
   const handleDetailSubmit = (id) => {
     const proofText = proofInputs[id]?.trim() || "";
     const selectedFiles = proofFiles[id] || [];
+    const uploadToFeed = uploadChecks[id] || false;
 
     if (!proofText && selectedFiles.length === 0) {
       alert("인증 글이나 사진/영상을 추가해주세요.");
       return;
     }
 
-    onCompleteDetail(id, proofText, selectedFiles);
+    onCompleteDetail(id, proofText, selectedFiles, uploadToFeed);
+
+    setProofInputs((prev) => ({ ...prev, [id]: "" }));
+    setProofFiles((prev) => ({ ...prev, [id]: [] }));
+    setUploadChecks((prev) => ({ ...prev, [id]: false }));
     setOpenProofId(null);
   };
 
@@ -131,9 +151,8 @@ function HomePage({
           <div className="home-routine-list">
             {filteredRoutines.map((routine) => (
               <div
-                className={`home-routine-card ${
-                  routine.completed ? "home-routine-card-completed" : ""
-                }`}
+                className={`home-routine-card ${routine.completed ? "home-routine-card-completed" : ""
+                  }`}
                 key={routine.id}
               >
                 <div className="home-routine-card-left">
@@ -240,6 +259,17 @@ function HomePage({
                                     handleFileChange(routine.id, e.target.files)
                                   }
                                 />
+                              </label>
+
+                              <label className="feed-upload-check">
+                                <input
+                                  type="checkbox"
+                                  checked={uploadChecks[routine.id] || false}
+                                  onChange={(e) =>
+                                    handleUploadCheckChange(routine.id, e.target.checked)
+                                  }
+                                />
+                                <span>피드에도 업로드하기</span>
                               </label>
 
                               {proofFiles[routine.id]?.length > 0 && (
