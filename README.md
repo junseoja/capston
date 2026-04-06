@@ -31,3 +31,9 @@ If you are developing a production application, we recommend using TypeScript wi
       birth: "2000-01-01",
     },
   ]);
+
+
+  ## 업데이트
+  
+  피드 업로드 하는 과정 추가
+  댓글 및 하트 기능 추가
