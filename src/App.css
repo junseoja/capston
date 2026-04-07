@@ -29,6 +29,7 @@ button {
   align-items: center;
   position: sticky;
   top: 0;
+  z-index: 1000;
 }
 
 .logo {
@@ -919,6 +920,7 @@ button {
 .routine-save-btn:hover {
   background-color: #4338ca;
 }
+
 /*반복 주기 선택*/
 .repeat-select-box {
   width: 100%;
@@ -956,6 +958,7 @@ button {
   background-color: #4f46e5;
   color: white;
 }
+
 /*반복 주기 선택 코드 위 여기까지*/
 
 /*여기까지 루틴 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
@@ -1024,11 +1027,13 @@ button {
 }
 
 .instagram-feed-card {
-  overflow: hidden;
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 22px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+    overflow: hidden;
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 22px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+    position: relative;
+    z-index: 1;
 }
 
 .instagram-feed-top {
@@ -1087,35 +1092,17 @@ button {
   height: 420px;
   background-color: #000;
   overflow: hidden;
-  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .instagram-feed-media {
-  position: absolute;
-  top: 50%;
-  left: 50%;
   max-width: 100%;
   max-height: 100%;
   width: auto;
   height: auto;
-  transform: translate(-50%, -50%);
   object-fit: contain;
-  object-position: center;
-  display: block;
-  background-color: #000;
-}
-
-.instagram-feed-media {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  transform: translate(-50%, -50%);
-  object-fit: contain;
-  object-position: center;
   display: block;
   background-color: #000;
 }
