@@ -6,11 +6,29 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [goal, setGoal] = useState("");
-  const [repeat, setRepeat] = useState("");
+  const [repeat, setRepeat] = useState([]);
   const [description, setDescription] = useState("");
   const [time, setTime] = useState("morning");
   const [routineMode, setRoutineMode] = useState("check");
+  const weekDays = ["월", "화", "수", "목", "금", "토", "일"];
+  /* ----------주 표시 코드---------- */
+  const handleRepeatDayClick = (day) => {
+    setRepeat((prev) =>
+      prev.includes(day)
+        ? prev.filter((item) => item !== day)
+        : [...prev, day]
+    );
+  };
 
+  const handleSelectEveryday = () => {
+    if (repeat.length === weekDays.length) {
+      setRepeat([]);
+      return;
+    }
+
+    setRepeat(weekDays);
+  };
+  /* ---------- 여기까지 주 표시 코드---------- */
   const handleSave = () => {
     if (!title.trim()) {
       alert("루틴 제목을 입력해주세요.");
@@ -21,12 +39,20 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
       alert("카테고리를 선택해주세요.");
       return;
     }
+    if (!goal) {
+      alert("목표 시간을 선택해주세요.");
+      return;
+    }
+    if (repeat.length === 0) {
+      alert("반복 주기를 선택해주세요.");
+      return;
+    }
 
     onAddRoutine({
       title,
       category,
       goal,
-      repeat,
+      repeat: repeat.length === 7 ? "매일" : repeat.join(", "),
       description,
       time,
       routineMode,
@@ -35,7 +61,7 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
     setTitle("");
     setCategory("");
     setGoal("");
-    setRepeat("");
+    ssetRepeat([]); /* 저장 후 초기화 */
     setDescription("");
     setTime("morning");
     setRoutineMode("check");
@@ -112,18 +138,38 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
             </select>
 
             <input
-              type="text"
-              placeholder="목표 시간을 입력하세요"
+              type="time"
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
             />
+            {/* ----------주 표시 코드 ---------- */}
+            <div className="repeat-select-box">
+              <p className="repeat-select-label">반복 주기</p>
 
-            <input
-              type="text"
-              placeholder="반복 주기를 입력하세요 (예: 매일, 월수금)"
-              value={repeat}
-              onChange={(e) => setRepeat(e.target.value)}
-            />
+              <div className="repeat-day-list">
+                <button
+                  type="button"
+                  className={`repeat-day-btn ${repeat.length === weekDays.length ? "active-repeat-day" : ""
+                    }`}
+                  onClick={handleSelectEveryday}
+                >
+                  매일
+                </button>
+
+                {weekDays.map((day) => (
+                  <button
+                    key={day}
+                    type="button"
+                    className={`repeat-day-btn ${repeat.includes(day) ? "active-repeat-day" : ""
+                      }`}
+                    onClick={() => handleRepeatDayClick(day)}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* ----------여기까지 주 표시 코드 ---------- */}
 
             <textarea
               placeholder="루틴 설명을 입력하세요"
@@ -165,9 +211,8 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
             <div className="routine-card-right">
               <div className="routine-card-actions">
                 <button
-                  className={`routine-check-btn ${
-                    routine.completed ? "completed-btn" : ""
-                  }`}
+                  className={`routine-check-btn ${routine.completed ? "completed-btn" : ""
+                    }`}
                   disabled
                 >
                   {routine.completed
