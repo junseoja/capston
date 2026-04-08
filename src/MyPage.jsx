@@ -2,9 +2,9 @@ function MyPage() {
   return (
     <div className="mypage">
       <div className="mypage-profile">
-        <div className="profile-avatar">김</div>
+        <div className="profile-avatar">닉</div>
         <div className="profile-info">
-          <h1>김준서</h1>
+          <h1>닉네임</h1>
           <p>꾸준한 습관으로 더 나은 하루를 만드는 중</p>
         </div>
       </div>
@@ -12,15 +12,15 @@ function MyPage() {
       <div className="mypage-stats">
         <div className="stat-card">
           <h3>총 루틴 수</h3>
-          <p>12개</p>
+          <p>??</p>
         </div>
         <div className="stat-card">
           <h3>이번 주 달성률</h3>
-          <p>86%</p>
+          <p>??%</p>
         </div>
         <div className="stat-card">
           <h3>인증 게시글</h3>
-          <p>24개</p>
+          <p>??개</p>
         </div>
       </div>
 
