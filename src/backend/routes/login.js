@@ -51,12 +51,33 @@ router.post("/login", async (req, res) => {
 });
 
 // 로그인 상태 확인
-router.get("/me", (req, res) => {
+// routes/login.js
+router.get("/me", async (req, res) => {
     const { sessionId } = req.cookies;
+
     if (!sessionId || !sessions.has(sessionId)) {
         return res.status(401).json({ success: false, message: "로그인되지 않았습니다." });
     }
-    return res.json({ success: true, user: sessions.get(sessionId) });
+
+    const { id } = sessions.get(sessionId);
+    const user = await findUser(id); // ✅ DB에서 유저 정보 조회
+
+    if (!user) {
+        return res.status(401).json({ success: false, message: "유저 정보를 찾을 수 없습니다." });
+    }
+
+    return res.json({
+        success: true,
+        user: {
+            user_id: user.user_id,
+            login_id: user.login_id,
+            nickname: user.nickname,   // ✅ 추가
+            email: user.email,         // ✅ 추가
+            gender: user.gender,       // ✅ 추가
+            birth_date: user.birth_date, // ✅ 추가
+            profile_img: user.profile_img, // ✅ 추가
+        }
+    });
 });
 
 // 로그아웃

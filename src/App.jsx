@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import "./App.css";
 import HomePage from "./HomePage";
 import LoginPage from "./LoginPage";
@@ -8,278 +8,170 @@ import MyPage from "./MyPage";
 import SignupPage from "./SignupPage";
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [page, setPage] = useState("home");
-  const [authPage, setAuthPage] = useState("login");
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [page, setPage] = useState("home");
+    const [authPage, setAuthPage] = useState("login");
+    const [routines, setRoutines] = useState([]); // ✅ HomePage용 임시 상태
+    const [feedPosts, setFeedPosts] = useState([]); // ✅ FeedPage용 임시 상태
 
-  // 회원가입 시 중복체크를 할 수 있도록 임시 사용자 목록 상태 추가
-  const [users, setUsers] = useState([
-    {
-      id: 1,
-      userId: "test123",
-      password: "test123",
-      nickname: "테스트",
-      email: "demo@routine.com",
-      gender: "female",
-      birth: "2000-01-01",
-    },
-  ]);
+    const today = new Date();
+    const month = today.getMonth() + 1;
 
-  // 피드 페이지에서 사용할 게시글 상태 (임시 데이터)
-  const [feedPosts, setFeedPosts] = useState([]);
+    // 백엔드에서 루틴 가져오기 + 필드명 변환
+    const fetchRoutines = useCallback(async () => {
+        try {
+            const res = await fetch("http://localhost:3000/routine", {
+                credentials: "include",
+            });
+            const data = await res.json();
+            if (data.success) {
+                const mapped = data.routines.map((r) => ({
+                    id: r.routine_id,
+                    title: r.title,
+                    category: r.category,
+                    time: r.time_slot,
+                    routineMode: r.routine_mode,
+                    goal: r.goal,
+                    repeat: r.repeat_cycle,
+                    description: r.description,
+                    completed: false,
+                    completedAt: "",
+                    proofText: "",
+                    proofFiles: [],
+                }));
+                setRoutines(mapped);
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    }, []);
 
-  const today = new Date();
-  const month = today.getMonth() + 1;
+    // 로그인 성공 시 루틴도 함께 불러오기
+    const handleLogin = async () => {
+        setIsLoggedIn(true);
+        await fetchRoutines();
+    };
 
-  const [routines, setRoutines] = useState([
-    {
-      id: 1,
-      title: "아침 물 마시기",
-      category: "건강",
-      goal: "1잔",
-      repeat: "매일",
-      description: "하루를 가볍게 시작하는 작은 습관",
-      time: "morning",
-      routineMode: "check",
-      completed: false,
-      completedAt: "",
-      proofText: "",
-      proofFiles: [],
-    },
-    {
-      id: 2,
-      title: "점심 산책 15분",
-      category: "운동",
-      goal: "15분",
-      repeat: "매일",
-      description: "식사 후 가볍게 걷기",
-      time: "lunch",
-      routineMode: "check",
-      completed: false,
-      completedAt: "",
-      proofText: "",
-      proofFiles: [],
-    },
-    {
-      id: 3,
-      title: "자기 전 독서 20분",
-      category: "독서",
-      goal: "20분",
-      repeat: "매일",
-      description: "잠들기 전 책 읽는 습관 만들기",
-      time: "dinner",
-      routineMode: "detail",
-      completed: false,
-      completedAt: "",
-      proofText: "",
-      proofFiles: [],
-    },
-  ]);
+    // ✅ HomePage용 루틴 완료 함수들 (나중에 백엔드 연결 예정)
+    const completeCheckRoutine = (id) => {
+        const now = new Date();
+        const timeText = now.toLocaleTimeString("ko-KR", {
+            hour: "2-digit", minute: "2-digit", hour12: false,
+        });
+        setRoutines((prev) =>
+            prev.map((r) => r.id === id ? { ...r, completed: true, completedAt: timeText } : r)
+        );
+    };
 
-  // 새 루틴 추가
-  const addRoutine = (newRoutine) => {
-    setRoutines((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        ...newRoutine,
-        completed: false,
-        completedAt: "",
-        proofText: "",
-        proofFiles: [],
-      },
-    ]);
-  };
+    const completeDetailRoutine = (id, proofText, proofFiles, uploadToFeed) => {
+        const now = new Date();
+        const timeText = now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+        const dateText = now.toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" });
+        const targetRoutine = routines.find((r) => r.id === id);
 
-  // 체크 루틴 완료
-  const completeCheckRoutine = (id) => {
-    const now = new Date();
-    const timeText = now.toLocaleTimeString("ko-KR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+        setRoutines((prev) =>
+            prev.map((r) => r.id === id
+                ? { ...r, completed: true, completedAt: timeText, proofText, proofFiles }
+                : r
+            )
+        );
 
-    setRoutines((prev) =>
-      prev.map((routine) =>
-        routine.id === id
-          ? {
-            ...routine,
-            completed: true,
-            completedAt: timeText,
-          }
-          : routine
-      )
-    );
-  };
+        if (uploadToFeed && targetRoutine) {
+            setFeedPosts((prev) => [{
+                id: Date.now(),
+                routineId: id,
+                routineTitle: targetRoutine.title,
+                routineDescription: targetRoutine.description,
+                category: targetRoutine.category,
+                content: proofText,
+                files: proofFiles,
+                createdAt: dateText,
+                createdTime: timeText,
+            }, ...prev]);
+        }
+    };
+
+    const cancelRoutineCompletion = (id) => {
+        setRoutines((prev) =>
+            prev.map((r) => r.id === id
+                ? { ...r, completed: false, completedAt: "", proofText: "", proofFiles: [] }
+                : r
+            )
+        );
+        setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
+    };
+
+    // ✅ 로그아웃 백엔드 호출
+    const handleLogout = async () => {
+        try {
+            await fetch("http://localhost:3000/logout", {
+                method: "POST",
+                credentials: "include",
+            });
+        } catch (error) {
+            console.error(error);
+        }
+        setIsLoggedIn(false);
+        setPage("home");
+        setAuthPage("login");
+    };
+    
+    const renderPage = () => {
+        if (page === "home") return (
+            <HomePage
+                routines={routines}
+                onCompleteCheck={completeCheckRoutine}
+                onCompleteDetail={completeDetailRoutine}
+                onCancelComplete={cancelRoutineCompletion}
+            />
+        );
+        if (page === "routine") return <RoutinePage onRoutineChange={fetchRoutines} />;
+        if (page === "feed") return <FeedPage feedPosts={feedPosts} />;
+        if (page === "mypage") return <MyPage />;
+        return (
+            <HomePage
+                routines={routines}
+                onCompleteCheck={completeCheckRoutine}
+                onCompleteDetail={completeDetailRoutine}
+                onCancelComplete={cancelRoutineCompletion}
+            />
+        );
+    };
 
 
-  // 상세 루틴 완료
-  const completeDetailRoutine = (id, proofText, proofFiles, uploadToFeed) => {
-    const now = new Date();
-
-    const timeText = now.toLocaleTimeString("ko-KR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-
-    const dateText = now.toLocaleDateString("ko-KR", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
-
-    const targetRoutine = routines.find((routine) => routine.id === id);
-
-    setRoutines((prev) =>
-      prev.map((routine) =>
-        routine.id === id
-          ? {
-            ...routine,
-            completed: true,
-            completedAt: timeText,
-            proofText,
-            proofFiles,
-          }
-          : routine
-      )
-    );
-
-    if (uploadToFeed && targetRoutine) {
-      setFeedPosts((prev) => [
-        {
-          id: Date.now(),
-          routineId: id,
-          routineTitle: targetRoutine.title,
-          routineDescription: targetRoutine.description,
-          category: targetRoutine.category,
-          userName: users[0]?.nickname || "나",
-          content: proofText,
-          files: proofFiles,
-          createdAt: dateText,
-          createdTime: timeText,
-        },
-        ...prev,
-      ]);
+    if (!isLoggedIn) {
+        return (
+            <div className="app">
+                <main className="page-container">
+                    {authPage === "login" && (
+                        <LoginPage
+                            onLogin={handleLogin}
+                            onGoSignup={() => setAuthPage("signup")}
+                        />
+                    )}
+                    {authPage === "signup" && (
+                        <SignupPage onBackToLogin={() => setAuthPage("login")} />
+                    )}
+                </main>
+            </div>
+        );
     }
-  };
-
-  // 루틴 완료 취소
-  const cancelRoutineCompletion = (id) => {
-    setRoutines((prev) =>
-      prev.map((routine) =>
-        routine.id === id
-          ? {
-            ...routine,
-            completed: false,
-            completedAt: "",
-            proofText: "",
-            proofFiles: [],
-          }
-          : routine
-      )
-    );
-
-    // 피드에서도 해당 게시글 삭제
-    setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
-  };
-
-  // 루틴 삭제
-  const deleteRoutine = (id) => {
-    setRoutines((prev) => prev.filter((routine) => routine.id !== id));
-    setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
-  };
-
-  // 회원가입 완료 시 사용자 목록에 저장하는 함수
-  const handleSignup = (newUser) => {
-    setUsers((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        ...newUser,
-      },
-    ]);
-
-    alert(`${newUser.nickname}님, 회원가입이 완료되었습니다.`);
-    setAuthPage("login");
-  };
-
-  const renderPage = () => {
-    if (page === "home") {
-      return (
-        <HomePage
-          routines={routines}
-          onCompleteCheck={completeCheckRoutine}
-          onCompleteDetail={completeDetailRoutine}
-          onCancelComplete={cancelRoutineCompletion}
-        />
-      );
-    }
-
-    if (page === "routine") {
-      return (
-        <RoutinePage
-          routines={routines}
-          onAddRoutine={addRoutine}
-          onDeleteRoutine={deleteRoutine}
-        />
-      );
-    }
-
-    if (page === "feed") return <FeedPage feedPosts={feedPosts} />;
-    if (page === "mypage") return <MyPage />;
 
     return (
-      <HomePage
-        routines={routines}
-        onCompleteCheck={completeCheckRoutine}
-        onCompleteDetail={completeDetailRoutine}
-        onCancelComplete={cancelRoutineCompletion}
-      />
+        <div className="app">
+            <header className="topbar">
+                <div className="logo">Routine Mate 🌙 {month}월</div>
+                <nav className="nav">
+                    <button onClick={() => setPage("home")}>홈</button>
+                    <button onClick={() => setPage("routine")}>루틴</button>
+                    <button onClick={() => setPage("feed")}>피드</button>
+                    <button onClick={() => setPage("mypage")}>마이페이지</button>
+                    <button onClick={handleLogout}>로그아웃</button>
+                </nav>
+            </header>
+            <main className="page-container">{renderPage()}</main>
+        </div>
     );
-  };
-
-  if (!isLoggedIn) {
-    return (
-      <div className="app">
-        <main className="page-container">
-          {authPage === "login" && (
-            <LoginPage
-              onLogin={() => setIsLoggedIn(true)}
-              onGoSignup={() => setAuthPage("signup")}
-            />
-          )}
-
-          {authPage === "signup" && (
-            <SignupPage
-              existingUsers={users}
-              onSignup={handleSignup}
-              onBackToLogin={() => setAuthPage("login")}
-            />
-          )}
-        </main>
-      </div>
-    );
-  }
-
-  return (
-    <div className="app">
-      <header className="topbar">
-        <div className="logo">Routine Mate 🌙 {month}월</div>
-
-        <nav className="nav">
-          <button onClick={() => setPage("home")}>홈</button>
-          <button onClick={() => setPage("routine")}>루틴</button>
-          <button onClick={() => setPage("feed")}>피드</button>
-          <button onClick={() => setPage("mypage")}>마이페이지</button>
-          <button onClick={() => setIsLoggedIn(false)}>로그아웃</button>
-        </nav>
-      </header>
-
-      <main className="page-container">{renderPage()}</main>
-    </div>
-  );
 }
 
 export default App;

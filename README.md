@@ -1,6 +1,76 @@
+# 🏃 Routine Mate - 루틴 메이트
+
+갓생을 위한 루틴 관리 서비스
+
+---
+
+## 🛠 기술 스택
+
+### Frontend
+- React (Vite)
+
+### Backend
+- Node.js (Express)
+- Python (FastAPI)
+
+### Database
+- AWS RDS MySQL
+
+---
+
+## 📁 프로젝트 구조
+capston-main/
+├── start.sh                  # 전체 서버 한번에 실행
+├── src/
+│   ├── frontend/             # React 프론트엔드
+│   │   └── src/
+│   │       ├── App.jsx
+│   │       ├── LoginPage.jsx
+│   │       ├── SignupPage.jsx
+│   │       ├── RoutinePage.jsx
+│   │       ├── FeedPage.jsx
+│   │       ├── HomePage.jsx
+│   │       └── MyPage.jsx
+│   │
+│   ├── backend/              # Node.js Express 서버
+│   │   ├── app.js
+│   │   ├── database.js
+│   │   └── routes/
+│   │       ├── login.js
+│   │       └── routine.js
+│   │
+│   └── python_api/           # FastAPI 서버
+│       ├── app.py
+│       ├── database.py
+│       ├── requirements.txt
+│       └── routers/
+│           ├── user.py
+│           └── routine.py
+
+---
+
+## ⚙️ 환경 설정
+
+`src/python_api/.env` 파일 생성 후 아래 내용 입력
+DB_HOST=your-rds-endpoint.amazonaws.com
+DB_USER=admin
+DB_PASSWORD=your-password
+DB_NAME=capston
+DB_PORT=3306
+
+> ⚠️ `.env` 파일은 git에 올라가지 않으므로 직접 생성해야 합니다.
+
 ---
 
 ## 🚀 서버 실행 방법
+
+### 한번에 실행 (추천)
+
+```bash
+# 프로젝트 루트에서
+chmod +x start.sh  # 최초 1회만
+./start.sh
+```
 
 ### 개별 실행
 
@@ -24,13 +94,17 @@ cd src/python_api
 
 # 가상환경 생성 (최초 1회만)
 python3 -m venv venv
+
 # 가상환경 활성화
 source venv/bin/activate  # Mac/Linux
+venv\Scripts\activate     # Windows
+
 # 패키지 설치 (최초 1회만)
 pip install -r requirements.txt
+
 # 서버 실행
 uvicorn app:app --reload --port 8000
-'''
+```
 
 ---
 
@@ -74,6 +148,7 @@ uvicorn app:app --reload --port 8000
 | POST | /login | 로그인 |
 | GET | /me | 로그인 상태 확인 |
 | POST | /logout | 로그아웃 |
+| GET | /check-duplicate | 아이디/닉네임 중복체크 |
 
 ### 루틴
 | 메서드 | URL | 설명 |
@@ -86,53 +161,21 @@ uvicorn app:app --reload --port 8000
 
 ## ✅ 구현 완료 기능
 
-- [x] 회원가입 (유효성 검사, 중복체크)
+- [x] 회원가입 (유효성 검사, 중복체크, DB 저장)
 - [x] 로그인 (쿠키 세션 방식)
 - [x] 루틴 생성 / 조회 / 삭제
-- [ ] 피드 기능
-- [ ] 마이페이지
-- [ ] 루틴 완료 체크
+- [x] 루틴 반복 요일 선택
+- [x] 루틴 시간 자동 분류 (아침/점심/저녁)
+- [ ] 홈 루틴 완료 체크 백엔드 연결
+- [ ] 피드 기능 백엔드 연결
+- [ ] 마이페이지 백엔드 연결
+- [ ] 댓글 및 하트 기능
 
 ---
 
+## 👥 팀원
 
-
-# React + Vite
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
-
-## 프론트 엔드 버전입니다.
-
-## 회원가입 시 중복체크를 할 수 있도록 임시 사용자 목록 상태 추가
-
-  //회원가입 시 중복체크를 할 수 있도록 임시 사용자 목록 상태 추가
-  const [users, setUsers] = useState([
-    {
-      id: 1,
-      userId: "test123",
-      password: "test123",
-      nickname: "테스트",
-      email: "demo@routine.com",
-      gender: "female",
-      birth: "2000-01-01",
-    },
-  ]);
-
-
-  ## 업데이트
-  
-  피드 업로드 하는 과정 추가
-  댓글 및 하트 기능 추가
+| 이름 | 역할 |
+|---|---|
+|  | Frontend |
+|  | Backend |

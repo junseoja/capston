@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-function RoutinePage() {
+function RoutinePage({ onRoutineChange }) {
     const [routines, setRoutines] = useState([]);
     const [showForm, setShowForm] = useState(false);
     const [title, setTitle] = useState("");
@@ -96,6 +96,7 @@ function RoutinePage() {
 
             if (result.success) {
                 await fetchRoutines();
+                await onRoutineChange();
                 setTitle("");
                 setCategory("");
                 setGoal("");
@@ -121,7 +122,10 @@ function RoutinePage() {
                 credentials: "include",
             });
             const result = await res.json();
-            if (result.success) await fetchRoutines();
+            if (result.success) {
+                await fetchRoutines();
+                await onRoutineChange();
+            }
         } catch (error) {
             console.error(error);
             alert("서버 오류가 발생했습니다.");
