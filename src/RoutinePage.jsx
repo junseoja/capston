@@ -17,21 +17,18 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
     const [hour, minute] = goalTime.split(":").map(Number);
     const totalMinutes = hour * 60 + minute;
 
-    // 06:00 ~ 11:59
     if (totalMinutes >= 360 && totalMinutes <= 719) {
       return "morning";
     }
 
-    // 12:00 ~ 17:59
     if (totalMinutes >= 720 && totalMinutes <= 1079) {
       return "lunch";
     }
 
-    // 18:00 ~ 05:59
     return "dinner";
   };
 
-  /* ---------- 주 표시 코드 ---------- */
+  // 반복 요일 선택
   const handleRepeatDayClick = (day) => {
     setRepeat((prev) =>
       prev.includes(day)
@@ -48,7 +45,6 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
 
     setRepeat(weekDays);
   };
-  /* ---------- 여기까지 주 표시 코드 ---------- */
 
   const handleSave = () => {
     if (!title.trim()) {

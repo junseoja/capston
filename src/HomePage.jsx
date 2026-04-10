@@ -20,13 +20,13 @@ function HomePage({
   const [time, setTime] = useState("morning");
   // 인증 글과 파일 상태 관리
   const [proofInputs, setProofInputs] = useState({});
-  // 루틴별로 파일 상태를 객체 형태로 관리 (예: { routineId: [file1, file2] })
+  // 루틴별 파일 상태 관리
   const [proofFiles, setProofFiles] = useState({});
-  // 루틴 완료 (체크형)
+  // 피드 업로드 체크 상태
   const [uploadChecks, setUploadChecks] = useState({});
-  // 인증 박스 열림 상태 관리
+  // 인증 박스 열림 상태
   const [openProofId, setOpenProofId] = useState(null);
-  // 루틴 완료 (체크형)
+
   const filteredRoutines = routines.filter((routine) => routine.time === time);
 
   const getTimeTitle = () => {
@@ -50,7 +50,6 @@ function HomePage({
     }));
   };
 
-  // 체크박스 변경 함수 (ui랑 실제 데이터 연결)
   const handleUploadCheckChange = (id, checked) => {
     setUploadChecks((prev) => ({
       ...prev,
@@ -73,7 +72,6 @@ function HomePage({
     }));
   };
 
-  // 상세 루틴 인증 제출
   const handleDetailSubmit = (id) => {
     const proofText = proofInputs[id]?.trim() || "";
     const selectedFiles = proofFiles[id] || [];
@@ -81,6 +79,11 @@ function HomePage({
 
     if (!proofText && selectedFiles.length === 0) {
       alert("인증 글이나 사진/영상을 추가해주세요.");
+      return;
+    }
+
+    if (proofText.length > 200) {
+      alert("200자 이하로 입력해주세요.");
       return;
     }
 
@@ -92,7 +95,6 @@ function HomePage({
     setOpenProofId(null);
   };
 
-  // 완료 취소 확인
   const handleCancelComplete = (id) => {
     const isConfirmed = window.confirm("루틴 완료를 취소하시겠습니까?");
     if (isConfirmed) {
@@ -193,29 +195,30 @@ function HomePage({
                         <p className="home-proof-text">{routine.proofText}</p>
                       )}
 
-                      {routine.proofFiles && routine.proofFiles.length > 0 && (
-                        <div className="proof-preview-list completed-proof-preview-list">
-                          {routine.proofFiles.map((file, index) => (
-                            <div key={index} className="proof-preview-item">
-                              {file.type.startsWith("image/") ? (
-                                <img
-                                  src={file.url}
-                                  alt=""
-                                  className="proof-preview-media"
-                                />
-                              ) : file.type.startsWith("video/") ? (
-                                <video
-                                  src={file.url}
-                                  controls
-                                  className="proof-preview-media"
-                                />
-                              ) : (
-                                <p>{file.name}</p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                      {routine.proofFiles &&
+                        routine.proofFiles.length > 0 && (
+                          <div className="proof-preview-list completed-proof-preview-list">
+                            {routine.proofFiles.map((file, index) => (
+                              <div key={index} className="proof-preview-item">
+                                {file.type.startsWith("image/") ? (
+                                  <img
+                                    src={file.url}
+                                    alt=""
+                                    className="proof-preview-media"
+                                  />
+                                ) : file.type.startsWith("video/") ? (
+                                  <video
+                                    src={file.url}
+                                    controls
+                                    className="proof-preview-media"
+                                  />
+                                ) : (
+                                  <p>{file.name}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                     </button>
                   ) : (
                     <>
@@ -235,7 +238,7 @@ function HomePage({
                                 setOpenProofId(
                                   openProofId === routine.id
                                     ? null
-                                    : routine.id,
+                                    : routine.id
                                 )
                               }
                             >
@@ -253,6 +256,17 @@ function HomePage({
                                   handleProofChange(routine.id, e.target.value)
                                 }
                               />
+
+                              <p
+                                style={{
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                  textAlign: "right",
+                                  margin: "0",
+                                }}
+                              >
+                                {(proofInputs[routine.id]?.length || 0)}/200
+                              </p>
 
                               <label className="proof-file-label">
                                 사진 / 영상 추가
@@ -273,7 +287,7 @@ function HomePage({
                                   onChange={(e) =>
                                     handleUploadCheckChange(
                                       routine.id,
-                                      e.target.checked,
+                                      e.target.checked
                                     )
                                   }
                                 />
