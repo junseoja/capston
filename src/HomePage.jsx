@@ -16,9 +16,15 @@ function HomePage({
     return newDate;
   });
 
+  // 시간대 상태 관리
   const [time, setTime] = useState("morning");
+  // 인증 글과 파일 상태 관리
   const [proofInputs, setProofInputs] = useState({});
+  // 루틴별 파일 상태 관리
   const [proofFiles, setProofFiles] = useState({});
+  // 피드 업로드 체크 상태
+  const [uploadChecks, setUploadChecks] = useState({});
+  // 인증 박스 열림 상태
   const [openProofId, setOpenProofId] = useState(null);
 
   const filteredRoutines = routines.filter((routine) => routine.time === time);
@@ -44,6 +50,13 @@ function HomePage({
     }));
   };
 
+  const handleUploadCheckChange = (id, checked) => {
+    setUploadChecks((prev) => ({
+      ...prev,
+      [id]: checked,
+    }));
+  };
+
   const handleFileChange = (id, fileList) => {
     const selectedFiles = Array.from(fileList);
 
@@ -62,17 +75,26 @@ function HomePage({
   const handleDetailSubmit = (id) => {
     const proofText = proofInputs[id]?.trim() || "";
     const selectedFiles = proofFiles[id] || [];
+    const uploadToFeed = uploadChecks[id] || false;
 
     if (!proofText && selectedFiles.length === 0) {
       alert("인증 글이나 사진/영상을 추가해주세요.");
       return;
     }
 
-    onCompleteDetail(id, proofText, selectedFiles);
+    if (proofText.length > 200) {
+      alert("200자 이하로 입력해주세요.");
+      return;
+    }
+
+    onCompleteDetail(id, proofText, selectedFiles, uploadToFeed);
+
+    setProofInputs((prev) => ({ ...prev, [id]: "" }));
+    setProofFiles((prev) => ({ ...prev, [id]: [] }));
+    setUploadChecks((prev) => ({ ...prev, [id]: false }));
     setOpenProofId(null);
   };
 
-  // 완료 취소 확인
   const handleCancelComplete = (id) => {
     const isConfirmed = window.confirm("루틴 완료를 취소하시겠습니까?");
     if (isConfirmed) {
@@ -209,26 +231,42 @@ function HomePage({
                         </button>
                       ) : (
                         <div className="home-detail-action">
-                          <button
-                            className="routine-detail-btn home-action-btn"
-                            onClick={() =>
-                              setOpenProofId(
-                                openProofId === routine.id ? null : routine.id
-                              )
-                            }
-                          >
-                            인증하기
-                          </button>
+                          {openProofId !== routine.id && (
+                            <button
+                              className="routine-detail-btn home-action-btn"
+                              onClick={() =>
+                                setOpenProofId(
+                                  openProofId === routine.id
+                                    ? null
+                                    : routine.id
+                                )
+                              }
+                            >
+                              인증하기
+                            </button>
+                          )}
 
                           {openProofId === routine.id && (
                             <div className="proof-box">
                               <textarea
+                                maxLength={200}
                                 placeholder="오늘 하루를 기록해보세요"
                                 value={proofInputs[routine.id] || ""}
                                 onChange={(e) =>
                                   handleProofChange(routine.id, e.target.value)
                                 }
                               />
+
+                              <p
+                                style={{
+                                  fontSize: "12px",
+                                  color: "#6b7280",
+                                  textAlign: "right",
+                                  margin: "0",
+                                }}
+                              >
+                                {(proofInputs[routine.id]?.length || 0)}/200
+                              </p>
 
                               <label className="proof-file-label">
                                 사진 / 영상 추가
@@ -240,6 +278,20 @@ function HomePage({
                                     handleFileChange(routine.id, e.target.files)
                                   }
                                 />
+                              </label>
+
+                              <label className="feed-upload-check">
+                                <input
+                                  type="checkbox"
+                                  checked={uploadChecks[routine.id] || false}
+                                  onChange={(e) =>
+                                    handleUploadCheckChange(
+                                      routine.id,
+                                      e.target.checked
+                                    )
+                                  }
+                                />
+                                <span>피드에도 업로드하기</span>
                               </label>
 
                               {proofFiles[routine.id]?.length > 0 && (

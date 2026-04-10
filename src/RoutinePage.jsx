@@ -1,18 +1,18 @@
-import { useState, useEffect } from "react"; // ✅ useEffect 추가
+import { useState, useEffect } from "react";
 
 function RoutinePage() {
-    // ✅ 변경 - props 대신 직접 상태 관리
     const [routines, setRoutines] = useState([]);
     const [showForm, setShowForm] = useState(false);
     const [title, setTitle] = useState("");
     const [category, setCategory] = useState("");
     const [goal, setGoal] = useState("");
-    const [repeat, setRepeat] = useState("");
+    const [repeat, setRepeat] = useState([]); // ✅ 팀원 버전 - 배열로 관리
     const [description, setDescription] = useState("");
-    const [time, setTime] = useState("morning");
     const [routineMode, setRoutineMode] = useState("check");
 
-    // ✅ 추가 - 페이지 로딩 시 루틴 목록 가져오기
+    const weekDays = ["월", "화", "수", "목", "금", "토", "일"]; // ✅ 팀원 추가
+
+    // ✅ 내 버전 - 페이지 로딩 시 루틴 목록 가져오기
     useEffect(() => {
         fetchRoutines();
     }, []);
@@ -29,7 +29,31 @@ function RoutinePage() {
         }
     };
 
-    // ✅ 변경 - 백엔드로 루틴 저장
+    // ✅ 팀원 추가 - 시간으로 아침/점심/저녁 자동 분류
+    const getTimeSection = (goalTime) => {
+        const [hour] = goalTime.split(":").map(Number);
+        const totalMinutes = hour * 60;
+        if (totalMinutes >= 360 && totalMinutes <= 719) return "morning";
+        if (totalMinutes >= 720 && totalMinutes <= 1079) return "lunch";
+        return "dinner";
+    };
+
+    // ✅ 팀원 추가 - 반복 요일 선택
+    const handleRepeatDayClick = (day) => {
+        setRepeat((prev) =>
+            prev.includes(day) ? prev.filter((item) => item !== day) : [...prev, day]
+        );
+    };
+
+    const handleSelectEveryday = () => {
+        if (repeat.length === weekDays.length) {
+            setRepeat([]);
+            return;
+        }
+        setRepeat(weekDays);
+    };
+
+    // ✅ 합침 - 백엔드 연결 + 팀원 유효성 검사
     const handleSave = async () => {
         if (!title.trim()) {
             alert("루틴 제목을 입력해주세요.");
@@ -39,24 +63,44 @@ function RoutinePage() {
             alert("카테고리를 선택해주세요.");
             return;
         }
+        if (!goal) {
+            alert("목표 시간을 선택해주세요.");
+            return;
+        }
+        if (repeat.length === 0) {
+            alert("반복 주기를 선택해주세요.");
+            return;
+        }
+
+        // ✅ 팀원 추가 - 시간으로 time_slot 자동 분류
+        const autoTime = getTimeSection(goal);
+        // ✅ 팀원 추가 - 매일이면 "매일", 아니면 "월, 화, 수" 형식
+        const repeatText = repeat.length === 7 ? "매일" : repeat.join(", ");
 
         try {
             const res = await fetch("http://localhost:3000/routine", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
-                body: JSON.stringify({ title, category, time_slot: time, routine_mode: routineMode, goal, repeat_cycle: repeat, description }),
+                body: JSON.stringify({
+                    title,
+                    category,
+                    time_slot: autoTime,       // ✅ 자동 분류된 시간대
+                    routine_mode: routineMode,
+                    goal,
+                    repeat_cycle: repeatText,  // ✅ 요일 텍스트로 변환
+                    description,
+                }),
             });
             const result = await res.json();
 
             if (result.success) {
-                await fetchRoutines(); // 목록 새로고침
+                await fetchRoutines();
                 setTitle("");
                 setCategory("");
                 setGoal("");
-                setRepeat("");
+                setRepeat([]);
                 setDescription("");
-                setTime("morning");
                 setRoutineMode("check");
                 setShowForm(false);
             }
@@ -66,7 +110,7 @@ function RoutinePage() {
         }
     };
 
-    // ✅ 변경 - 백엔드로 루틴 삭제
+    // ✅ 내 버전 - 백엔드로 루틴 삭제
     const handleDelete = async (routine_id) => {
         const isConfirmed = window.confirm("이 루틴을 삭제하시겠습니까?");
         if (!isConfirmed) return;
@@ -77,9 +121,7 @@ function RoutinePage() {
                 credentials: "include",
             });
             const result = await res.json();
-            if (result.success) {
-                await fetchRoutines(); // 목록 새로고침
-            }
+            if (result.success) await fetchRoutines();
         } catch (error) {
             console.error(error);
             alert("서버 오류가 발생했습니다.");
@@ -114,7 +156,13 @@ function RoutinePage() {
                 <div className="routine-form-box">
                     <h2>새 루틴 추가</h2>
                     <div className="routine-form">
-                        <input type="text" placeholder="루틴 제목을 입력하세요" value={title} onChange={(e) => setTitle(e.target.value)} />
+                        <input
+                            type="text"
+                            placeholder="루틴 제목을 입력하세요"
+                            value={title}
+                            onChange={(e) => setTitle(e.target.value)}
+                        />
+
                         <select value={category} onChange={(e) => setCategory(e.target.value)}>
                             <option value="">루틴 카테고리 선택</option>
                             <option value="기상">기상</option>
@@ -125,19 +173,51 @@ function RoutinePage() {
                             <option value="물 마시기">물 마시기</option>
                             <option value="건강">건강</option>
                             <option value="자기계발">자기계발</option>
+                            <option value="기타">기타</option> {/* ✅ 팀원 추가 */}
                         </select>
-                        <select value={time} onChange={(e) => setTime(e.target.value)}>
-                            <option value="morning">아침</option>
-                            <option value="lunch">점심</option>
-                            <option value="dinner">저녁</option>
-                        </select>
+
                         <select value={routineMode} onChange={(e) => setRoutineMode(e.target.value)}>
                             <option value="check">체크 루틴</option>
                             <option value="detail">상세 루틴</option>
                         </select>
-                        <input type="text" placeholder="목표 시간을 입력하세요" value={goal} onChange={(e) => setGoal(e.target.value)} />
-                        <input type="text" placeholder="반복 주기를 입력하세요 (예: 매일, 월수금)" value={repeat} onChange={(e) => setRepeat(e.target.value)} />
-                        <textarea placeholder="루틴 설명을 입력하세요" value={description} onChange={(e) => setDescription(e.target.value)}></textarea>
+
+                        {/* ✅ 팀원 변경 - 시간 직접 입력 */}
+                        <input
+                            type="time"
+                            value={goal}
+                            onChange={(e) => setGoal(e.target.value)}
+                        />
+
+                        {/* ✅ 팀원 추가 - 요일 선택 버튼 */}
+                        <div className="repeat-select-box">
+                            <p className="repeat-select-label">반복 주기</p>
+                            <div className="repeat-day-list">
+                                <button
+                                    type="button"
+                                    className={`repeat-day-btn ${repeat.length === weekDays.length ? "active-repeat-day" : ""}`}
+                                    onClick={handleSelectEveryday}
+                                >
+                                    매일
+                                </button>
+                                {weekDays.map((day) => (
+                                    <button
+                                        key={day}
+                                        type="button"
+                                        className={`repeat-day-btn ${repeat.includes(day) ? "active-repeat-day" : ""}`}
+                                        onClick={() => handleRepeatDayClick(day)}
+                                    >
+                                        {day}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <textarea
+                            placeholder="루틴 설명을 입력하세요"
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                        ></textarea>
+
                         <button className="routine-save-btn" onClick={handleSave}>저장하기</button>
                     </div>
                 </div>
@@ -161,10 +241,18 @@ function RoutinePage() {
                         </div>
                         <div className="routine-card-right">
                             <div className="routine-card-actions">
-                                <button className={`routine-check-btn ${routine.completed ? "completed-btn" : ""}`} disabled>
-                                    {routine.completed ? `완료 ${routine.completedAt}` : routine.routine_mode === "check" ? "체크 루틴" : "상세 루틴"}
+                                <button
+                                    className={`routine-check-btn ${routine.completed ? "completed-btn" : ""}`}
+                                    disabled
+                                >
+                                    {routine.completed
+                                        ? `완료 ${routine.completedAt}`
+                                        : routine.routine_mode === "check" ? "체크 루틴" : "상세 루틴"}
                                 </button>
-                                <button className="routine-delete-btn" onClick={() => handleDelete(routine.routine_id)}>
+                                <button
+                                    className="routine-delete-btn"
+                                    onClick={() => handleDelete(routine.routine_id)}
+                                >
                                     루틴 삭제
                                 </button>
                             </div>

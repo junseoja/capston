@@ -1,59 +1,79 @@
-function FeedPage() {
+function FeedPage({ feedPosts }) {
+  if (!feedPosts || feedPosts.length === 0) {
+    return (
+      <div className="feed-page">
+        <div className="feed-header">
+          <h1 className="feed-title">피드</h1>
+          <p className="feed-subtitle">
+            상세 루틴 인증에서 피드 업로드를 체크하면 여기에 게시물이 올라와요.
+          </p>
+        </div>
+
+        <div className="feed-empty-card">
+          <p className="feed-empty-title">아직 업로드된 게시물이 없어요.</p>
+          <p className="feed-empty-text">
+            홈에서 상세 루틴을 인증하고 피드 업로드를 체크해보세요.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="feed-page">
+    <div className="feed-page instagram-feed-page">
       <div className="feed-header">
-        <h1 className="feed-title">인증 피드</h1>
+        <h1 className="feed-title">피드</h1>
         <p className="feed-subtitle">
-          다른 사용자들의 루틴 인증을 확인하고 동기부여를 받아보세요.
+          루틴 인증이 인스타그램처럼 카드 형태로 쌓이는 공간이에요.
         </p>
       </div>
 
-      <div className="feed-list">
-        <div className="feed-card">
-          <div className="feed-image">사진</div>
-          <div className="feed-content">
-            <div className="feed-top">
-              <h3>아침 스트레칭 완료</h3>
-              <span>2026.03.19</span>
-            </div>
-            <p className="feed-user">김준서</p>
-            <p className="feed-text">
-              오늘도 아침에 10분 스트레칭 완료! 몸이 훨씬 가벼워진 느낌이에요.
-            </p>
-          </div>
-        </div>
+      <div className="instagram-feed-list">
+        {feedPosts.map((post) => (
+          <article key={post.id} className="instagram-feed-card">
+            <div className="instagram-feed-top">
+              <h3 className="instagram-feed-routine-title">{post.routineTitle}</h3>
 
-        <div className="feed-card">
-          <div className="feed-image">사진</div>
-          <div className="feed-content">
-            <div className="feed-top">
-              <h3>물 2L 마시기 성공</h3>
-              <span>2026.03.18</span>
-            </div>
-            <p className="feed-user">박민지</p>
-            <p className="feed-text">
-              오늘 목표했던 물 2리터 채웠어요. 작은 습관이지만 뿌듯합니다.
-            </p>
-          </div>
-        </div>
+              <p className="instagram-feed-routine-description">
+                {post.routineDescription}
+              </p>
 
-        <div className="feed-card">
-          <div className="feed-image">사진</div>
-          <div className="feed-content">
-            <div className="feed-top">
-              <h3>저녁 러닝 인증</h3>
-              <span>2026.03.17</span>
+              <div className="instagram-feed-info-row">
+                <span className="instagram-feed-info-badge">{post.category}</span>
+                <span className="instagram-feed-info-time">
+                  인증 시간 {post.createdAt} {post.createdTime}
+                </span>
+              </div>
             </div>
-            <p className="feed-user">이서연</p>
-            <p className="feed-text">
-              퇴근 후 30분 러닝 완료. 힘들었지만 끝나고 나니까 기분이 정말 좋았어요.
-            </p>
-          </div>
-        </div>
+
+            {post.files?.length > 0 && (
+              <div className="instagram-feed-media-box">
+                {post.files[0].type.startsWith("image/") ? (
+                  <img
+                    src={post.files[0].url}
+                    alt="루틴 인증 이미지"
+                    className="instagram-feed-media"
+                  />
+                ) : (
+                  <video
+                    src={post.files[0].url}
+                    controls
+                    className="instagram-feed-media"
+                  />
+                )}
+              </div>
+            )}
+
+            <div className="instagram-feed-body">
+              <p className="instagram-feed-caption">
+                {post.content || "오늘 루틴 인증 완료!"}
+              </p>
+            </div>
+          </article>
+        ))}
       </div>
     </div>
-  )
+  );
 }
 
-export default FeedPage
-
+export default FeedPage;
