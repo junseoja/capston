@@ -26,6 +26,7 @@ function App() {
 
     // 피드 게시물 상태 - 상세 루틴 인증 시 "피드 업로드" 체크하면 추가됨
     const [feedPosts, setFeedPosts] = useState([]);
+    const [currentUser, setCurrentUser] = useState(null);
 
     // 상단바에 표시할 현재 월
     const today = new Date();
@@ -69,11 +70,33 @@ function App() {
     // ── 로그인 처리 ────────────────────────────────────────────────────────────
     // LoginPage에서 로그인 성공 콜백으로 호출됨
     // 로그인 상태 전환 → 루틴 fetch → 홈("/")으로 이동
+    const fetchCurrentUser = useCallback(async () => {
+        try {
+            const res = await fetch("http://localhost:3000/me", {
+                credentials: "include",
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                setCurrentUser(data.user);
+                return data.user;
+            }
+        } catch (error) {
+            console.error("?좎? ?뺣낫 fetch ?ㅽ뙣:", error);
+        }
+
+        setCurrentUser(null);
+        return null;
+    }, []);
+
+    // 로그인 성공 시 상태 업데이트 및 루틴 데이터 fetch 후 홈으로 이동
     const handleLogin = async () => {
         setIsLoggedIn(true);
-        await fetchRoutines(); // 로그인 직후 루틴 목록 즉시 로드
+        await fetchCurrentUser(); // 로그인한 유저 정보 fetch
+        await fetchRoutines(); // 루틴 데이터 fetch
         navigate("/");
     };
+
 
     // ── 루틴 완료 처리 (체크 모드) ─────────────────────────────────────────────
     // 체크 루틴: 버튼 클릭 한 번으로 완료 처리, 현재 시간을 completedAt에 저장
@@ -110,18 +133,41 @@ function App() {
         // "피드에 업로드" 체크했을 때 feedPosts에 게시물 추가
         if (uploadToFeed && targetRoutine) {
             setFeedPosts((prev) => [{
-                id: Date.now(),                             // 임시 ID (추후 DB ID로 교체 예정)
+                id: Date.now(),
                 routineId: id,
+                nickname: currentUser?.nickname ?? "나",
                 routineTitle: targetRoutine.title,
-                routineDescription: targetRoutine.description,
                 category: targetRoutine.category,
                 content: proofText,
                 files: proofFiles,
+                liked: false,
+                likeCount: 0,
+                commentCount: 0,
                 createdAt: dateText,
                 createdTime: timeText,
-            }, ...prev]); // 최신 게시물이 맨 앞에 오도록 앞에 추가
+            }, ...prev]);
+
         }
     };
+    // ── 피드 좋아요 토글 ─────────────────────────────────────────────────────
+    const toggleFeedLike = (postId) => {
+        setFeedPosts((prev) =>
+            prev.map((post) => {
+                if (post.id !== postId) return post;
+
+                const nextLiked = !post.liked;
+
+                return {
+                    ...post,
+                    liked: nextLiked,
+                    likeCount: nextLiked
+                        ? post.likeCount + 1
+                        : Math.max(0, post.likeCount - 1),
+                };
+            })
+        );
+    };
+
 
     // ── 루틴 완료 취소 ─────────────────────────────────────────────────────────
     // 완료된 루틴을 미완료 상태로 되돌리고, 피드에 올린 게시물도 함께 삭제
@@ -199,7 +245,7 @@ function App() {
                                 onCompleteCheck={completeCheckRoutine}    // 체크 루틴 완료 핸들러
                                 onCompleteDetail={completeDetailRoutine}  // 상세 루틴 완료 핸들러
                                 onCancelComplete={cancelRoutineCompletion} // 완료 취소 핸들러
-                              />
+                            />
                             : <Navigate to="/login" />
                         }
                     />
@@ -218,10 +264,14 @@ function App() {
                     <Route
                         path="/feed"
                         element={isLoggedIn
-                            ? <FeedPage feedPosts={feedPosts} />
+                            ? <FeedPage
+                                feedPosts={feedPosts}
+                                onToggleLike={toggleFeedLike}
+                            />
                             : <Navigate to="/login" />
                         }
                     />
+
 
                     {/* 마이페이지: 추후 백엔드 연결 예정 */}
                     <Route

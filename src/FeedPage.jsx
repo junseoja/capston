@@ -9,18 +9,17 @@ import { useState, useEffect } from "react";
 //   feedPosts - App.jsx에서 관리하는 피드 게시물 배열
 //               각 항목: { id, routineId, routineTitle, routineDescription,
 //                          category, content, files, createdAt, createdTime }
-function FeedPage({ feedPosts }) {
-    // 피드 게시물이 없을 때 안내 화면
+function FeedPage({ feedPosts, onToggleLike }) {
     if (!feedPosts || feedPosts.length === 0) {
         return (
-            <div className="feed-page">
+            <div className="feed-page insta-feed-page">
                 <div className="feed-header">
                     <h1 className="feed-title">피드</h1>
                     <p className="feed-subtitle">
                         상세 루틴 인증에서 피드 업로드를 체크하면 여기에 게시물이 올라와요.
                     </p>
                 </div>
-                {/* 빈 피드 안내 카드 */}
+
                 <div className="feed-empty-card">
                     <p className="feed-empty-title">아직 업로드된 게시물이 없어요.</p>
                     <p className="feed-empty-text">
@@ -31,56 +30,82 @@ function FeedPage({ feedPosts }) {
         );
     }
 
-    // 게시물이 있을 때 인스타그램 스타일 카드 목록 표시
     return (
-        <div className="feed-page instagram-feed-page">
+        <div className="feed-page insta-feed-page">
             <div className="feed-header">
                 <h1 className="feed-title">피드</h1>
                 <p className="feed-subtitle">
-                    루틴 인증이 인스타그램처럼 카드 형태로 쌓이는 공간이에요.
+                    루틴 인증이 인스타그램처럼 쌓이는 공간이에요.
                 </p>
             </div>
 
-            {/* 피드 카드 목록 */}
-            <div className="instagram-feed-list">
+            <div className="insta-feed-list">
                 {feedPosts.map((post) => (
-                    <article key={post.id} className="instagram-feed-card">
-                        {/* 카드 상단: 루틴 제목, 설명, 카테고리 배지, 인증 시간 */}
-                        <div className="instagram-feed-top">
-                            <h3 className="instagram-feed-routine-title">{post.routineTitle}</h3>
-                            <p className="instagram-feed-routine-description">{post.routineDescription}</p>
-                            <div className="instagram-feed-info-row">
-                                <span className="instagram-feed-info-badge">{post.category}</span>
-                                <span className="instagram-feed-info-time">
-                                    인증 시간 {post.createdAt} {post.createdTime}
-                                </span>
+                    <article key={post.id} className="insta-feed-card">
+                        <div className="insta-feed-topline">
+                            <div className="insta-feed-mainline">
+                                <span className="insta-feed-nickname">{post.nickname}</span>
+                                <span className="insta-feed-divider">•</span>
+                                <span className="insta-feed-routine-title">{post.routineTitle}</span>
                             </div>
+                            <span className="insta-feed-category">{post.category}</span>
                         </div>
 
-                        {/* 첨부 파일: 첫 번째 파일만 대표 이미지/영상으로 표시 */}
+                        <p className="insta-feed-proof-text">
+                            {post.content || "오늘 루틴 인증 완료!"}
+                        </p>
+
                         {post.files?.length > 0 && (
-                            <div className="instagram-feed-media-box">
-                                {post.files[0].type.startsWith("image/") ? (
-                                    <img
-                                        src={post.files[0].url}
-                                        alt="루틴 인증 이미지"
-                                        className="instagram-feed-media"
-                                    />
-                                ) : (
-                                    <video
-                                        src={post.files[0].url}
-                                        controls
-                                        className="instagram-feed-media"
-                                    />
-                                )}
+                            <div
+                                className={
+                                    post.files.length === 1
+                                        ? "insta-feed-media-single"
+                                        : "insta-feed-media-grid"
+                                }
+                            >
+                                {post.files.map((file, index) => (
+                                    <div
+                                        key={`${post.id}-${index}`}
+                                        className="insta-feed-media-item"
+                                    >
+                                        {file.type.startsWith("image/") ? (
+                                            <img
+                                                src={file.url}
+                                                alt="루틴 인증 이미지"
+                                                className="insta-feed-media"
+                                            />
+                                        ) : (
+                                            <video
+                                                src={file.url}
+                                                controls
+                                                className="insta-feed-media"
+                                            />
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         )}
 
-                        {/* 카드 하단: 인증 글 (없으면 기본 문구 표시) */}
-                        <div className="instagram-feed-body">
-                            <p className="instagram-feed-caption">
-                                {post.content || "오늘 루틴 인증 완료!"}
-                            </p>
+                        <div className="insta-feed-action-row">
+                            <button
+                                type="button"
+                                className={`insta-feed-action-btn insta-like-btn ${post.liked ? "liked" : ""}`}
+                                onClick={() => onToggleLike(post.id)}
+                            >
+                                <span className="insta-feed-icon">
+                                    {post.liked ? "♥" : "♡"}
+                                </span>
+                                <span>{post.likeCount}</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                className="insta-feed-action-btn insta-comment-btn"
+                                disabled
+                            >
+                                <span className="insta-feed-icon">💬</span>
+                                <span>{post.commentCount}</span>
+                            </button>
                         </div>
                     </article>
                 ))}
@@ -90,3 +115,4 @@ function FeedPage({ feedPosts }) {
 }
 
 export default FeedPage;
+
