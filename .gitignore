@@ -37,4 +37,5 @@ __pycache__/
 node_modules/
 
 # 기타
-.DS_Store
+.DS_Store__pycache__/
+*.pyc

@@ -1,16 +1,25 @@
-import { useState } from "react"; // ✅ 추가 - 입력값 상태 관리를 위해 import
+// 로그인 페이지 컴포넌트
+// - 아이디/비밀번호 입력 후 Express 백엔드(/login)로 POST 요청
+// - 성공 시 부모(App.jsx)의 handleLogin 콜백 호출 → 홈으로 이동
+// - Enter 키로도 로그인 실행 가능
 
+import { useState } from "react";
+
+// props:
+//   onLogin    - 로그인 성공 시 App.jsx에서 전달한 handleLogin 함수
+//   onGoSignup - 회원가입 페이지로 이동 시 App.jsx에서 전달한 navigate("/signup")
 function LoginPage({ onLogin, onGoSignup }) {
-  const [id, setId] = useState("");         // ✅ 추가 - 아이디 입력값 상태
-  const [password, setPassword] = useState(""); // ✅ 추가 - 비밀번호 입력값 상태
+  const [id, setId] = useState("");       // 아이디 입력값 상태
+  const [password, setPassword] = useState(""); // 비밀번호 입력값 상태
 
-  // ✅ 추가 - 로그인 버튼 클릭 시 백엔드로 요청
+  // 로그인 요청 함수
+  // Express 서버(/login)에 POST → 성공 시 세션 쿠키 발급
   const handleLogin = async () => {
     try {
       const response = await fetch("http://localhost:3000/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // ✅ 추가 - 쿠키 주고받기 위해 필수
+        credentials: "include", // 서버가 Set-Cookie로 sessionId를 내려줄 때 브라우저가 저장하도록 허용
         body: JSON.stringify({ id, password }),
       });
 
@@ -18,13 +27,14 @@ function LoginPage({ onLogin, onGoSignup }) {
 
       if (result.success) {
         alert("로그인 성공");
-        onLogin(); // ✅ 기존 - 부모한테 로그인 성공 알림
+        onLogin(); // App.jsx의 handleLogin 호출 → isLoggedIn = true, fetchRoutines, navigate("/")
       } else {
-        alert(result.message); // ✅ 추가 - 서버에서 받은 에러 메시지 표시
+        alert(result.message); // 서버에서 보낸 에러 메시지 표시 (예: "비밀번호가 틀렸습니다.")
       }
     } catch (error) {
-      console.error(error);
-      alert("서버 오류가 발생했습니다."); // ✅ 추가 - 서버 연결 실패 시
+      // 서버가 꺼져있거나 네트워크 오류 시
+      console.error("로그인 요청 실패:", error);
+      alert("서버 오류가 발생했습니다.");
     }
   };
 
@@ -35,21 +45,28 @@ function LoginPage({ onLogin, onGoSignup }) {
         <p className="login-subtitle">계정에 로그인하고 루틴을 시작해보세요.</p>
 
         <div className="login-form">
+          {/* 아이디 입력 - Enter 키로 로그인 실행 */}
           <input
             type="text"
             placeholder="아이디를 입력하세요"
-            value={id}                              // ✅ 추가 - 상태 연결
-            onChange={(e) => setId(e.target.value)} // ✅ 추가 - 입력값 변경 감지
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
           />
+
+          {/* 비밀번호 입력 - Enter 키로 로그인 실행 */}
           <input
             type="password"
             placeholder="비밀번호를 입력하세요"
-            value={password}                              // ✅ 추가 - 상태 연결
-            onChange={(e) => setPassword(e.target.value)} // ✅ 추가 - 입력값 변경 감지
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
           />
-          <button onClick={handleLogin}>로그인</button> {/* ✅ 변경 - onLogin → handleLogin */}
+
+          <button onClick={handleLogin}>로그인</button>
         </div>
 
+        {/* 회원가입 페이지 이동 링크 */}
         <p className="login-footer">
           아직 회원이 아니신가요?
           <span onClick={onGoSignup} style={{ cursor: "pointer" }}> 회원가입 </span>
