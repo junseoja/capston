@@ -92,9 +92,11 @@ button {
   color: white;
 }
 
-.home-action-btn {
-  width: 100%;
-  min-width: 180px;
+.home-action-btn:disabled,
+.proof-save-btn:disabled {
+  background-color: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
 }
 
 /* 아침, 점심, 저녁 시간 탭 전체 영역 */
@@ -254,9 +256,11 @@ button {
   padding: 6px 10px;
   border-radius: 999px;
 }
-
+/*인증 버튼 위치 잡기*/
 .home-detail-action {
   width: 100%;
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* 루틴 완료 후 완료 시간과 인증 내용을 감싸는 박스 */
