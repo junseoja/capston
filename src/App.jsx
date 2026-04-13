@@ -269,6 +269,7 @@ function App() {
         <div className="logo">Routine Mate 🌙 {month}월</div>
 
         <nav className="nav">
+          <h4>???님</h4>
           <button onClick={() => setPage("home")}>홈</button>
           <button onClick={() => setPage("routine")}>루틴</button>
           <button onClick={() => setPage("feed")}>피드</button>
