@@ -101,6 +101,13 @@ pip install -r requirements.txt
 uvicorn app:app --reload --port 8000
 ```
 
+```bash
+cd src/python_api
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\venv\Scripts\Activate.ps1
+python -m uvicorn app:app --reload --port 8000
+```
+
 ---
 
 ## 🗄 데이터베이스 테이블
