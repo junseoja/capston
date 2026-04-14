@@ -4,23 +4,23 @@ echo "🚀 서버 시작 중..."
 
 # FastAPI 실행
 echo "🐍 FastAPI 시작..."
-# cd /Users/sayongja/ProjectFile/capston-main/src/python_api
-cd /캡스톤/capston/src/python_api
+cd /Users/sayongja/ProjectFile/capston-main/src/python_api
+#cd /캡스톤/capston/src/python_api
 source venv/bin/activate
 uvicorn app:app --reload --port 8000 &
 FASTAPI_PID=$!
 
 # Express 실행
 echo "🟩 Express 시작..."
-# cd /Users/sayongja/ProjectFile/capston-main/src/backend
-cd /캡스톤/capston/src/backend
+cd /Users/sayongja/ProjectFile/capston-main/src/backend
+#cd /캡스톤/capston/src/backend
 node app.js &
 EXPRESS_PID=$!
 
 # React 실행
 echo "⚛️  React 시작..."
-#cd /Users/sayongja/ProjectFile/capston-main
-cd /캡스톤/capston
+cd /Users/sayongja/ProjectFile/capston-main
+#cd /캡스톤/capston
 npm run dev &
 REACT_PID=$!
 

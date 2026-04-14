@@ -34,9 +34,9 @@ def create_routine(body: RoutineCreate):
             new_uuid = uuid7str()  # 시간 기반 고유 routine_id 생성
             cursor.execute(
                 """INSERT INTO routines (routine_id, user_id, title, category, time_slot, routine_mode, goal, repeat_cycle, description)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (new_uuid, body.user_id, body.title, body.category, body.time_slot,
-                 body.routine_mode, body.goal, body.repeat_cycle, body.description)
+                body.routine_mode, body.goal, body.repeat_cycle, body.description)
             )
         conn.commit()
         return {"success": True}

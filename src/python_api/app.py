@@ -5,7 +5,7 @@
 
 from fastapi import FastAPI
 
-from routers import user, routine  # 유저/루틴 라우터 모듈
+from routers import user, routine, completion, feed, like, comment  # ✅ 추가
 
 app = FastAPI()
 
@@ -14,3 +14,8 @@ app.include_router(user.router)
 
 # 루틴 관련 라우터 등록: /routine/, /routine/{user_id}, /routine/{routine_id}
 app.include_router(routine.router)
+
+app.include_router(completion.router)  # ✅ 추가
+app.include_router(feed.router)        # ✅ 추가
+app.include_router(like.router)        # ✅ 추가
+app.include_router(comment.router)     # ✅ 추가

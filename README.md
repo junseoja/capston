@@ -104,6 +104,15 @@ uvicorn app:app --reload --port 8000
 ---
 
 ## 🗄 데이터베이스 테이블
+## 전체 테이블 관계도 
+users
+  ├── routines (1:N)
+  │     └── routine_completions (1:N)
+  │           └── feeds (1:1)
+  │                 ├── feed_images (1:N)
+  │                 ├── feed_likes (1:N)
+  │                 └── feed_comments (1:N)
+  └── feed_likes (1:N)
 
 ### users
 | 컬럼 | 타입 | 설명 |
@@ -138,8 +147,64 @@ uvicorn app:app --reload --port 8000
 | session_id | VARCHAR(255) | 세션 ID (UUID v4) |
 | user_id | VARCHAR(255) | 유저 FK |
 
----
+📋 테이블 명세서
 
+1. routine_completions (루틴 완료 기록)
+컬럼명|타입|NULL|KEY|기본값|설명
+completion_idCHAR(36)NOPRI-UUID v7 기본키
+routine_idCHAR(36)NOFK-루틴 외래키
+user_idCHAR(36)NOFK-유저 외래키
+completed_atDATETIMEYES-CURRENT_TIMESTAMP완료 시간
+proof_textTEXTYES-NULL상세 루틴 인증 글
+
+2. feeds (피드 게시글)
+컬럼명|타입|NULL|KEY|기본값|설명
+feed_idCHAR(36)NOPRI-UUID v7 기본키
+user_idCHAR(36)NOFK-유저 외래키
+routine_idCHAR(36)NOFK-루틴 외래키
+completion_idCHAR(36)NOFK-완료기록 외래키
+contentTEXTYES-NULL인증 글 내용
+created_atDATETIMEYES-CURRENT_TIMESTAMP작성 시간
+
+3. feed_images (피드 이미지/영상)
+컬럼명|타입|NULL|KEY|기본값|설명
+image_idCHAR(36)NOPRI-UUID v7 기본키
+feed_idCHAR(36)NOFK-피드 외래키
+file_urlTEXTNO--파일 저장 경로
+file_typeVARCHAR(50)YES-NULLimage/jpeg, video/mp4 등
+created_atDATETIMEYES-CURRENT_TIMESTAMP업로드 시간
+
+4. feed_likes (좋아요)
+컬럼명|타입|NULL|KEY|기본값|설명
+like_idCHAR(36)NOPRI-UUID v7 기본키
+feed_idCHAR(36)NOFK-피드 외래키
+user_idCHAR(36)NOFK-유저 외래키
+created_atDATETIMEYES-CURRENT_TIMESTAMP좋아요 시간
+-UNIQUE-UNI-(feed_id + user_id) 중복 방지
+
+5. feed_comments (댓글)
+컬럼명|타입|NULL|KEY|기본값|설명
+comment_idCHAR(36)NOPRI-UUID v7 기본키
+feed_idCHAR(36)NOFK-피드 외래키
+user_idCHAR(36)NOFK-유저 외래키
+contentTEXTNO--댓글 내용
+created_atDATETIMEYES-CURRENT_TIMESTAMP작성 시간
+
+---
+🔗 외래키 관계
+users ──────────────────────────────────┐
+  │                                     │
+  ├── routines                          │
+  │     └── routine_completions ────────┤
+  │               └── feeds ────────────┤
+  │                     ├── feed_images │
+  │                     ├── feed_likes ─┤
+  │                     └── feed_comments
+
+⚠️ 삭제 정책 (ON DELETE CASCADE)
+users 삭제       → 관련 모든 데이터 자동 삭제
+routines 삭제    → completions, feeds 자동 삭제
+feeds 삭제       → images, likes, comments 자동 삭제
 ## 📡 API 명세
 
 ### Express (:3000) - 인증
