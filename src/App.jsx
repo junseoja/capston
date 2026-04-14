@@ -143,10 +143,10 @@ function App() {
                 liked: false,
                 likeCount: 0,
                 commentCount: 0,
+                comments: [],
                 createdAt: dateText,
                 createdTime: timeText,
             }, ...prev]);
-
         }
     };
     // ── 피드 좋아요 토글 ─────────────────────────────────────────────────────
@@ -163,6 +163,59 @@ function App() {
                     likeCount: nextLiked
                         ? post.likeCount + 1
                         : Math.max(0, post.likeCount - 1),
+                };
+            })
+        );
+    };
+
+    // ── 피드 댓글 추가 ─────────────────────────────────────────────────────
+    const addFeedComment = (postId, commentText) => {
+        const trimmed = commentText.trim();
+        if (!trimmed) return;
+
+        // postId에 해당하는 게시물 찾아서 comments 배열에 새 댓글 추가
+        setFeedPosts((prev) =>
+            prev.map((post) => {
+                if (post.id !== postId) return post;
+
+                const nextComments = [
+                    ...(post.comments ?? []),
+                    {
+                        id: Date.now(),
+                        nickname: currentUser?.nickname ?? "나",
+                        content: trimmed,
+                        createdAt: new Date().toLocaleString("ko-KR", {
+                            month: "2-digit",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        }),
+                    },
+                ];
+
+                return {
+                    ...post,
+                    comments: nextComments,
+                    commentCount: nextComments.length,
+                };
+            })
+        );
+    };
+
+    // ── 피드 댓글 삭제 ─────────────────────────────────────────────────────
+    const deleteFeedComment = (postId, commentId) => {
+        setFeedPosts((prev) =>
+            prev.map((post) => {
+                if (post.id !== postId) return post;
+
+                const nextComments = (post.comments ?? []).filter(
+                    (comment) => comment.id !== commentId
+                );
+
+                return {
+                    ...post,
+                    comments: nextComments,
+                    commentCount: nextComments.length,
                 };
             })
         );
@@ -267,6 +320,9 @@ function App() {
                             ? <FeedPage
                                 feedPosts={feedPosts}
                                 onToggleLike={toggleFeedLike}
+                                onAddComment={addFeedComment}
+                                onDeleteComment={deleteFeedComment}
+                                currentUserNickname={currentUser?.nickname ?? ""}
                             />
                             : <Navigate to="/login" />
                         }
