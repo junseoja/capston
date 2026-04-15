@@ -203,7 +203,6 @@ AWS RDS MySQL
 
 ---
 
-## ✅ 구현 완료 기능
 
 ## ✅ 구현 완료 기능
 
@@ -283,7 +282,6 @@ AWS RDS MySQL
 - [ ] 닉네임 중복체크 → Express에서 FastAPI `/user/check/nickname` 연결
 - [ ] 세션 → Express 메모리 Map 대신 DB 저장 방식으로 전환 (FastAPI sessions API 준비 완료)
 - [ ] 비밀번호 bcrypt 해싱 적용
-- [ ] 댓글 및 하트 기능
 - [ ] 현재 루틴을 추가하면 인증한 루틴에 대한 표시가 전부 사라지는 버그 발생
 ---
 
