@@ -1,7 +1,27 @@
-// 앱 전체의 루트 컴포넌트
-// - 로그인 상태(isLoggedIn)를 전역으로 관리
-// - 루틴 데이터(routines)를 중앙에서 fetch하여 하위 컴포넌트에 전달 (단일 진실 공급원)
-// - react-router-dom의 Routes로 URL 기반 페이지 이동 처리
+// ============================================================
+// App.jsx - 앱 루트 컴포넌트
+// ============================================================
+// 역할:
+//   - 로그인 상태(isLoggedIn)를 전역으로 관리
+//   - 루틴 데이터(routines)를 중앙에서 fetch하여 하위 컴포넌트에 props로 전달
+//     (단일 진실 공급원 패턴 - Single Source of Truth)
+//   - 피드 게시물(feedPosts)을 메모리에서 관리 (추후 API 연결 예정)
+//   - react-router-dom의 Routes로 URL 기반 페이지 이동 처리
+//
+// 상태 구조:
+//   isLoggedIn  : 로그인 여부 (true/false)
+//   routines    : 백엔드에서 fetch한 루틴 배열 (필드명 변환 적용)
+//   feedPosts   : 상세 루틴 인증 시 "피드 업로드" 체크한 게시물 배열 (메모리)
+//   currentUser : 현재 로그인한 유저 정보 (nickname 등)
+//
+// 라우트 구조:
+//   /login  → LoginPage  (비로그인 전용)
+//   /signup → SignupPage (비로그인 전용)
+//   /       → HomePage   (로그인 전용)
+//   /routine → RoutinePage (로그인 전용)
+//   /feed   → FeedPage   (로그인 전용)
+//   /mypage → MyPage     (로그인 전용)
+// ============================================================
 
 import { useState, useCallback } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
@@ -15,46 +35,64 @@ import SignupPage from "./SignupPage";
 
 function App() {
     // useNavigate: URL 이동을 프로그래밍적으로 처리 (예: 로그인 후 "/" 로 이동)
+    // BrowserRouter 내부에서만 사용 가능 (main.jsx에서 감싸줌)
     const navigate = useNavigate();
 
-    // 로그인 여부 상태 - true면 메인 앱, false면 로그인/회원가입 화면 표시
+    // ── 전역 상태 ────────────────────────────────────────────────────────────
+
+    // 로그인 여부 - true면 메인 앱, false면 로그인/회원가입 화면 표시
     const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-    // 루틴 목록 상태 - 백엔드에서 fetch한 뒤 필드명 변환하여 저장
-    // HomePage, RoutinePage에 props로 전달하여 동일 데이터 공유
+    // 루틴 목록 - 백엔드에서 fetch 후 DB 컬럼명 → 컴포넌트 필드명으로 변환하여 저장
+    // HomePage, RoutinePage에 props로 전달하여 동일 데이터 공유 (중복 fetch 방지)
     const [routines, setRoutines] = useState([]);
 
-    // 피드 게시물 상태 - 상세 루틴 인증 시 "피드 업로드" 체크하면 추가됨
+    // 피드 게시물 - 상세 루틴 인증 시 "피드 업로드" 체크하면 추가됨
+    // NOTE: 현재 메모리에만 저장 → 새로고침 시 초기화됨 (추후 백엔드 연결 예정)
     const [feedPosts, setFeedPosts] = useState([]);
+
+    // 현재 로그인한 유저 정보 (GET /me 응답: { user_id, login_id, nickname, ... })
     const [currentUser, setCurrentUser] = useState(null);
 
-    // 상단바에 표시할 현재 월
+    // 상단바에 표시할 현재 월 (예: "6월")
     const today = new Date();
-    const month = today.getMonth() + 1;
+    const month = today.getMonth() + 1; // getMonth()는 0-indexed이므로 +1
 
-    // ── 루틴 데이터 fetch ──────────────────────────────────────────────────────
-    // useCallback: 함수 재생성 방지 (RoutinePage에 props로 넘길 때 불필요한 리렌더 방지)
+    // ── 루틴 데이터 fetch ─────────────────────────────────────────────────────
+
+    /**
+     * fetchRoutines - Express /routine에서 루틴 목록을 가져와 상태 업데이트
+     *
+     * useCallback으로 메모이제이션:
+     *   RoutinePage에 onRoutineChange 콜백 props로 전달할 때 불필요한 리렌더 방지
+     *   의존성 배열 []이므로 컴포넌트 생명주기 동안 동일한 함수 참조 유지
+     *
+     * 필드 매핑 (DB 컬럼명 → 컴포넌트 prop 이름):
+     *   routine_id   → id
+     *   time_slot    → time
+     *   routine_mode → routineMode
+     *   repeat_cycle → repeat
+     */
     const fetchRoutines = useCallback(async () => {
         try {
             const res = await fetch("http://localhost:3000/routine", {
-                credentials: "include", // 쿠키(세션ID)를 요청에 포함 → 로그인 인증
+                credentials: "include", // 쿠키(sessionId)를 요청에 포함 → 로그인 인증
             });
             const data = await res.json();
 
             if (data.success) {
                 // DB 컬럼명을 컴포넌트에서 쓰기 편한 이름으로 변환 (필드 매핑)
-                // DB: routine_id, time_slot, routine_mode, repeat_cycle
-                // 컴포넌트: id, time, routineMode, repeat
                 const mapped = data.routines.map((r) => ({
-                    id: r.routine_id,           // 루틴 고유 ID
-                    title: r.title,             // 루틴 제목
-                    category: r.category,       // 카테고리 (운동, 공부 등)
-                    time: r.time_slot,          // 시간대 (morning / lunch / dinner)
-                    routineMode: r.routine_mode, // 완료 방식 (check / detail)
-                    goal: r.goal,               // 목표 시간 (예: "07:30")
-                    repeat: r.repeat_cycle,     // 반복 주기 (예: "월, 수, 금" 또는 "매일")
-                    description: r.description, // 루틴 설명
-                    // 아래는 프론트에서만 쓰는 완료 관련 상태 (DB에 없음, 추후 연결 예정)
+                    id: r.routine_id,            // 루틴 고유 ID (UUID v7)
+                    title: r.title,              // 루틴 제목
+                    category: r.category,        // 카테고리 (운동, 공부 등)
+                    time: r.time_slot,           // 시간대 ("morning" / "lunch" / "dinner")
+                    routineMode: r.routine_mode, // 완료 방식 ("check" / "detail")
+                    goal: r.goal,                // 목표 시간 문자열 (예: "07:30")
+                    repeat: r.repeat_cycle,      // 반복 주기 (예: "월, 수, 금" 또는 "매일")
+                    description: r.description,  // 루틴 설명
+                    // 아래 필드는 DB에 없고 프론트에서만 관리하는 완료 상태
+                    // TODO: 추후 GET /completion/today/{user_id} API 연결 후 초기값 설정
                     completed: false,
                     completedAt: "",
                     proofText: "",
@@ -63,127 +101,218 @@ function App() {
                 setRoutines(mapped);
             }
         } catch (error) {
+            // 서버 꺼짐, 네트워크 오류 등
             console.error("루틴 fetch 실패:", error);
         }
-    }, []);
+    }, []); // 의존성 없음 → 첫 렌더링 시 한 번만 함수 생성
 
-    // ── 로그인 처리 ────────────────────────────────────────────────────────────
-    // LoginPage에서 로그인 성공 콜백으로 호출됨
-    // 로그인 상태 전환 → 루틴 fetch → 홈("/")으로 이동
+    // ── 유저 정보 fetch ───────────────────────────────────────────────────────
+
+    /**
+     * fetchCurrentUser - GET /me로 현재 로그인한 유저 정보를 가져와 상태 업데이트
+     *
+     * 로그인 직후 호출하여 currentUser 상태를 채움
+     * currentUser.nickname은 피드 게시물 작성자 이름으로 사용됨
+     */
     const fetchCurrentUser = useCallback(async () => {
         try {
             const res = await fetch("http://localhost:3000/me", {
-                credentials: "include",
+                credentials: "include", // 세션 쿠키 포함
             });
             const data = await res.json();
 
             if (data.success) {
-                setCurrentUser(data.user);
+                setCurrentUser(data.user); // { user_id, login_id, nickname, ... }
                 return data.user;
             }
         } catch (error) {
-            console.error("?좎? ?뺣낫 fetch ?ㅽ뙣:", error);
+            console.error("유저 정보 fetch 실패:", error);
         }
 
+        // fetch 실패 또는 비로그인 상태
         setCurrentUser(null);
         return null;
-    }, []);
+    }, []); // 의존성 없음
 
-    // 로그인 성공 시 상태 업데이트 및 루틴 데이터 fetch 후 홈으로 이동
+    // ── 로그인 처리 ───────────────────────────────────────────────────────────
+
+    /**
+     * handleLogin - LoginPage에서 로그인 성공 콜백으로 호출됨
+     *
+     * 처리 순서:
+     *   1. 로그인 상태 전환 (isLoggedIn = true)
+     *   2. 현재 유저 정보 fetch (currentUser 채움)
+     *   3. 루틴 목록 fetch
+     *   4. 홈("/")으로 이동
+     */
     const handleLogin = async () => {
         setIsLoggedIn(true);
-        await fetchCurrentUser(); // 로그인한 유저 정보 fetch
-        await fetchRoutines(); // 루틴 데이터 fetch
+        await fetchCurrentUser(); // 로그인한 유저 정보 fetch (닉네임 등)
+        await fetchRoutines();    // 루틴 데이터 fetch (홈 화면 표시용)
         navigate("/");
     };
 
+    // ── 루틴 완료 처리 (체크 모드) ────────────────────────────────────────────
 
-    // ── 루틴 완료 처리 (체크 모드) ─────────────────────────────────────────────
-    // 체크 루틴: 버튼 클릭 한 번으로 완료 처리, 현재 시간을 completedAt에 저장
-    // 추후 백엔드 완료 저장 API 연결 예정
+    /**
+     * completeCheckRoutine - 체크 루틴 완료 처리
+     *
+     * 체크 루틴: 버튼 클릭 한 번으로 즉시 완료 처리
+     * 완료 시간을 "HH:MM" 형식으로 기록 (한국어 24시간제)
+     *
+     * TODO: 추후 POST /completion API 연결 후 DB에 완료 기록 저장
+     *
+     * @param {string} id - 완료할 루틴의 UUID v7
+     */
     const completeCheckRoutine = (id) => {
         const now = new Date();
         const timeText = now.toLocaleTimeString("ko-KR", {
-            hour: "2-digit", minute: "2-digit", hour12: false,
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false, // 24시간제 (예: "09:30", "21:00")
         });
-        // 해당 id의 루틴만 completed: true 로 변경, 나머지는 그대로
+
+        // 해당 id의 루틴만 completed: true로 변경, 나머지는 그대로 (불변성 유지)
         setRoutines((prev) =>
-            prev.map((r) => r.id === id ? { ...r, completed: true, completedAt: timeText } : r)
+            prev.map((r) =>
+                r.id === id
+                    ? { ...r, completed: true, completedAt: timeText }
+                    : r
+            )
         );
     };
 
-    // ── 루틴 완료 처리 (상세 모드) ─────────────────────────────────────────────
-    // 상세 루틴: 인증 글(proofText) + 파일(proofFiles) + 피드 업로드 여부(uploadToFeed)를 받아 처리
+    // ── 루틴 완료 처리 (상세 모드) ────────────────────────────────────────────
+
+    /**
+     * completeDetailRoutine - 상세 루틴 완료 처리
+     *
+     * 상세 루틴: 인증 글(proofText) + 파일(proofFiles) + 피드 업로드 여부를 받아 처리
+     * "피드에도 업로드하기" 체크 시 feedPosts에 새 게시물 추가
+     *
+     * TODO: 추후 POST /completion, POST /feed API 연결 후 DB에 저장
+     *
+     * @param {string} id          - 완료할 루틴의 UUID v7
+     * @param {string} proofText   - 인증 글 (최대 200자)
+     * @param {Array}  proofFiles  - 첨부 파일 배열 [{ name, type, url }]
+     * @param {boolean} uploadToFeed - 피드 업로드 여부
+     */
     const completeDetailRoutine = (id, proofText, proofFiles, uploadToFeed) => {
         const now = new Date();
-        const timeText = now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
-        const dateText = now.toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" });
+        const timeText = now.toLocaleTimeString("ko-KR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+        });
+        const dateText = now.toLocaleDateString("ko-KR", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+        });
 
-        // 피드에 올릴 루틴 정보를 미리 찾아둠 (setRoutines 이후엔 변경 전 값 필요)
+        // setRoutines 이후에는 이전 값 접근이 어려우므로 미리 루틴 정보를 찾아둠
         const targetRoutine = routines.find((r) => r.id === id);
 
         // 루틴 완료 상태 및 인증 데이터 저장
         setRoutines((prev) =>
-            prev.map((r) => r.id === id
-                ? { ...r, completed: true, completedAt: timeText, proofText, proofFiles }
-                : r
+            prev.map((r) =>
+                r.id === id
+                    ? { ...r, completed: true, completedAt: timeText, proofText, proofFiles }
+                    : r
             )
         );
 
-        // "피드에 업로드" 체크했을 때 feedPosts에 게시물 추가
+        // "피드에 업로드" 체크했을 때 feedPosts 배열 앞에 새 게시물 추가 (최신이 맨 위)
         if (uploadToFeed && targetRoutine) {
-            setFeedPosts((prev) => [{
-                id: Date.now(),
-                routineId: id,
-                nickname: currentUser?.nickname ?? "나",
-                routineTitle: targetRoutine.title,
-                category: targetRoutine.category,
-                content: proofText,
-                files: proofFiles,
-                liked: false,
-                likeCount: 0,
-                commentCount: 0,
-                createdAt: dateText,
-                createdTime: timeText,
-            }, ...prev]);
-
+            setFeedPosts((prev) => [
+                {
+                    id: Date.now(),                           // 임시 ID (추후 DB의 feed_id로 교체)
+                    routineId: id,                            // 완료 취소 시 피드 삭제에 사용
+                    nickname: currentUser?.nickname ?? "나",  // 옵셔널 체이닝으로 null 안전 접근
+                    routineTitle: targetRoutine.title,
+                    category: targetRoutine.category,
+                    content: proofText,
+                    files: proofFiles,
+                    liked: false,
+                    likeCount: 0,
+                    commentCount: 0,
+                    createdAt: dateText,
+                    createdTime: timeText,
+                },
+                ...prev, // 기존 게시물들은 뒤에 배치 (최신 게시물이 먼저)
+            ]);
         }
     };
-    // ── 피드 좋아요 토글 ─────────────────────────────────────────────────────
+
+    // ── 피드 좋아요 토글 ──────────────────────────────────────────────────────
+
+    /**
+     * toggleFeedLike - 피드 게시물 좋아요 토글
+     *
+     * liked 상태를 반전시키고 likeCount를 1 증감
+     * Math.max(0, ...) 으로 likeCount가 음수가 되지 않도록 보호
+     *
+     * TODO: 추후 POST /like API 연결 후 DB에 좋아요 상태 저장
+     *
+     * @param {number} postId - 좋아요 토글할 게시물 ID (Date.now() 값)
+     */
     const toggleFeedLike = (postId) => {
         setFeedPosts((prev) =>
             prev.map((post) => {
-                if (post.id !== postId) return post;
+                if (post.id !== postId) return post; // 대상 아닌 게시물은 그대로
 
                 const nextLiked = !post.liked;
-
                 return {
                     ...post,
                     liked: nextLiked,
                     likeCount: nextLiked
                         ? post.likeCount + 1
-                        : Math.max(0, post.likeCount - 1),
+                        : Math.max(0, post.likeCount - 1), // 0 미만으로 내려가지 않도록
                 };
             })
         );
     };
 
+    // ── 루틴 완료 취소 ────────────────────────────────────────────────────────
 
-    // ── 루틴 완료 취소 ─────────────────────────────────────────────────────────
-    // 완료된 루틴을 미완료 상태로 되돌리고, 피드에 올린 게시물도 함께 삭제
+    /**
+     * cancelRoutineCompletion - 루틴 완료 취소
+     *
+     * 완료된 루틴을 미완료 상태로 되돌리고,
+     * 해당 루틴으로 올라간 피드 게시물도 함께 삭제
+     *
+     * TODO: 추후 DELETE /completion/{completion_id} API 연결
+     *
+     * @param {string} id - 완료 취소할 루틴의 UUID v7
+     */
     const cancelRoutineCompletion = (id) => {
+        // 루틴 완료 상태 초기화
         setRoutines((prev) =>
-            prev.map((r) => r.id === id
-                ? { ...r, completed: false, completedAt: "", proofText: "", proofFiles: [] }
-                : r
+            prev.map((r) =>
+                r.id === id
+                    ? { ...r, completed: false, completedAt: "", proofText: "", proofFiles: [] }
+                    : r
             )
         );
-        // 해당 루틴으로 올라간 피드 게시물도 함께 제거
+
+        // 해당 루틴으로 업로드된 피드 게시물도 함께 제거
+        // routineId로 필터링하여 연관 게시물만 삭제
         setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
     };
 
     // ── 로그아웃 처리 ─────────────────────────────────────────────────────────
-    // 백엔드에 로그아웃 요청 → 세션 쿠키 삭제 → 상태 초기화 → 로그인 페이지로 이동
+
+    /**
+     * handleLogout - 로그아웃 처리
+     *
+     * 처리 순서:
+     *   1. Express POST /logout 요청 → DB에서 세션 삭제 + 쿠키 제거
+     *   2. 프론트 상태 초기화 (isLoggedIn, routines, feedPosts, currentUser)
+     *   3. 로그인 페이지("/login")로 이동
+     *
+     * NOTE: 2단계는 서버 요청 실패 시에도 수행 (try/catch 구조)
+     *       → 서버가 꺼져있어도 프론트에서는 로그아웃됨
+     */
     const handleLogout = async () => {
         try {
             await fetch("http://localhost:3000/logout", {
@@ -192,20 +321,29 @@ function App() {
             });
         } catch (error) {
             console.error("로그아웃 요청 실패:", error);
+            // 서버 오류여도 프론트 상태는 초기화 진행
         }
+
+        // 프론트 상태 초기화 (다른 유저가 로그인해도 이전 데이터 보이지 않도록)
         setIsLoggedIn(false);
-        setRoutines([]); // 루틴 데이터 초기화 (다른 유저가 로그인해도 이전 데이터 안 보이도록)
+        setRoutines([]);
+        setFeedPosts([]);
+        setCurrentUser(null);
         navigate("/login");
     };
+
+    // ── 렌더링 ────────────────────────────────────────────────────────────────
 
     return (
         <div className="app">
             {/* 로그인 상태일 때만 상단 네비게이션 바 표시 */}
             {isLoggedIn && (
                 <header className="topbar">
+                    {/* 로고 + 현재 월 표시 */}
                     <div className="logo">Routine Mate 🌙 {month}월</div>
+
                     <nav className="nav">
-                        {/* navigate()로 URL 변경 → 브라우저 히스토리에 쌓임 → 뒤로가기 동작 */}
+                        {/* navigate()로 URL 변경 → 브라우저 히스토리에 쌓임 → 뒤로가기 가능 */}
                         <button onClick={() => navigate("/")}>홈</button>
                         <button onClick={() => navigate("/routine")}>루틴</button>
                         <button onClick={() => navigate("/feed")}>피드</button>
@@ -217,73 +355,80 @@ function App() {
 
             <main className="page-container">
                 <Routes>
-                    {/* 로그인 페이지: 비로그인 상태면 표시, 이미 로그인 중이면 홈으로 리다이렉트 */}
+                    {/* 로그인 페이지: 비로그인이면 표시, 이미 로그인 중이면 홈으로 리다이렉트 */}
                     <Route
                         path="/login"
-                        element={!isLoggedIn
-                            ? <LoginPage onLogin={handleLogin} onGoSignup={() => navigate("/signup")} />
-                            : <Navigate to="/" />
+                        element={
+                            !isLoggedIn
+                                ? <LoginPage
+                                    onLogin={handleLogin}           // 로그인 성공 콜백
+                                    onGoSignup={() => navigate("/signup")} // 회원가입 페이지 이동
+                                  />
+                                : <Navigate to="/" />              // 이미 로그인 → 홈으로
                         }
                     />
 
-                    {/* 회원가입 페이지: 비로그인 상태면 표시, 이미 로그인 중이면 홈으로 리다이렉트 */}
+                    {/* 회원가입 페이지: 비로그인이면 표시, 이미 로그인 중이면 홈으로 리다이렉트 */}
                     <Route
                         path="/signup"
-                        element={!isLoggedIn
-                            ? <SignupPage onBackToLogin={() => navigate("/login")} />
-                            : <Navigate to="/" />
+                        element={
+                            !isLoggedIn
+                                ? <SignupPage onBackToLogin={() => navigate("/login")} />
+                                : <Navigate to="/" />
                         }
                     />
 
-                    {/* 홈 페이지: 로그인 상태면 표시, 비로그인이면 로그인 페이지로 리다이렉트
-                        routines를 props로 내려줌으로써 RoutinePage와 동일한 데이터를 공유 */}
+                    {/* 홈 페이지: 로그인이면 표시, 비로그인이면 로그인으로 리다이렉트
+                        routines를 props로 내려줌으로써 RoutinePage와 동일한 데이터 공유 */}
                     <Route
                         path="/"
-                        element={isLoggedIn
-                            ? <HomePage
-                                routines={routines}              // 중앙 fetch된 루틴 데이터
-                                onCompleteCheck={completeCheckRoutine}    // 체크 루틴 완료 핸들러
-                                onCompleteDetail={completeDetailRoutine}  // 상세 루틴 완료 핸들러
-                                onCancelComplete={cancelRoutineCompletion} // 완료 취소 핸들러
-                            />
-                            : <Navigate to="/login" />
+                        element={
+                            isLoggedIn
+                                ? <HomePage
+                                    routines={routines}                       // 중앙에서 fetch된 루틴 데이터
+                                    onCompleteCheck={completeCheckRoutine}    // 체크 루틴 완료 핸들러
+                                    onCompleteDetail={completeDetailRoutine}  // 상세 루틴 완료 핸들러
+                                    onCancelComplete={cancelRoutineCompletion} // 완료 취소 핸들러
+                                  />
+                                : <Navigate to="/login" />
                         }
                     />
 
-                    {/* 루틴 관리 페이지: 루틴 추가/삭제 후 App의 routines 상태를 갱신하도록
-                        onRoutineChange(fetchRoutines)를 전달 */}
+                    {/* 루틴 관리 페이지: 루틴 추가/삭제 후 App의 routines 상태도 갱신
+                        onRoutineChange = fetchRoutines 를 콜백으로 전달 */}
                     <Route
                         path="/routine"
-                        element={isLoggedIn
-                            ? <RoutinePage onRoutineChange={fetchRoutines} />
-                            : <Navigate to="/login" />
+                        element={
+                            isLoggedIn
+                                ? <RoutinePage onRoutineChange={fetchRoutines} />
+                                : <Navigate to="/login" />
                         }
                     />
 
-                    {/* 피드 페이지: 상세 루틴 인증 시 "피드 업로드" 체크한 게시물 표시 */}
+                    {/* 피드 페이지: 현재는 메모리의 feedPosts 표시 (추후 API 연결 예정) */}
                     <Route
                         path="/feed"
-                        element={isLoggedIn
-                            ? <FeedPage
-                                feedPosts={feedPosts}
-                                onToggleLike={toggleFeedLike}
-                            />
-                            : <Navigate to="/login" />
+                        element={
+                            isLoggedIn
+                                ? <FeedPage
+                                    feedPosts={feedPosts}
+                                    onToggleLike={toggleFeedLike}
+                                  />
+                                : <Navigate to="/login" />
                         }
                     />
 
-
-                    {/* 마이페이지: 추후 백엔드 연결 예정 */}
+                    {/* 마이페이지: MyPage 내부에서 직접 /me, /routine API 호출 */}
                     <Route
                         path="/mypage"
-                        element={isLoggedIn
-                            ? <MyPage />
-                            : <Navigate to="/login" />
-                        }
+                        element={isLoggedIn ? <MyPage /> : <Navigate to="/login" />}
                     />
 
                     {/* 정의되지 않은 URL 접근 시 상태에 따라 홈 또는 로그인으로 리다이렉트 */}
-                    <Route path="*" element={<Navigate to={isLoggedIn ? "/" : "/login"} />} />
+                    <Route
+                        path="*"
+                        element={<Navigate to={isLoggedIn ? "/" : "/login"} />}
+                    />
                 </Routes>
             </main>
         </div>
