@@ -19,7 +19,7 @@
 //   (동일 API를 두 번 호출하는 이유: 필드 매핑이 다르기 때문 - DB 원본 vs 매핑됨)
 // ============================================================
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 function RoutinePage({ onRoutineChange }) {
     // 이 페이지에서 표시할 루틴 목록
@@ -40,14 +40,6 @@ function RoutinePage({ onRoutineChange }) {
     // 요일 선택 버튼 목록 (월요일부터 시작)
     const weekDays = ["월", "화", "수", "목", "금", "토", "일"];
 
-    // ── 초기 데이터 로드 ──────────────────────────────────────────────────────
-
-    // 컴포넌트 마운트 시 루틴 목록 한 번 로드
-    // 의존성 배열 [] → 마운트 시 1회 실행
-    useEffect(() => {
-        fetchRoutines();
-    }, []);
-
     // ── API 호출 함수 ─────────────────────────────────────────────────────────
 
     /**
@@ -57,7 +49,7 @@ function RoutinePage({ onRoutineChange }) {
      * 여기서는 DB 컬럼명 그대로 저장 (필드 매핑 없음)
      * 이 페이지에서는 routine_id, time_slot 등 원본 컬럼명으로 렌더링
      */
-    const fetchRoutines = async () => {
+    const fetchRoutines = useCallback(async () => {
         try {
             const res = await fetch("http://localhost:3000/routine", {
                 credentials: "include", // 세션 쿠키 포함 → 로그인한 유저의 루틴만 반환
@@ -69,7 +61,21 @@ function RoutinePage({ onRoutineChange }) {
         } catch (error) {
             console.error("루틴 목록 조회 실패:", error);
         }
-    };
+    }, []);
+
+    // ── 초기 데이터 로드 ──────────────────────────────────────────────────────
+
+    // [수정] fetchRoutines 선언 이후에 useEffect에서 호출하도록 순서를 정리
+    // React Hooks lint에서 "선언 전 참조" 경고가 나지 않도록 배치 변경
+    useEffect(() => {
+        // [수정] effect 본문에서 직접 setState가 일어나는 함수를 즉시 호출하지 않고,
+        // 비동기 초기화 함수 안에서 루틴 로드를 수행하여 React Hooks lint 규칙에 맞춤
+        const loadInitialRoutines = async () => {
+            await fetchRoutines();
+        };
+
+        loadInitialRoutines();
+    }, [fetchRoutines]);
 
     // ── 유틸리티 함수 ─────────────────────────────────────────────────────────
 

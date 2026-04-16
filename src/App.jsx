@@ -23,7 +23,7 @@
 //   /mypage → MyPage     (로그인 전용)
 // ============================================================
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import "./App.css";
 import HomePage from "./HomePage";
@@ -54,6 +54,10 @@ function App() {
     // 현재 로그인한 유저 정보 (GET /me 응답: { user_id, login_id, nickname, ... })
     const [currentUser, setCurrentUser] = useState(null);
 
+    // [추가] 앱 시작 시 세션 복구(/me) 여부가 확인되기 전에는
+    // 라우트 리다이렉트를 바로 수행하지 않기 위한 플래그
+    const [authChecked, setAuthChecked] = useState(false);
+
     // 상단바에 표시할 현재 월 (예: "6월")
     const today = new Date();
     const month = today.getMonth() + 1; // getMonth()는 0-indexed이므로 +1
@@ -72,17 +76,40 @@ function App() {
      *   time_slot    → time
      *   routine_mode → routineMode
      *   repeat_cycle → repeat
+     *
+     * [수정] 이제 루틴 목록만 가져오지 않고
+     * GET /completion/today도 함께 읽어서 오늘 완료 상태를 복원함.
      */
     const fetchRoutines = useCallback(async () => {
         try {
-            const res = await fetch("http://localhost:3000/routine", {
-                credentials: "include", // 쿠키(sessionId)를 요청에 포함 → 로그인 인증
-            });
-            const data = await res.json();
+            const [routineRes, completionRes] = await Promise.all([
+                fetch("http://localhost:3000/routine", {
+                    credentials: "include", // 쿠키(sessionId)를 요청에 포함 → 로그인 인증
+                }),
+                fetch("http://localhost:3000/completion/today", {
+                    credentials: "include",
+                }),
+            ]);
 
-            if (data.success) {
+            const [routineData, completionData] = await Promise.all([
+                routineRes.json(),
+                completionRes.json(),
+            ]);
+
+            if (routineData.success) {
+                // [추가] 오늘 완료 기록을 routine_id 기준으로 빠르게 찾기 위해 Map 구성
+                const completionMap = new Map(
+                    (completionData.success ? completionData.completions : []).map((completion) => [
+                        completion.routine_id,
+                        completion,
+                    ])
+                );
+
                 // DB 컬럼명을 컴포넌트에서 쓰기 편한 이름으로 변환 (필드 매핑)
-                const mapped = data.routines.map((r) => ({
+                const mapped = routineData.routines.map((r) => {
+                    const todayCompletion = completionMap.get(r.routine_id);
+
+                    return {
                     id: r.routine_id,            // 루틴 고유 ID (UUID v7)
                     title: r.title,              // 루틴 제목
                     category: r.category,        // 카테고리 (운동, 공부 등)
@@ -91,13 +118,21 @@ function App() {
                     goal: r.goal,                // 목표 시간 문자열 (예: "07:30")
                     repeat: r.repeat_cycle,      // 반복 주기 (예: "월, 수, 금" 또는 "매일")
                     description: r.description,  // 루틴 설명
-                    // 아래 필드는 DB에 없고 프론트에서만 관리하는 완료 상태
-                    // TODO: 추후 GET /completion/today/{user_id} API 연결 후 초기값 설정
-                    completed: false,
-                    completedAt: "",
-                    proofText: "",
+                    // [수정] 완료 상태는 프론트 메모리 기본값이 아니라
+                    // /completion/today 응답으로부터 복원
+                    completed: Boolean(todayCompletion),
+                    completionId: todayCompletion?.completion_id ?? null,
+                    completedAt: todayCompletion
+                        ? new Date(todayCompletion.completed_at).toLocaleTimeString("ko-KR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: false,
+                        })
+                        : "",
+                    proofText: todayCompletion?.proof_text ?? "",
                     proofFiles: [],
-                }));
+                };
+                });
                 setRoutines(mapped);
             }
         } catch (error) {
@@ -134,6 +169,34 @@ function App() {
         return null;
     }, []); // 의존성 없음
 
+    // ── 앱 시작 시 세션 복구 ───────────────────────────────────────────────────
+
+    /**
+     * [추가] 앱 첫 진입/새로고침 시 세션 쿠키로 로그인 상태를 복구.
+     * /me 성공 시 현재 유저 + 루틴/오늘 완료 내역까지 함께 로드한 뒤
+     * 그 다음에 보호 라우트 렌더링을 허용함.
+     */
+    useEffect(() => {
+        const bootstrapAuth = async () => {
+            try {
+                const user = await fetchCurrentUser();
+
+                if (user) {
+                    setIsLoggedIn(true);
+                    await fetchRoutines();
+                } else {
+                    setIsLoggedIn(false);
+                    setRoutines([]);
+                    setFeedPosts([]);
+                }
+            } finally {
+                setAuthChecked(true);
+            }
+        };
+
+        bootstrapAuth();
+    }, [fetchCurrentUser, fetchRoutines]);
+
     // ── 로그인 처리 ───────────────────────────────────────────────────────────
 
     /**
@@ -164,7 +227,7 @@ function App() {
      *
      * @param {string} id - 완료할 루틴의 UUID v7
      */
-    const completeCheckRoutine = (id) => {
+    const completeCheckRoutine = async (id) => {
         const now = new Date();
         const timeText = now.toLocaleTimeString("ko-KR", {
             hour: "2-digit",
@@ -172,14 +235,45 @@ function App() {
             hour12: false, // 24시간제 (예: "09:30", "21:00")
         });
 
-        // 해당 id의 루틴만 completed: true로 변경, 나머지는 그대로 (불변성 유지)
-        setRoutines((prev) =>
-            prev.map((r) =>
-                r.id === id
-                    ? { ...r, completed: true, completedAt: timeText }
-                    : r
-            )
-        );
+        try {
+            // [추가] 완료 버튼 클릭 시 실제 백엔드 POST /completion에 저장
+            const res = await fetch("http://localhost:3000/completion", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                    routine_id: id,
+                    proof_text: "",
+                }),
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                alert(data.message || "루틴 완료 저장에 실패했습니다.");
+                return false;
+            }
+
+            // 해당 id의 루틴만 completed: true로 변경, 나머지는 그대로 (불변성 유지)
+            setRoutines((prev) =>
+                prev.map((r) =>
+                    r.id === id
+                        ? {
+                            ...r,
+                            completed: true,
+                            completionId: data.completion_id,
+                            completedAt: timeText,
+                            proofText: "",
+                            proofFiles: [],
+                        }
+                        : r
+                )
+            );
+            return true;
+        } catch (error) {
+            console.error("체크 루틴 완료 저장 실패:", error);
+            alert("서버 오류가 발생했습니다.");
+            return false;
+        }
     };
 
     // ── 루틴 완료 처리 (상세 모드) ────────────────────────────────────────────
@@ -197,7 +291,7 @@ function App() {
      * @param {Array}  proofFiles  - 첨부 파일 배열 [{ name, type, url }]
      * @param {boolean} uploadToFeed - 피드 업로드 여부
      */
-    const completeDetailRoutine = (id, proofText, proofFiles, uploadToFeed) => {
+    const completeDetailRoutine = async (id, proofText, proofFiles, uploadToFeed) => {
         const now = new Date();
         const timeText = now.toLocaleTimeString("ko-KR", {
             hour: "2-digit",
@@ -213,34 +307,65 @@ function App() {
         // setRoutines 이후에는 이전 값 접근이 어려우므로 미리 루틴 정보를 찾아둠
         const targetRoutine = routines.find((r) => r.id === id);
 
-        // 루틴 완료 상태 및 인증 데이터 저장
-        setRoutines((prev) =>
-            prev.map((r) =>
-                r.id === id
-                    ? { ...r, completed: true, completedAt: timeText, proofText, proofFiles }
-                    : r
-            )
-        );
+        try {
+            // [추가] 상세 루틴도 동일하게 백엔드 POST /completion에 저장
+            const res = await fetch("http://localhost:3000/completion", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                    routine_id: id,
+                    proof_text: proofText,
+                }),
+            });
+            const data = await res.json();
 
-        // "피드에 업로드" 체크했을 때 feedPosts 배열 앞에 새 게시물 추가 (최신이 맨 위)
-        if (uploadToFeed && targetRoutine) {
-            setFeedPosts((prev) => [
-                {
-                    id: Date.now(),                           // 임시 ID (추후 DB의 feed_id로 교체)
-                    routineId: id,                            // 완료 취소 시 피드 삭제에 사용
-                    nickname: currentUser?.nickname ?? "나",  // 옵셔널 체이닝으로 null 안전 접근
-                    routineTitle: targetRoutine.title,
-                    category: targetRoutine.category,
-                    content: proofText,
-                    files: proofFiles,
-                    liked: false,
-                    likeCount: 0,
-                    commentCount: 0,
-                    createdAt: dateText,
-                    createdTime: timeText,
-                },
-                ...prev, // 기존 게시물들은 뒤에 배치 (최신 게시물이 먼저)
-            ]);
+            if (!data.success) {
+                alert(data.message || "상세 루틴 완료 저장에 실패했습니다.");
+                return false;
+            }
+
+            // 루틴 완료 상태 및 인증 데이터 저장
+            setRoutines((prev) =>
+                prev.map((r) =>
+                    r.id === id
+                        ? {
+                            ...r,
+                            completed: true,
+                            completionId: data.completion_id,
+                            completedAt: timeText,
+                            proofText,
+                            proofFiles,
+                        }
+                        : r
+                )
+            );
+
+            // "피드에 업로드" 체크했을 때 feedPosts 배열 앞에 새 게시물 추가 (최신이 맨 위)
+            if (uploadToFeed && targetRoutine) {
+                setFeedPosts((prev) => [
+                    {
+                        id: Date.now(),                           // 임시 ID (추후 DB의 feed_id로 교체)
+                        routineId: id,                            // 완료 취소 시 피드 삭제에 사용
+                        nickname: currentUser?.nickname ?? "나",  // 옵셔널 체이닝으로 null 안전 접근
+                        routineTitle: targetRoutine.title,
+                        category: targetRoutine.category,
+                        content: proofText,
+                        files: proofFiles,
+                        liked: false,
+                        likeCount: 0,
+                        commentCount: 0,
+                        createdAt: dateText,
+                        createdTime: timeText,
+                    },
+                    ...prev, // 기존 게시물들은 뒤에 배치 (최신 게시물이 먼저)
+                ]);
+            }
+            return true;
+        } catch (error) {
+            console.error("상세 루틴 완료 저장 실패:", error);
+            alert("서버 오류가 발생했습니다.");
+            return false;
         }
     };
 
@@ -282,22 +407,61 @@ function App() {
      * 해당 루틴으로 올라간 피드 게시물도 함께 삭제
      *
      * TODO: 추후 DELETE /completion/{completion_id} API 연결
+     * [백엔드 주의] 완료 취소는 FastAPI를 직접 호출하지 말고,
+     * 반드시 Express DELETE /completion/:completion_id 경유로 호출해야 함.
+     * 이유:
+     *   1. Express가 세션 쿠키로 로그인 유저를 확인하고
+     *   2. 백엔드에서 session.user_id를 함께 전달하여
+     *   3. FastAPI가 WHERE completion_id=? AND user_id=? 로 본인 기록만 삭제하도록 검증함
+     * 따라서 프론트에서는 완료 시 completion_id를 함께 보관해야
+     * 나중에 안전하게 완료 취소 API를 연결할 수 있음.
      *
      * @param {string} id - 완료 취소할 루틴의 UUID v7
      */
-    const cancelRoutineCompletion = (id) => {
-        // 루틴 완료 상태 초기화
-        setRoutines((prev) =>
-            prev.map((r) =>
-                r.id === id
-                    ? { ...r, completed: false, completedAt: "", proofText: "", proofFiles: [] }
-                    : r
-            )
-        );
+    const cancelRoutineCompletion = async (id) => {
+        const targetRoutine = routines.find((routine) => routine.id === id);
 
-        // 해당 루틴으로 업로드된 피드 게시물도 함께 제거
-        // routineId로 필터링하여 연관 게시물만 삭제
-        setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
+        // [추가] 백엔드 완료 취소는 completion_id가 있어야 호출 가능
+        if (!targetRoutine?.completionId) {
+            alert("완료 기록 식별자가 없어 취소할 수 없습니다.");
+            return;
+        }
+
+        try {
+            const res = await fetch(`http://localhost:3000/completion/${targetRoutine.completionId}`, {
+                method: "DELETE",
+                credentials: "include",
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                alert(data.message || "루틴 완료 취소에 실패했습니다.");
+                return;
+            }
+
+            // 루틴 완료 상태 초기화
+            setRoutines((prev) =>
+                prev.map((r) =>
+                    r.id === id
+                        ? {
+                            ...r,
+                            completed: false,
+                            completionId: null,
+                            completedAt: "",
+                            proofText: "",
+                            proofFiles: [],
+                        }
+                        : r
+                )
+            );
+
+            // 해당 루틴으로 업로드된 피드 게시물도 함께 제거
+            // routineId로 필터링하여 연관 게시물만 삭제
+            setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
+        } catch (error) {
+            console.error("루틴 완료 취소 실패:", error);
+            alert("서버 오류가 발생했습니다.");
+        }
     };
 
     // ── 로그아웃 처리 ─────────────────────────────────────────────────────────
@@ -329,10 +493,16 @@ function App() {
         setRoutines([]);
         setFeedPosts([]);
         setCurrentUser(null);
+        setAuthChecked(true);
         navigate("/login");
     };
 
     // ── 렌더링 ────────────────────────────────────────────────────────────────
+
+    // [추가] 세션 복구 확인 전에는 보호 라우트 리다이렉트 대신 로딩 화면 표시
+    if (!authChecked) {
+        return <div className="app">로딩 중...</div>;
+    }
 
     return (
         <div className="app">

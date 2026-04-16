@@ -179,7 +179,7 @@ function HomePage({
      *
      * @param {string} id - 루틴 UUID
      */
-    const handleDetailSubmit = (id) => {
+    const handleDetailSubmit = async (id) => {
         const proofText = proofInputs[id]?.trim() || "";    // 앞뒤 공백 제거
         const selectedFiles = proofFiles[id] || [];
         const uploadToFeed = uploadChecks[id] || false;
@@ -198,26 +198,19 @@ function HomePage({
         }
 
         // 부모(App.jsx)에 완료 처리 위임
-        onCompleteDetail(id, proofText, selectedFiles, uploadToFeed);
+        const isCompleted = await onCompleteDetail(id, proofText, selectedFiles, uploadToFeed);
+        if (!isCompleted) return;
 
         // 인증 박스 입력 상태 초기화
         setProofInputs((prev) => ({ ...prev, [id]: "" }));
         setUploadChecks((prev) => ({ ...prev, [id]: false }));
         setOpenProofId(null); // 인증 박스 닫기
 
-        // 제출 후 Object URL 해제 (App.jsx로 복사본이 넘어갔으므로 더 이상 불필요)
-        // NOTE: App.jsx의 feedPosts에 저장된 url은 유지되어야 하므로
-        //       proofFiles 상태의 URL만 정리 (동일 url 참조이므로 feedPosts에는 영향 없음)
-        // → 실제 운영 시 S3 업로드 후 Object URL은 불필요해지므로 여기서 해제가 적절
-        setProofFiles((prev) => {
-            if (prev[id]) {
-                prev[id].forEach((file) => {
-                    URL.revokeObjectURL(file.url);
-                    objectUrlsRef.current = objectUrlsRef.current.filter((u) => u !== file.url);
-                });
-            }
-            return { ...prev, [id]: [] };
-        });
+        // [수정] 완료된 루틴 카드와 피드(메모리 상태)가 같은 blob URL을 계속 참조하므로
+        // 제출 직후 revokeObjectURL()을 호출하면 화면 표시가 깨질 수 있음.
+        // 따라서 이 시점에는 proofFiles 입력 상태만 비우고, URL 해제는
+        // 파일 재선택/언마운트 시점에만 수행.
+        setProofFiles((prev) => ({ ...prev, [id]: [] }));
     };
 
     /**

@@ -20,7 +20,7 @@
 #   추후 홈 화면 완료 버튼 클릭 시 이 API 연결 예정
 # ============================================================
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
 from pydantic import BaseModel
 from typing import Optional
@@ -119,18 +119,26 @@ def get_today_completions(user_id: str):
 # ── 완료 기록 삭제 (DELETE /completion/{completion_id}) ───────────────────────
 
 @router.delete("/{completion_id}")
-def delete_completion(completion_id: str):
+def delete_completion(
+    completion_id: str,
+    user_id: str = Query(..., description="요청한 유저의 UUID v7 — 본인 완료 기록만 삭제 가능")
+):
     """루틴 완료 취소 (완료 기록 삭제)
 
     홈 화면에서 완료된 루틴 카드를 클릭해 완료 취소할 때 호출 예정.
     피드에 올라간 게시물도 함께 삭제해야 하므로
     feeds 테이블의 ON DELETE CASCADE 설정 여부 확인 필요.
 
+    [수정] 기존에는 completion_id만으로 삭제했으나,
+    이제 user_id까지 함께 검증하여 본인 완료 기록만 삭제 가능하도록 강화.
+
     Args:
         completion_id (str): 삭제할 완료 기록의 UUID v7 (URL 경로 파라미터)
+        user_id (str): 요청한 유저의 UUID v7 (Query 파라미터, 필수)
 
     Returns:
-        dict: {"success": True}
+        dict: {"success": True}                     → 삭제 성공
+              {"success": False, "message": "..."} → 권한 없음 또는 대상 없음
 
     Raises:
         HTTPException 500: DB 삭제 오류
@@ -139,10 +147,16 @@ def delete_completion(completion_id: str):
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "DELETE FROM routine_completions WHERE completion_id = %s",
-                (completion_id,)
+                "DELETE FROM routine_completions WHERE completion_id = %s AND user_id = %s",
+                (completion_id, user_id)
             )
+            affected = cursor.rowcount
         conn.commit()
+
+        # [추가] 삭제된 행이 없으면 존재하지 않거나 본인 소유가 아님
+        if affected == 0:
+            return {"success": False, "message": "삭제 권한이 없거나 존재하지 않는 완료 기록입니다."}
+
         return {"success": True}
     except Exception as e:
         print("🔴 오류:", e)

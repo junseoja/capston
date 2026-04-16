@@ -26,6 +26,8 @@ const {
 const { v4: uuidv4 } = require("uuid"); // 세션 ID 생성용 UUID v4
 
 const PYTHON_API = "http://localhost:8000"; // FastAPI 서버 주소 (중복체크 직접 호출용)
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // [추가] 백엔드 기본 이메일 형식 검사
+const ALLOWED_GENDERS = ["남", "여", "기타"]; // [추가] DB ENUM과 동일한 허용 성별 목록
 
 // ── 회원가입 (POST /signup) ───────────────────────────────────────────────────
 
@@ -46,6 +48,38 @@ router.post("/signup", async (req, res) => {
         return res.status(400).json({ success: false, message: "아이디와 비밀번호를 입력하세요." });
     }
 
+    // [추가] 프론트 외의 클라이언트가 잘못된 body를 보내더라도
+    // 500이 아닌 400으로 명확히 응답하도록 기본 입력 검증 보강
+    if (!nickname || !email || !gender || !birth) {
+        return res.status(400).json({ success: false, message: "회원가입 필수값이 누락되었습니다." });
+    }
+
+    const birthYear = Number(birth.year);
+    const birthMonth = Number(birth.month);
+    const birthDay = Number(birth.day);
+
+    if (!Number.isInteger(birthYear) || !Number.isInteger(birthMonth) || !Number.isInteger(birthDay)) {
+        return res.status(400).json({ success: false, message: "생년월일 형식이 올바르지 않습니다." });
+    }
+
+    const birthDateObject = new Date(birthYear, birthMonth - 1, birthDay);
+    const isValidBirthDate =
+        birthDateObject.getFullYear() === birthYear &&
+        birthDateObject.getMonth() === birthMonth - 1 &&
+        birthDateObject.getDate() === birthDay;
+
+    if (!isValidBirthDate) {
+        return res.status(400).json({ success: false, message: "유효한 생년월일을 입력하세요." });
+    }
+
+    if (!EMAIL_REGEX.test(String(email).trim())) {
+        return res.status(400).json({ success: false, message: "올바른 이메일 형식이 아닙니다." });
+    }
+
+    if (!ALLOWED_GENDERS.includes(gender)) {
+        return res.status(400).json({ success: false, message: "성별 값이 올바르지 않습니다." });
+    }
+
     const existing = await findUser(id);
     if (existing) {
         return res.status(409).json({ success: false, message: "이미 존재하는 아이디입니다." });
@@ -55,7 +89,7 @@ router.post("/signup", async (req, res) => {
     // bcrypt.hash()는 내부적으로 랜덤 salt를 생성하여 결합
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const birth_date = `${birth.year}-${String(birth.month).padStart(2, "0")}-${String(birth.day).padStart(2, "0")}`;
+    const birth_date = `${birthYear}-${String(birthMonth).padStart(2, "0")}-${String(birthDay).padStart(2, "0")}`;
 
     const result = await createUser({
         login_id: id,

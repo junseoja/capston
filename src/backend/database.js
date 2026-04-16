@@ -12,6 +12,7 @@
 //   유저 관련  : findUser, createUser
 //   세션 관련  : createSession, findSession, deleteSession
 //   루틴 관련  : createRoutine, getRoutines, deleteRoutine
+//   완료 관련  : createCompletion, getTodayCompletions, getCompletionHistory, deleteCompletion
 // ============================================================
 
 const fetch = require("node-fetch"); // HTTP 요청 라이브러리 (node.js 환경용)
@@ -200,6 +201,59 @@ async function getCompletionHistory(user_id) {
     return await res.json(); // 배열 그대로 반환
 }
 
+/**
+ * 루틴 완료 기록 생성
+ *
+ * [추가] 홈 화면의 완료 처리를 DB에 영속화하기 위한 함수.
+ * Express completion.js의 POST /completion 라우트에서 세션 인증 후 호출됨.
+ *
+ * @param {object} completionData
+ *   @param {string} completionData.routine_id - 완료한 루틴 UUID v7
+ *   @param {string} completionData.user_id    - 세션에서 추출한 유저 UUID v7
+ *   @param {string} completionData.proof_text - 인증 글 (체크 루틴은 빈 문자열)
+ * @returns {object} { success: true, completion_id: "uuid-v7-..." }
+ */
+async function createCompletion(completionData) {
+    const res = await fetch(`${PYTHON_API}/completion/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(completionData),
+    });
+    return await res.json();
+}
+
+/**
+ * 오늘 완료한 루틴 목록 조회
+ *
+ * [추가] 새로고침 후에도 오늘 완료 상태를 복원할 수 있도록
+ * FastAPI GET /completion/today/{user_id}를 중계.
+ *
+ * @param {string} user_id - 세션에서 추출한 유저 UUID v7
+ * @returns {Array} 오늘 완료 기록 배열
+ */
+async function getTodayCompletions(user_id) {
+    const res = await fetch(`${PYTHON_API}/completion/today/${user_id}`);
+    return await res.json();
+}
+
+/**
+ * 완료 기록 삭제 (완료 취소)
+ *
+ * [추가] completion_id만으로 삭제하지 않고,
+ * user_id를 함께 전달하여 FastAPI에서 소유자 검증까지 수행.
+ *
+ * @param {string} completion_id - 삭제할 완료 기록 UUID v7
+ * @param {string} user_id       - 요청한 유저의 UUID v7 (세션에서 추출)
+ * @returns {object} { success: true } 또는 { success: false, message: "..." }
+ */
+async function deleteCompletion(completion_id, user_id) {
+    const res = await fetch(
+        `${PYTHON_API}/completion/${completion_id}?user_id=${encodeURIComponent(user_id)}`,
+        { method: "DELETE" }
+    );
+    return await res.json();
+}
+
 // ── 모듈 내보내기 ────────────────────────────────────────────────────────────
 module.exports = {
     findUser,
@@ -210,5 +264,8 @@ module.exports = {
     createRoutine,
     getRoutines,
     deleteRoutine,
+    createCompletion,
+    getTodayCompletions,
     getCompletionHistory,
+    deleteCompletion,
 };
