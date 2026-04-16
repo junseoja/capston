@@ -20,6 +20,7 @@
 // ============================================================
 
 import { useState, useEffect, useCallback } from "react";
+import { EXPRESS_URL } from "./config";
 
 function RoutinePage({ onRoutineChange }) {
     // 이 페이지에서 표시할 루틴 목록
@@ -51,7 +52,7 @@ function RoutinePage({ onRoutineChange }) {
      */
     const fetchRoutines = useCallback(async () => {
         try {
-            const res = await fetch("http://localhost:3000/routine", {
+            const res = await fetch(`${EXPRESS_URL}/routine`, {
                 credentials: "include", // 세션 쿠키 포함 → 로그인한 유저의 루틴만 반환
             });
             const data = await res.json();
@@ -186,7 +187,7 @@ function RoutinePage({ onRoutineChange }) {
         const repeatText = repeat.length === 7 ? "매일" : repeat.join(", ");
 
         try {
-            const res = await fetch("http://localhost:3000/routine", {
+            const res = await fetch(`${EXPRESS_URL}/routine`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
@@ -235,7 +236,7 @@ function RoutinePage({ onRoutineChange }) {
         if (!isConfirmed) return; // 취소 시 아무 것도 하지 않음
 
         try {
-            const res = await fetch(`http://localhost:3000/routine/${routine_id}`, {
+            const res = await fetch(`${EXPRESS_URL}/routine/${routine_id}`, {
                 method: "DELETE",
                 credentials: "include",
             });

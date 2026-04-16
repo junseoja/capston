@@ -15,6 +15,7 @@
 // ============================================================
 
 import { useState, useEffect } from "react";
+import { EXPRESS_URL } from "./config";
 
 /**
  * formatDate - completed_at 타임스탬프를 상대적 날짜 문자열로 변환
@@ -83,11 +84,11 @@ function MyPage() {
             // ── 세 요청을 병렬로 실행 ──
             const [userRes, routineRes, historyRes] = await Promise.all([
                 // 유저 정보: 세션 쿠키로 현재 로그인한 유저 정보를 Express에서 반환
-                fetch("http://localhost:3000/me", { credentials: "include" }),
+                fetch(`${EXPRESS_URL}/me`, { credentials: "include" }),
                 // 루틴 목록: 개수 계산에만 사용
-                fetch("http://localhost:3000/routine", { credentials: "include" }),
+                fetch(`${EXPRESS_URL}/routine`, { credentials: "include" }),
                 // 완료 이력: 마이페이지 최근 활동 섹션용
-                fetch("http://localhost:3000/completion/history", { credentials: "include" }),
+                fetch(`${EXPRESS_URL}/completion/history`, { credentials: "include" }),
             ]);
 
             const [userData, routineData, historyData] = await Promise.all([

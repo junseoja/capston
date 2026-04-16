@@ -24,8 +24,9 @@
 // ============================================================
 
 import { useState, useCallback, useEffect } from "react";
+import { EXPRESS_URL } from "./config";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import "./App.css";
+import "../css/App.css";
 import HomePage from "./HomePage";
 import LoginPage from "./LoginPage";
 import RoutinePage from "./RoutinePage";
@@ -83,10 +84,10 @@ function App() {
     const fetchRoutines = useCallback(async () => {
         try {
             const [routineRes, completionRes] = await Promise.all([
-                fetch("http://localhost:3000/routine", {
+                fetch(`${EXPRESS_URL}/routine`, {
                     credentials: "include", // 쿠키(sessionId)를 요청에 포함 → 로그인 인증
                 }),
-                fetch("http://localhost:3000/completion/today", {
+                fetch(`${EXPRESS_URL}/completion/today`, {
                     credentials: "include",
                 }),
             ]);
@@ -151,7 +152,7 @@ function App() {
      */
     const fetchCurrentUser = useCallback(async () => {
         try {
-            const res = await fetch("http://localhost:3000/me", {
+            const res = await fetch(`${EXPRESS_URL}/me`, {
                 credentials: "include", // 세션 쿠키 포함
             });
             const data = await res.json();
@@ -237,7 +238,7 @@ function App() {
 
         try {
             // [추가] 완료 버튼 클릭 시 실제 백엔드 POST /completion에 저장
-            const res = await fetch("http://localhost:3000/completion", {
+            const res = await fetch(`${EXPRESS_URL}/completion`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
@@ -309,7 +310,7 @@ function App() {
 
         try {
             // [추가] 상세 루틴도 동일하게 백엔드 POST /completion에 저장
-            const res = await fetch("http://localhost:3000/completion", {
+            const res = await fetch(`${EXPRESS_URL}/completion`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
@@ -428,7 +429,7 @@ function App() {
         }
 
         try {
-            const res = await fetch(`http://localhost:3000/completion/${targetRoutine.completionId}`, {
+            const res = await fetch(`${EXPRESS_URL}/completion/${targetRoutine.completionId}`, {
                 method: "DELETE",
                 credentials: "include",
             });
@@ -479,7 +480,7 @@ function App() {
      */
     const handleLogout = async () => {
         try {
-            await fetch("http://localhost:3000/logout", {
+            await fetch(`${EXPRESS_URL}/logout`, {
                 method: "POST",
                 credentials: "include", // 세션 쿠키 전달 → 서버에서 세션 삭제
             });

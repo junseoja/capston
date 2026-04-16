@@ -19,9 +19,14 @@
 //   /completion/history                              → completionRouter
 // ============================================================
 
+require("dotenv").config(); // .env 파일을 process.env에 로드 (가장 먼저 실행)
+
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+
+const PORT = process.env.PORT || 3000;
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 
 // 인증 라우터: 회원가입(/signup), 로그인(/login), 로그아웃(/logout),
 //             현재 유저(/me), 중복체크(/check-duplicate)
@@ -34,14 +39,13 @@ const routineRouter = require("./routes/routine");
 const completionRouter = require("./routes/completion");
 
 const app = express();
-const PORT = 3000;
 
 // ── 미들웨어 등록 ────────────────────────────────────────────────────────────
 
 // CORS 설정: React 개발 서버(5173)에서 오는 요청만 허용
 // credentials: true → 쿠키 포함 요청(fetch credentials: "include") 허용
 //              반드시 origin을 와일드카드(*) 대신 명시적 URL로 지정해야 함
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+app.use(cors({ origin: FRONTEND_URL, credentials: true }));
 
 // 요청 body를 JSON으로 파싱 → req.body 에 JSON 데이터 담김
 app.use(express.json());
@@ -73,4 +77,6 @@ app.use("/", completionRouter);
 
 app.listen(PORT, () => {
     console.log(`서버 실행 중: http://localhost:${PORT}`);
+    console.log(`FastAPI 연결 대상: ${process.env.PYTHON_API || "http://localhost:8000"}`);
+    console.log(`허용된 프론트엔드: ${FRONTEND_URL}`);
 });

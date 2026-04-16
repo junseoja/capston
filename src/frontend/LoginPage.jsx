@@ -13,6 +13,7 @@
 // ============================================================
 
 import { useState } from "react";
+import { EXPRESS_URL } from "./config";
 
 function LoginPage({ onLogin, onGoSignup }) {
     // 아이디 입력값 상태 (제어 컴포넌트 방식)
@@ -38,7 +39,7 @@ function LoginPage({ onLogin, onGoSignup }) {
      */
     const handleLogin = async () => {
         try {
-            const response = await fetch("http://localhost:3000/login", {
+            const response = await fetch(`${EXPRESS_URL}/login`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include", // 쿠키 저장/전송 허용

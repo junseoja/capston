@@ -17,7 +17,7 @@
 
 const fetch = require("node-fetch"); // HTTP 요청 라이브러리 (node.js 환경용)
 
-const PYTHON_API = "http://localhost:8000"; // FastAPI 서버 주소 (포트 8000)
+const PYTHON_API = process.env.PYTHON_API || "http://localhost:8000"; // FastAPI 서버 주소
 
 // ─── 유저 관련 함수 ────────────────────────────────────────────────────────
 

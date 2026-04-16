@@ -19,24 +19,105 @@
 
 ---
 
+## 📦 의존성 패키지
+
+### 프론트엔드 (`package.json`)
+
+```bash
+npm install
+```
+
+| 패키지 | 버전 | 용도 |
+|---|---|---|
+| react | ^19.2.4 | UI 라이브러리 |
+| react-dom | ^19.2.4 | React DOM 렌더링 |
+| react-router-dom | ^7.14.0 | URL 기반 클라이언트 라우팅 |
+
+**devDependencies**
+
+| 패키지 | 버전 | 용도 |
+|---|---|---|
+| vite | ^8.0.0 | 빌드 도구 / 개발 서버 |
+| @vitejs/plugin-react | ^6.0.0 | Vite React 플러그인 |
+| eslint | ^9.39.4 | 코드 린터 |
+| eslint-plugin-react-hooks | ^7.0.1 | React Hooks 린트 규칙 |
+| eslint-plugin-react-refresh | ^0.5.2 | HMR 안전성 검사 |
+| @types/react | ^19.2.14 | React 타입 정의 |
+| @types/react-dom | ^19.2.3 | ReactDOM 타입 정의 |
+| globals | ^17.0.0 | ESLint 전역 변수 목록 |
+
+---
+
+### Express 백엔드 (`src/backend/package.json`)
+
+```bash
+cd src/backend
+npm install
+```
+
+| 패키지 | 버전 | 용도 |
+|---|---|---|
+| express | ^5.2.1 | Node.js 웹 프레임워크 |
+| cors | ^2.8.6 | CORS 허용 미들웨어 |
+| cookie-parser | ^1.4.7 | 쿠키 파싱 미들웨어 |
+| bcryptjs | ^3.0.3 | 비밀번호 bcrypt 해싱 |
+| dotenv | ^16.6.1 | `.env` 환경변수 로드 |
+| node-fetch | ^2.7.0 | Express → FastAPI HTTP 요청 |
+| uuid | ^13.0.0 | UUID v4 세션 ID 생성 |
+
+---
+
+### Python FastAPI 백엔드 (`src/python_api/requirements.txt`)
+
+```bash
+cd src/python_api
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+| 패키지 | 버전 | 용도 |
+|---|---|---|
+| fastapi | 0.135.2 | Python 웹 프레임워크 |
+| uvicorn | 0.42.0 | ASGI 서버 (FastAPI 실행) |
+| pydantic | 2.12.5 | 요청 데이터 타입 검증 |
+| PyMySQL | 1.1.2 | Python ↔ MySQL 연결 |
+| python-dotenv | 1.2.2 | `.env` 환경변수 로드 |
+| bcrypt | 5.0.0 | 비밀번호 해시 검증 |
+| uuid6 | 2025.0.1 | UUID v7 생성 라이브러리 |
+| uuid7 | 0.1.0 | UUID v7 추가 지원 |
+| starlette | 1.0.0 | FastAPI 내부 ASGI 프레임워크 |
+| anyio | 4.13.0 | 비동기 I/O 지원 |
+
+---
+
 ## 📁 프로젝트 구조
 
 ```
 capston-main/
+├── index.html                # HTML 진입점
 ├── start.sh                  # 전체 서버 한번에 실행
+├── .env                      # 프론트엔드 환경변수 (VITE_EXPRESS_URL)
 ├── src/
-│   ├── App.jsx               # 루트 컴포넌트 (라우팅 + 전역 상태 관리)
-│   ├── main.jsx              # 앱 진입점 (BrowserRouter 포함)
-│   ├── LoginPage.jsx         # 로그인 페이지
-│   ├── SignupPage.jsx        # 회원가입 페이지
-│   ├── HomePage.jsx          # 홈 페이지 (루틴 완료 체크)
-│   ├── RoutinePage.jsx       # 루틴 관리 페이지 (CRUD)
-│   ├── FeedPage.jsx          # 피드 페이지
-│   ├── MyPage.jsx            # 마이페이지
+│   ├── frontend/             # React 프론트엔드
+│   │   ├── main.jsx          # 앱 진입점 (BrowserRouter 포함)
+│   │   ├── App.jsx           # 루트 컴포넌트 (라우팅 + 전역 상태 관리)
+│   │   ├── config.js         # 서버 URL 환경변수 중앙 관리
+│   │   ├── LoginPage.jsx     # 로그인 페이지
+│   │   ├── SignupPage.jsx    # 회원가입 페이지
+│   │   ├── HomePage.jsx      # 홈 페이지 (루틴 완료 체크)
+│   │   ├── RoutinePage.jsx   # 루틴 관리 페이지 (CRUD)
+│   │   ├── FeedPage.jsx      # 피드 페이지
+│   │   └── MyPage.jsx        # 마이페이지
+│   │
+│   ├── css/                  # 스타일시트
+│   │   ├── App.css           # 전체 레이아웃 및 컴포넌트 스타일
+│   │   └── index.css         # 전역 기본 스타일
 │   │
 │   ├── backend/              # Node.js Express 서버 (:3000)
 │   │   ├── app.js
 │   │   ├── database.js       # Express → FastAPI 연결 모듈
+│   │   ├── .env              # Express 환경변수 (PORT, PYTHON_API, FRONTEND_URL)
 │   │   └── routes/
 │   │       ├── login.js      # 인증 라우터 (로그인/회원가입/세션/중복체크)
 │   │       ├── routine.js    # 루틴 CRUD 라우터
@@ -46,6 +127,7 @@ capston-main/
 │       ├── app.py
 │       ├── database.py       # MySQL 커넥션 모듈
 │       ├── requirements.txt
+│       ├── .env              # DB 접속 정보 (DB_HOST, DB_USER 등)
 │       └── routers/
 │           ├── user.py       # 유저 API (회원가입/세션/중복체크)
 │           ├── routine.py    # 루틴 API
@@ -59,7 +141,42 @@ capston-main/
 
 ## ⚙️ 환경 설정
 
-`src/python_api/.env` 파일 생성 후 아래 내용 입력
+> ⚠️ `.env` 파일은 모두 `.gitignore`에 등록되어 있어 Git에 올라가지 않습니다.  
+> 각 `.env.example` 파일을 복사해서 `.env`로 이름을 바꾼 뒤 값을 채우세요.
+
+### 1. 프론트엔드 — 프로젝트 루트 `.env`
+
+```bash
+cp .env.example .env
+```
+
+```
+# Express 백엔드 서버 URL
+VITE_EXPRESS_URL=http://localhost:3000
+```
+
+### 2. Express 백엔드 — `src/backend/.env`
+
+```bash
+cp src/backend/.env.example src/backend/.env
+```
+
+```
+# Express 서버 포트
+PORT=3000
+
+# FastAPI 서버 URL
+PYTHON_API=http://localhost:8000
+
+# React 프론트엔드 URL (CORS 허용 대상)
+FRONTEND_URL=http://localhost:5173
+```
+
+### 3. Python FastAPI — `src/python_api/.env`
+
+```bash
+cp src/python_api/.env.example src/python_api/.env   # .env.example이 없으면 직접 생성
+```
 
 ```
 DB_HOST=your-rds-endpoint.amazonaws.com
@@ -68,8 +185,6 @@ DB_PASSWORD=your-password
 DB_NAME=capston
 DB_PORT=3306
 ```
-
-> ⚠️ `.env` 파일은 git에 올라가지 않으므로 직접 생성해야 합니다.
 
 ---
 
@@ -651,6 +766,126 @@ const isMatch = isBcryptHash
   - README만 봐도 루틴 삭제가 실제 DB 삭제까지 포함된다는 점을 바로 이해 가능
 
 ---
+
+
+### 🔧 2026-04-16 작업 내역
+
+### 1. 전체 코드 리뷰 및 피드백
+
+전체 소스 파일(프론트 8개 + Express 4개 + FastAPI 8개)을 분석하여 문제점 도출
+
+| 구분 | 내용 |
+|---|---|
+| 🔴 버그 | `app.js` `PORT` 중복 선언 → `SyntaxError` Express 서버 기동 불가 |
+| 🔴 버그 | `SignupPage.jsx` 중복체크 URL에 `encodeURIComponent` 누락 → 특수문자 입력 시 URL 파괴 |
+| 🔴 기능 누락 | 루틴 수정(편집) 기능 없음 — 삭제 후 재생성만 가능 |
+| 🟡 보안 | 평문 비밀번호 병행 비교 로직 잔존 (`login.js`) |
+| 🟡 보안 | `database.js` 각 함수에 try-catch 없음 — FastAPI 다운 시 Express 크래시 가능 |
+| 🟠 품질 | 모든 fetch 호출에 `localhost:3000`, `localhost:8000` 하드코딩 |
+| 🟠 품질 | `start.sh` 절대경로(`/Users/sayongja/...`) 하드코딩 |
+| 🟠 품질 | `src/` 루트에 JSX, CSS, JS 파일이 혼재 — 폴더 구분 없음 |
+
+---
+
+### 2. 서버 URL 환경변수화
+
+모든 하드코딩된 서버 주소를 `.env` 파일 기반으로 전환
+
+#### 2-1. 환경변수 파일 생성
+
+| 파일 | 내용 |
+|---|---|
+| `.env` (프로젝트 루트) | `VITE_EXPRESS_URL=http://localhost:3000` |
+| `.env.example` (루트) | 팀원 공유용 템플릿 |
+| `src/backend/.env` | `PORT`, `PYTHON_API`, `FRONTEND_URL` |
+| `src/backend/.env.example` | 팀원 공유용 템플릿 |
+
+#### 2-2. Express 백엔드 적용
+
+- `src/backend/app.js`: `require("dotenv").config()` 추가, `PORT` · `FRONTEND_URL` 환경변수화
+- `src/backend/database.js`: `PYTHON_API` 상수를 `process.env.PYTHON_API || "http://localhost:8000"` 로 변경
+- `src/backend/routes/login.js`: 동일하게 `PYTHON_API` 환경변수화
+- `src/backend/package.json`: `dotenv ^16.6.1` 의존성 추가 및 설치
+
+#### 2-3. React 프론트엔드 적용
+
+- `src/frontend/config.js` 신규 생성 — `EXPRESS_URL` 상수를 한 곳에서 관리
+  ```js
+  export const EXPRESS_URL = import.meta.env.VITE_EXPRESS_URL ?? "http://localhost:3000";
+  ```
+- `LoginPage.jsx`, `SignupPage.jsx`, `App.jsx`, `RoutinePage.jsx`, `MyPage.jsx` — 하드코딩 URL 19곳을 `${EXPRESS_URL}/...` 로 일괄 교체
+- `SignupPage.jsx` 중복체크 URL에 `encodeURIComponent()` 추가 (버그 수정 겸)
+
+---
+
+### 3. `start.sh` 개선
+
+| 항목 | 이전 | 이후 |
+|---|---|---|
+| 경로 | `/Users/sayongja/...` 절대경로 | `$SCRIPT_DIR` 기반 상대경로 |
+| FastAPI 포트 | `--port 8000` 하드코딩 | `src/backend/.env`의 `PYTHON_API`에서 포트 추출 |
+| Express 포트 | echo에만 3000 고정 | `.env`의 `PORT` 변수 사용 |
+| 출력 URL | 하드코딩 | `.env` 변수 출력 |
+| .env 없을 때 | 에러 없이 오작동 | 경고 메시지 출력 후 기본값으로 실행 |
+
+---
+
+### 4. `src/` 폴더 구조 재편
+
+JSX · CSS · JS 파일이 `src/` 루트에 혼재하던 구조를 역할별 폴더로 분리
+
+```
+[이전]                          [이후]
+src/                            src/
+├── App.jsx                     ├── frontend/         ← JSX + config.js
+├── main.jsx                    │   ├── main.jsx
+├── LoginPage.jsx               │   ├── App.jsx
+├── SignupPage.jsx              │   ├── config.js
+├── HomePage.jsx                │   ├── LoginPage.jsx
+├── RoutinePage.jsx             │   ├── SignupPage.jsx
+├── FeedPage.jsx                │   ├── HomePage.jsx
+├── MyPage.jsx                  │   ├── RoutinePage.jsx
+├── App.css                     │   ├── FeedPage.jsx
+├── index.css                   │   └── MyPage.jsx
+├── config.js                   ├── css/              ← CSS
+├── backend/                    │   ├── App.css
+└── python_api/                 │   └── index.css
+                                ├── backend/
+                                └── python_api/
+```
+
+**수정된 import 경로**
+
+| 파일 | 변경 내용 |
+|---|---|
+| `index.html` | `/src/main.jsx` → `/src/frontend/main.jsx` |
+| `main.jsx` | `'./index.css'` → `'../css/index.css'` |
+| `App.jsx` | `'./App.css'` → `'../css/App.css'` |
+| 나머지 JSX | `'./config'` → 변경 없음 (`config.js`도 `frontend/`로 함께 이동) |
+
+---
+
+### 5. 버그 수정 — `app.js` PORT 중복 선언
+
+- **원인**: 환경변수화 작업 시 `const PORT = process.env.PORT || 3000`을 추가했으나 기존 `const PORT = 3000` 줄을 제거하지 않음 → `SyntaxError: Identifier 'PORT' has already been declared`
+- **증상**: Express 서버 기동 불가 (서버 접속 오류)
+- **해결**: `app.js` 42번째 줄의 중복 `const PORT = 3000` 제거
+
+---
+
+### 6. README 패키지 목록 추가
+
+전체 의존성 패키지를 README에 정리
+
+| 영역 | 추가된 패키지 | 설치 명령 |
+|---|---|---|
+| 프론트엔드 | react, react-dom, react-router-dom + devDeps 8개 | `npm install` |
+| Express | express, bcryptjs, cors, cookie-parser, **dotenv**, node-fetch, uuid | `cd src/backend && npm install` |
+| FastAPI | fastapi, uvicorn, pydantic, PyMySQL, python-dotenv, bcrypt, uuid7 등 | `pip install -r requirements.txt` |
+
+환경 설정 섹션도 `.env` 파일 3개(루트 / backend / python_api) 전부 안내하도록 개정
+
+
 
 ## ⚠️ 미구현 / 개선 필요 사항
 

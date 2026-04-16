@@ -20,7 +20,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import './index.css'
+import '../css/index.css'
 import App from './App.jsx'
 
 // public/index.html의 <div id="root"> 엘리먼트를 React 앱의 루트로 사용

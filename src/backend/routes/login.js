@@ -25,7 +25,7 @@ const {
 } = require("../database");
 const { v4: uuidv4 } = require("uuid"); // 세션 ID 생성용 UUID v4
 
-const PYTHON_API = "http://localhost:8000"; // FastAPI 서버 주소 (중복체크 직접 호출용)
+const PYTHON_API = process.env.PYTHON_API || "http://localhost:8000"; // FastAPI 서버 주소
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // [추가] 백엔드 기본 이메일 형식 검사
 const ALLOWED_GENDERS = ["남", "여", "기타"]; // [추가] DB ENUM과 동일한 허용 성별 목록
 

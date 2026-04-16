@@ -18,7 +18,8 @@
 //   - 중복체크(버튼 클릭): 로컬 검사 통과 시에만 API 호출
 // ============================================================
 
-import { useState } from 'react'
+import { useState } from 'react';
+import { EXPRESS_URL } from './config';
 
 // ── 입력값 유효성 검사 정규식 ──────────────────────────────────────────────────
 
@@ -278,7 +279,7 @@ function SignupPage({ onBackToLogin }) {
         // NOTE: 이 라우트가 Express에 구현되어야 동작함
         try {
             const response = await fetch(
-                `http://localhost:3000/check-duplicate?field=${fieldName}&value=${value.trim()}`,
+                `${EXPRESS_URL}/check-duplicate?field=${fieldName}&value=${encodeURIComponent(value.trim())}`,
                 { credentials: "include" }
             );
             const result = await response.json();
@@ -360,7 +361,7 @@ function SignupPage({ onBackToLogin }) {
 
         // Express POST /signup 요청
         try {
-            const response = await fetch("http://localhost:3000/signup", {
+            const response = await fetch(`${EXPRESS_URL}/signup`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
