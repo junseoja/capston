@@ -157,7 +157,7 @@ function HomePage({
         const previewFiles = selectedFiles.map((file) => {
             const url = URL.createObjectURL(file); // 브라우저 메모리에 임시 URL 생성
             objectUrlsRef.current.push(url);       // 언마운트 시 해제하기 위해 추적
-            return { name: file.name, type: file.type, url };
+            return { name: file.name, type: file.type, url, file }; // file: 서버 업로드용 원본 File 객체
         });
 
         setProofFiles((prev) => ({

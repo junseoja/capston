@@ -39,3 +39,7 @@ node_modules/
 # 기타
 .DS_Store__pycache__/
 *.pyc
+
+# 업로드된 파일 (피드 이미지/영상)
+src/backend/uploads/*
+!src/backend/uploads/.gitkeep

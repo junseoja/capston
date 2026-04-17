@@ -64,6 +64,7 @@ npm install
 | dotenv | ^16.6.1 | `.env` 환경변수 로드 |
 | node-fetch | ^2.7.0 | Express → FastAPI HTTP 요청 |
 | uuid | ^13.0.0 | UUID v4 세션 ID 생성 |
+| multer | ^1.4.5-lts.2 | 파일 업로드 처리 (multipart/form-data) |
 
 ---
 
@@ -118,10 +119,14 @@ capston-main/
 │   │   ├── app.js
 │   │   ├── database.js       # Express → FastAPI 연결 모듈
 │   │   ├── .env              # Express 환경변수 (PORT, PYTHON_API, FRONTEND_URL)
+│   │   ├── uploads/          # 피드 이미지/영상 업로드 저장소
 │   │   └── routes/
 │   │       ├── login.js      # 인증 라우터 (로그인/회원가입/세션/중복체크)
 │   │       ├── routine.js    # 루틴 CRUD 라우터
-│   │       └── completion.js # 완료 이력 라우터
+│   │       ├── completion.js # 완료 이력 라우터
+│   │       ├── feed.js       # 피드 라우터 (생성/조회/삭제, 이미지 업로드)
+│   │       ├── like.js       # 좋아요 라우터 (토글)
+│   │       └── comment.js    # 댓글 라우터 (작성/조회/삭제)
 │   │
 │   └── python_api/           # FastAPI 서버 (:8000)
 │       ├── app.py
@@ -476,6 +481,9 @@ AWS RDS MySQL
 - [x] UUID v7 기반 PK (user_id, routine_id 등)
 - [x] 피드 UI (인스타그램 스타일, 좋아요 토글)
 - [x] 루틴 완료 기록 / 피드 / 좋아요 / 댓글 FastAPI 라우터 구현
+- [x] 피드 / 좋아요 / 댓글 Express 라우터 구현 및 프론트엔드 연결
+- [x] 피드 이미지/영상 업로드 (multer + Express 정적 서빙)
+- [x] 피드 목록 DB 기반 최신순 조회 (메모리 → DB 전환 완료)
 
 
 ---
@@ -917,16 +925,168 @@ src/                            src/
 
 
 
+## 🔧 2026-04-18 작업 내역
+
+### 1. 피드/좋아요/댓글 Express 라우터 신규 생성 — 백엔드 API 완전 연결
+
+기존에 FastAPI에만 구현되어 있던 피드, 좋아요, 댓글 API를 Express에서 세션 인증을 거쳐 중계하도록 Express 라우터 3개를 신규 생성.
+
+#### 1-1. Express 피드 라우터 (`routes/feed.js`)
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| POST | /feed | 피드 생성 (multipart/form-data, 이미지 업로드 포함) |
+| GET | /feed | 전체 피드 목록 조회 (이미지 + 현재 유저 좋아요 상태 + 댓글 포함, 최신순) |
+| DELETE | /feed/:feed_id | 피드 삭제 (세션 인증 + 본인 소유 검증) |
+
+- **파일 업로드**: `multer` 패키지로 multipart/form-data 처리, 파일은 `src/backend/uploads/`에 저장
+- **파일명 충돌 방지**: `timestamp-랜덤숫자.확장자` 형식으로 저장
+- **파일 제한**: 파일당 최대 50MB, 이미지/영상만 허용 (MIME 타입 필터)
+- **GET /feed 응답 구조**: 각 피드에 대해 FastAPI `GET /feed/{feed_id}` (이미지/댓글) + `GET /like/{feed_id}/{user_id}` (좋아요 여부)를 `Promise.all`로 병렬 조회하여 하나의 응답으로 합침
+
+#### 1-2. Express 좋아요 라우터 (`routes/like.js`)
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| POST | /like | 좋아요 토글 — 추가/취소 (세션 인증, user_id 자동 주입) |
+
+- 클라이언트는 `feed_id`만 전달, `user_id`는 세션에서 추출하여 FastAPI에 전달
+- FastAPI의 INSERT → IntegrityError 시 DELETE 토글 메커니즘 그대로 활용
+
+#### 1-3. Express 댓글 라우터 (`routes/comment.js`)
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| POST | /comment | 댓글 작성 (세션 인증, user_id 자동 주입) |
+| GET | /comment/:feed_id | 피드 댓글 목록 조회 (세션 인증) |
+| DELETE | /comment/:comment_id | 댓글 삭제 (세션 인증 + 본인 소유 검증) |
+
+---
+
+### 2. Express ↔ FastAPI 브리지 함수 추가 (`database.js`)
+
+피드/좋아요/댓글 관련 FastAPI 중계 함수 11개를 `database.js`에 추가
+
+| 함수명 | FastAPI 엔드포인트 | 용도 |
+|---|---|---|
+| `createFeed()` | POST /feed/ | 피드 레코드 생성 |
+| `addFeedImage()` | POST /feed/image | 피드 이미지 레코드 추가 |
+| `getFeeds()` | GET /feed/ | 전체 피드 목록 조회 |
+| `getFeedDetail()` | GET /feed/{feed_id} | 피드 상세 (이미지+댓글 포함) |
+| `deleteFeed()` | DELETE /feed/{feed_id} | 피드 삭제 (소유자 검증) |
+| `toggleLike()` | POST /like/ | 좋아요 토글 |
+| `checkLike()` | GET /like/{feed_id}/{user_id} | 좋아요 여부 확인 |
+| `createComment()` | POST /comment/ | 댓글 작성 |
+| `getComments()` | GET /comment/{feed_id} | 댓글 목록 조회 |
+| `deleteComment()` | DELETE /comment/{comment_id} | 댓글 삭제 (소유자 검증) |
+
+---
+
+### 3. Express 서버 설정 변경 (`app.js`)
+
+- 새 라우터 3개 등록: `feedRouter`, `likeRouter`, `commentRouter`
+- `path` 모듈 추가 및 `/uploads/` 정적 파일 서빙 설정 (`express.static`)
+- `multer` 패키지 설치 (`src/backend/package.json`에 의존성 추가)
+- `src/backend/uploads/` 디렉토리 생성 (`.gitkeep` 포함)
+
+---
+
+### 4. 프론트엔드 피드 시스템 전면 개편
+
+#### 4-1. App.jsx — 메모리 기반 피드 상태 제거
+
+- **삭제된 상태**: `feedPosts` (useState)
+- **삭제된 함수**: `toggleFeedLike`, `addFeedComment`, `deleteFeedComment` (메모리 전용 핸들러 3개)
+- **변경된 함수 — `completeDetailRoutine`**:
+  - 기존: 피드 업로드 시 `feedPosts` 메모리 배열에 추가
+  - 변경: `FormData`로 텍스트 필드(routine_id, completion_id, content) + 파일을 함께 `POST /feed`로 전송
+  - 피드 업로드 실패 시 루틴 완료 자체는 유지하고 실패 알림만 표시
+- **변경된 함수 — `cancelRoutineCompletion`**: 메모리 feedPosts 필터링 코드 제거 (DB의 ON DELETE CASCADE로 자동 삭제)
+- **FeedPage props 변경**: 기존 5개(`feedPosts`, `onToggleLike`, `onAddComment`, `onDeleteComment`, `currentUserNickname`) → 1개(`currentUser`)
+
+#### 4-2. FeedPage.jsx — 전면 재작성 (메모리 → DB 기반)
+
+- **피드 조회**: 컴포넌트 마운트 시 `GET /feed`로 전체 피드를 DB에서 최신순 조회
+- **좋아요**: `POST /like` API 호출 → 서버 응답(`liked: true/false`) 기반으로 로컬 상태 즉시 업데이트
+- **댓글 작성**: `POST /comment` API 호출 → 성공 시 로컬 상태에 즉시 반영
+- **댓글 삭제**: `DELETE /comment/:comment_id` API 호출 → 성공 시 로컬 상태에서 제거
+- **이미지 표시**: DB의 `feed_images.file_url` 값을 Express `/uploads/` 경로 기준으로 변환하여 표시
+- **댓글 본인 확인**: 기존 `nickname` 비교 → `user_id` 비교로 변경 (동일 닉네임 충돌 방지)
+- **작성 시간 표시**: DB 타임스탬프를 `formatDateTime()` 함수로 한국어 포맷 변환
+
+#### 4-3. HomePage.jsx — 파일 객체 보존
+
+- `handleFileChange`: 파일 선택 시 미리보기용 Object URL 외에 원본 `File` 객체도 함께 저장
+  - 기존: `{ name, type, url }`
+  - 변경: `{ name, type, url, file }` — `file`은 서버 업로드 시 `FormData.append()`에 사용
+
+---
+
+### 5. 데이터 흐름 변경 (Before → After)
+
+```
+[Before — 메모리 기반]
+홈 → 상세 루틴 완료 → App.jsx feedPosts 배열에 push (메모리)
+피드 페이지 → App.jsx feedPosts를 props로 전달 (새로고침 시 초기화)
+좋아요/댓글 → App.jsx에서 feedPosts 배열 조작 (메모리)
+
+[After — DB 기반]
+홈 → 상세 루틴 완료 + 피드 체크 → POST /feed (multipart)
+     → Express: multer로 파일 저장 + FastAPI POST /feed/ + POST /feed/image
+피드 페이지 → GET /feed
+     → Express: FastAPI GET /feed/ + 각 피드별 이미지/좋아요 상태 병렬 조회
+좋아요 → POST /like → Express → FastAPI POST /like/ (토글)
+댓글   → POST /comment → Express → FastAPI POST /comment/
+```
+
+---
+
+### 6. 기타 변경
+
+| 항목 | 내용 |
+|---|---|
+| `.gitignore` | `src/backend/uploads/*` 추가 (업로드 파일 Git 제외, `.gitkeep`은 유지) |
+| `src/backend/package.json` | `multer` 의존성 추가 |
+| ESLint | `App.jsx`에서 미사용 `dateText` 변수 제거 |
+| 프론트 빌드 | `npx vite build` 성공 확인 |
+| Express 문법 검증 | 전체 8개 파일 `node --check` 통과 |
+
+---
+
+### 7. API 명세 추가 (Express :3000)
+
+#### Express (:3000) — 피드
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| POST | /feed | 피드 생성 (multipart — files[] + routine_id, completion_id, content) |
+| GET | /feed | 전체 피드 목록 조회 (이미지, 좋아요 상태, 댓글 포함, 최신순) |
+| DELETE | /feed/:feed_id | 피드 삭제 |
+
+#### Express (:3000) — 좋아요
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| POST | /like | 좋아요 토글 (body: { feed_id }) |
+
+#### Express (:3000) — 댓글
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| POST | /comment | 댓글 작성 (body: { feed_id, content }) |
+| GET | /comment/:feed_id | 피드 댓글 목록 조회 |
+| DELETE | /comment/:comment_id | 댓글 삭제 |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
-- [ ] 피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)
-- [ ] 댓글 기능 → 현재 프론트 메모리 기준이며 댓글 API 연결 필요
-- [ ] 피드 업로드 → 실제 백엔드 API(`/feed`)와 연결 필요
-- [ ] 마이페이지 → 이번 주 달성률, 인증 게시글 수, 최근 활동 백엔드 연결
-- [ ] 닉네임 중복체크 → Express에서 FastAPI `/user/check/nickname` 연결
-- [ ] 세션 → Express 메모리 Map 대신 DB 저장 방식으로 전환 (FastAPI sessions API 준비 완료)
-- [ ] 비밀번호 bcrypt 해싱 적용
+- [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
+- [x] ~~댓글 기능 → 현재 프론트 메모리 기준이며 댓글 API 연결 필요~~ ✅ 2026-04-18 완료
+- [x] ~~피드 업로드 → 실제 백엔드 API(`/feed`)와 연결 필요~~ ✅ 2026-04-18 완료
+- [ ] 마이페이지 → 이번 주 달성률, 인증 게시글 수 백엔드 연결
 - [ ] 현재 루틴을 추가하면 인증한 루틴 표시가 사라지는 버그 확인 필요
+- [ ] 피드 이미지 → 현재 로컬 디스크 저장 방식, 추후 S3 등 클라우드 스토리지 전환 고려
 ---
 
 ## 👥 팀원

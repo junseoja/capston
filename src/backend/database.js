@@ -254,6 +254,168 @@ async function deleteCompletion(completion_id, user_id) {
     return await res.json();
 }
 
+// ─── 피드 관련 함수 ────────────────────────────────────────────────────────
+
+/**
+ * 피드 게시물 생성
+ *
+ * FastAPI POST /feed/ 호출.
+ * 상세 루틴 완료 시 "피드에도 업로드" 체크한 경우 호출.
+ *
+ * @param {object} feedData
+ *   @param {string} feedData.user_id       - 유저 UUID v7
+ *   @param {string} feedData.routine_id    - 루틴 UUID v7
+ *   @param {string} feedData.completion_id - 완료 기록 UUID v7
+ *   @param {string} feedData.content       - 피드 본문 (인증 글)
+ * @returns {object} { success: true, feed_id: "uuid-v7-..." }
+ */
+async function createFeed(feedData) {
+    const res = await fetch(`${PYTHON_API}/feed/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(feedData),
+    });
+    return await res.json();
+}
+
+/**
+ * 피드 이미지 레코드 추가
+ *
+ * FastAPI POST /feed/image 호출.
+ * 파일은 Express에서 디스크에 저장한 뒤, URL을 이 함수로 전달.
+ *
+ * @param {object} imageData
+ *   @param {string} imageData.feed_id   - 피드 UUID v7
+ *   @param {string} imageData.file_url  - 저장된 파일 URL (예: /uploads/xxx.jpg)
+ *   @param {string} imageData.file_type - MIME 타입 (예: image/jpeg)
+ * @returns {object} { success: true }
+ */
+async function addFeedImage(imageData) {
+    const res = await fetch(`${PYTHON_API}/feed/image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(imageData),
+    });
+    return await res.json();
+}
+
+/**
+ * 전체 피드 목록 조회 (최신순)
+ *
+ * FastAPI GET /feed/ 호출.
+ * 좋아요 수, 댓글 수가 포함된 피드 목록 반환.
+ *
+ * @returns {Array} 피드 목록 배열
+ */
+async function getFeeds() {
+    const res = await fetch(`${PYTHON_API}/feed/`);
+    return await res.json();
+}
+
+/**
+ * 피드 상세 조회 (이미지 + 댓글 포함)
+ *
+ * FastAPI GET /feed/{feed_id} 호출.
+ *
+ * @param {string} feed_id - 피드 UUID v7
+ * @returns {object} 피드 상세 (images, comments 포함)
+ */
+async function getFeedDetail(feed_id) {
+    const res = await fetch(`${PYTHON_API}/feed/${feed_id}`);
+    return await res.json();
+}
+
+/**
+ * 피드 삭제 (본인 소유 검증 포함)
+ *
+ * @param {string} feed_id - 삭제할 피드 UUID v7
+ * @param {string} user_id - 요청한 유저 UUID v7
+ * @returns {object} { success: true } 또는 { success: false, message: "..." }
+ */
+async function deleteFeed(feed_id, user_id) {
+    const res = await fetch(
+        `${PYTHON_API}/feed/${feed_id}?user_id=${encodeURIComponent(user_id)}`,
+        { method: "DELETE" }
+    );
+    return await res.json();
+}
+
+// ─── 좋아요 관련 함수 ─────────────────────────────────────────────────────
+
+/**
+ * 좋아요 토글 (추가/취소)
+ *
+ * @param {string} feed_id - 피드 UUID v7
+ * @param {string} user_id - 유저 UUID v7
+ * @returns {object} { success: true, liked: true/false }
+ */
+async function toggleLike(feed_id, user_id) {
+    const res = await fetch(`${PYTHON_API}/like/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feed_id, user_id }),
+    });
+    return await res.json();
+}
+
+/**
+ * 특정 유저의 좋아요 여부 확인
+ *
+ * @param {string} feed_id - 피드 UUID v7
+ * @param {string} user_id - 유저 UUID v7
+ * @returns {object} { liked: true/false }
+ */
+async function checkLike(feed_id, user_id) {
+    const res = await fetch(`${PYTHON_API}/like/${feed_id}/${user_id}`);
+    return await res.json();
+}
+
+// ─── 댓글 관련 함수 ──────────────────────────────────────────────────────
+
+/**
+ * 댓글 작성
+ *
+ * @param {object} commentData
+ *   @param {string} commentData.feed_id  - 피드 UUID v7
+ *   @param {string} commentData.user_id  - 유저 UUID v7
+ *   @param {string} commentData.content  - 댓글 내용
+ * @returns {object} { success: true, comment_id: "uuid-v7-..." }
+ */
+async function createComment(commentData) {
+    const res = await fetch(`${PYTHON_API}/comment/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(commentData),
+    });
+    return await res.json();
+}
+
+/**
+ * 피드 댓글 목록 조회
+ *
+ * @param {string} feed_id - 피드 UUID v7
+ * @returns {Array} 댓글 목록 배열 (작성순)
+ */
+async function getComments(feed_id) {
+    const res = await fetch(`${PYTHON_API}/comment/${feed_id}`);
+    return await res.json();
+}
+
+/**
+ * 댓글 삭제 (본인 소유 검증 포함)
+ *
+ * @param {string} comment_id - 삭제할 댓글 UUID v7
+ * @param {string} user_id    - 요청한 유저 UUID v7
+ * @returns {object} { success: true } 또는 { success: false, message: "..." }
+ */
+async function deleteComment(comment_id, user_id) {
+    const res = await fetch(
+        `${PYTHON_API}/comment/${comment_id}?user_id=${encodeURIComponent(user_id)}`,
+        { method: "DELETE" }
+    );
+    return await res.json();
+}
+
 // ── 모듈 내보내기 ────────────────────────────────────────────────────────────
 module.exports = {
     findUser,
@@ -268,4 +430,14 @@ module.exports = {
     getTodayCompletions,
     getCompletionHistory,
     deleteCompletion,
+    createFeed,
+    addFeedImage,
+    getFeeds,
+    getFeedDetail,
+    deleteFeed,
+    toggleLike,
+    checkLike,
+    createComment,
+    getComments,
+    deleteComment,
 };

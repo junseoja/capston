@@ -48,10 +48,6 @@ function App() {
     // HomePage, RoutinePage에 props로 전달하여 동일 데이터 공유 (중복 fetch 방지)
     const [routines, setRoutines] = useState([]);
 
-    // 피드 게시물 - 상세 루틴 인증 시 "피드 업로드" 체크하면 추가됨
-    // NOTE: 현재 메모리에만 저장 → 새로고침 시 초기화됨 (추후 백엔드 연결 예정)
-    const [feedPosts, setFeedPosts] = useState([]);
-
     // 현재 로그인한 유저 정보 (GET /me 응답: { user_id, login_id, nickname, ... })
     const [currentUser, setCurrentUser] = useState(null);
 
@@ -188,7 +184,6 @@ function App() {
                 } else {
                     setIsLoggedIn(false);
                     setRoutines([]);
-                    setFeedPosts([]);
                 }
             } finally {
                 setAuthChecked(true);
@@ -299,12 +294,6 @@ function App() {
             minute: "2-digit",
             hour12: false,
         });
-        const dateText = now.toLocaleDateString("ko-KR", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-        });
-
         // setRoutines 이후에는 이전 값 접근이 어려우므로 미리 루틴 정보를 찾아둠
         const targetRoutine = routines.find((r) => r.id === id);
 
@@ -342,26 +331,34 @@ function App() {
                 )
             );
 
-            // "피드에 업로드" 체크했을 때 feedPosts 배열 앞에 새 게시물 추가 (최신이 맨 위)
+            // "피드에 업로드" 체크 시 실제 백엔드 API로 피드 생성
             if (uploadToFeed && targetRoutine) {
-                setFeedPosts((prev) => [
-                    {
-                        id: Date.now(),                           // 임시 ID (추후 DB의 feed_id로 교체)
-                        routineId: id,                            // 완료 취소 시 피드 삭제에 사용
-                        nickname: currentUser?.nickname ?? "나",  // 옵셔널 체이닝으로 null 안전 접근
-                        routineTitle: targetRoutine.title,
-                        category: targetRoutine.category,
-                        content: proofText,
-                        files: proofFiles,
-                        liked: false,
-                        likeCount: 0,
-                        commentCount: 0,
-                        comments: [],
-                        createdAt: dateText,
-                        createdTime: timeText,
-                    },
-                    ...prev, // 기존 게시물들은 뒤에 배치 (최신 게시물이 먼저)
-                ]);
+                try {
+                    // FormData로 텍스트 필드 + 파일을 함께 전송
+                    const formData = new FormData();
+                    formData.append("routine_id", id);
+                    formData.append("completion_id", data.completion_id);
+                    formData.append("content", proofText);
+
+                    // proofFiles 배열의 각 항목에서 원본 File 객체가 필요
+                    // blob URL로는 서버에 업로드할 수 없으므로, 원본 파일을 사용
+                    // handleFileChange에서 File 객체를 함께 저장해야 함
+                    for (const file of proofFiles) {
+                        if (file.file) {
+                            formData.append("files", file.file);
+                        }
+                    }
+
+                    await fetch(`${EXPRESS_URL}/feed`, {
+                        method: "POST",
+                        credentials: "include",
+                        body: formData, // multipart/form-data (Content-Type 자동 설정)
+                    });
+                } catch (feedError) {
+                    console.error("피드 업로드 실패:", feedError);
+                    // 피드 업로드 실패해도 루틴 완료 자체는 성공이므로 alert만 표시
+                    alert("루틴 완료는 저장되었지만, 피드 업로드에 실패했습니다.");
+                }
             }
             return true;
         } catch (error) {
@@ -369,99 +366,6 @@ function App() {
             alert("서버 오류가 발생했습니다.");
             return false;
         }
-    };
-
-    // ── 피드 좋아요 토글 ──────────────────────────────────────────────────────
-
-    /**
-     * toggleFeedLike - 피드 게시물 좋아요 토글
-     *
-     * liked 상태를 반전시키고 likeCount를 1 증감
-     * Math.max(0, ...) 으로 likeCount가 음수가 되지 않도록 보호
-     *
-     * TODO: 추후 POST /like API 연결 후 DB에 좋아요 상태 저장
-     *
-     * @param {number} postId - 좋아요 토글할 게시물 ID (Date.now() 값)
-     */
-    const toggleFeedLike = (postId) => {
-        setFeedPosts((prev) =>
-            prev.map((post) => {
-                if (post.id !== postId) return post; // 대상 아닌 게시물은 그대로
-
-                const nextLiked = !post.liked;
-                return {
-                    ...post,
-                    liked: nextLiked,
-                    likeCount: nextLiked
-                        ? post.likeCount + 1
-                        : Math.max(0, post.likeCount - 1), // 0 미만으로 내려가지 않도록
-                };
-            })
-        );
-    };
-
-    /**
-     * addFeedComment - 피드 댓글 추가
-     *
-     * 현재는 프론트 메모리 상태만 갱신하며, 추후 댓글 API 연결 시 서버 저장으로 대체 예정
-     *
-     * @param {number} postId - 댓글을 달 게시물 ID
-     * @param {string} commentText - 댓글 입력값
-     */
-    const addFeedComment = (postId, commentText) => {
-        const trimmed = commentText.trim();
-        if (!trimmed) return;
-
-        setFeedPosts((prev) =>
-            prev.map((post) => {
-                if (post.id !== postId) return post;
-
-                const nextComments = [
-                    ...(post.comments ?? []),
-                    {
-                        id: Date.now(),
-                        nickname: currentUser?.nickname ?? "나",
-                        content: trimmed,
-                        createdAt: new Date().toLocaleString("ko-KR", {
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                        }),
-                    },
-                ];
-
-                return {
-                    ...post,
-                    comments: nextComments,
-                    commentCount: nextComments.length,
-                };
-            })
-        );
-    };
-
-    /**
-     * deleteFeedComment - 피드 댓글 삭제
-     *
-     * @param {number} postId - 대상 게시물 ID
-     * @param {number} commentId - 삭제할 댓글 ID
-     */
-    const deleteFeedComment = (postId, commentId) => {
-        setFeedPosts((prev) =>
-            prev.map((post) => {
-                if (post.id !== postId) return post;
-
-                const nextComments = (post.comments ?? []).filter(
-                    (comment) => comment.id !== commentId
-                );
-
-                return {
-                    ...post,
-                    comments: nextComments,
-                    commentCount: nextComments.length,
-                };
-            })
-        );
     };
 
     // ── 루틴 완료 취소 ────────────────────────────────────────────────────────
@@ -521,9 +425,7 @@ function App() {
                 )
             );
 
-            // 해당 루틴으로 업로드된 피드 게시물도 함께 제거
-            // routineId로 필터링하여 연관 게시물만 삭제
-            setFeedPosts((prev) => prev.filter((post) => post.routineId !== id));
+            // 연관 피드 게시물은 DB의 ON DELETE CASCADE로 자동 삭제됨
         } catch (error) {
             console.error("루틴 완료 취소 실패:", error);
             alert("서버 오류가 발생했습니다.");
@@ -557,7 +459,6 @@ function App() {
         // 프론트 상태 초기화 (다른 유저가 로그인해도 이전 데이터 보이지 않도록)
         setIsLoggedIn(false);
         setRoutines([]);
-        setFeedPosts([]);
         setCurrentUser(null);
         setAuthChecked(true);
         navigate("/login");
@@ -641,18 +542,12 @@ function App() {
                         }
                     />
 
-                    {/* 피드 페이지: 현재는 메모리의 feedPosts 표시 (추후 API 연결 예정) */}
+                    {/* 피드 페이지: DB에서 전체 피드를 최신순으로 조회 */}
                     <Route
                         path="/feed"
                         element={
                             isLoggedIn
-                                ? <FeedPage
-                                    feedPosts={feedPosts}
-                                    onToggleLike={toggleFeedLike}
-                                    onAddComment={addFeedComment}
-                                    onDeleteComment={deleteFeedComment}
-                                    currentUserNickname={currentUser?.nickname ?? "나"}
-                                  />
+                                ? <FeedPage currentUser={currentUser} />
                                 : <Navigate to="/login" />
                         }
                     />

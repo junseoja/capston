@@ -24,6 +24,7 @@ require("dotenv").config(); // .env 파일을 process.env에 로드 (가장 먼�
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+const path = require("path");
 
 const PORT = process.env.PORT || 3000;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -37,6 +38,15 @@ const routineRouter = require("./routes/routine");
 
 // 완료 이력 라우터: GET /completion/history
 const completionRouter = require("./routes/completion");
+
+// 피드 라우터: POST/GET /feed, DELETE /feed/:feed_id
+const feedRouter = require("./routes/feed");
+
+// 좋아요 라우터: POST /like
+const likeRouter = require("./routes/like");
+
+// 댓글 라우터: POST /comment, GET /comment/:feed_id, DELETE /comment/:comment_id
+const commentRouter = require("./routes/comment");
 
 const app = express();
 
@@ -52,6 +62,10 @@ app.use(express.json());
 
 // 쿠키 파싱 미들웨어 → req.cookies.sessionId 처럼 쿠키 값에 접근 가능
 app.use(cookieParser());
+
+// 업로드된 파일을 정적으로 서빙 (피드 이미지/영상)
+// /uploads/파일명 으로 접근 가능
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ── 라우터 등록 ──────────────────────────────────────────────────────────────
 
@@ -72,6 +86,22 @@ app.use("/", routineRouter);
 // 완료 이력 관련 라우트 (prefix "/")
 // - GET    /completion/history : 내 루틴 완료 이력 조회
 app.use("/", completionRouter);
+
+// 피드 관련 라우트 (prefix "/")
+// - POST   /feed         : 피드 생성 (이미지 업로드 포함)
+// - GET    /feed         : 전체 피드 목록 조회
+// - DELETE /feed/:feed_id : 피드 삭제
+app.use("/", feedRouter);
+
+// 좋아요 관련 라우트 (prefix "/")
+// - POST   /like : 좋아요 토글
+app.use("/", likeRouter);
+
+// 댓글 관련 라우트 (prefix "/")
+// - POST   /comment              : 댓글 작성
+// - GET    /comment/:feed_id     : 댓글 목록 조회
+// - DELETE /comment/:comment_id  : 댓글 삭제
+app.use("/", commentRouter);
 
 // ── 서버 시작 ────────────────────────────────────────────────────────────────
 
