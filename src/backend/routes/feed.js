@@ -17,7 +17,6 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const {
-    findSession,
     createFeed,
     addFeedImage,
     getFeeds,
@@ -25,6 +24,8 @@ const {
     deleteFeed,
     checkLike,
 } = require("../database");
+// [리팩터링 #12] 세션 인증 4줄 복붙을 미들웨어 한 줄로 대체
+const requireAuth = require("../middleware/requireAuth");
 
 // ── multer 설정 (파일 업로드) ────────────────────────────────────────────────
 
@@ -67,18 +68,9 @@ const upload = multer({
  *   2. FastAPI POST /feed/ → feed_id 생성
  *   3. 업로드된 파일마다 FastAPI POST /feed/image → DB에 이미지 URL 저장
  */
-router.post("/feed", upload.array("files", 10), async (req, res) => {
-    const { sessionId } = req.cookies;
-
-    if (!sessionId) {
-        return res.status(401).json({ success: false, message: "로그인이 필요합니다." });
-    }
-
-    const session = await findSession(sessionId);
-    if (!session) {
-        return res.status(401).json({ success: false, message: "로그인이 필요합니다." });
-    }
-
+// [리팩터링 #1+#3] 기존 catch는 무조건 500으로 뭉갰지만, next(err)로 넘기면
+// 글로벌 핸들러가 FastApiError의 실제 상태(예: 404, 409)를 보존해서 응답
+router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, next) => {
     const { routine_id, completion_id, content } = req.body;
 
     if (!routine_id || !completion_id) {
@@ -88,7 +80,7 @@ router.post("/feed", upload.array("files", 10), async (req, res) => {
     try {
         // 1. 피드 레코드 생성
         const feedResult = await createFeed({
-            user_id: session.user_id,
+            user_id: req.user.user_id,
             routine_id,
             completion_id,
             content: content || "",
@@ -113,8 +105,7 @@ router.post("/feed", upload.array("files", 10), async (req, res) => {
 
         return res.json({ success: true, feed_id });
     } catch (error) {
-        console.error("피드 생성 오류:", error);
-        return res.status(500).json({ success: false, message: "서버 오류" });
+        return next(error);
     }
 });
 
@@ -133,18 +124,7 @@ router.post("/feed", upload.array("files", 10), async (req, res) => {
  *      - FastAPI GET /like/{feed_id}/{user_id} → 현재 유저 좋아요 여부
  *   3. 합쳐서 반환
  */
-router.get("/feed", async (req, res) => {
-    const { sessionId } = req.cookies;
-
-    if (!sessionId) {
-        return res.status(401).json({ success: false, message: "로그인이 필요합니다." });
-    }
-
-    const session = await findSession(sessionId);
-    if (!session) {
-        return res.status(401).json({ success: false, message: "로그인이 필요합니다." });
-    }
-
+router.get("/feed", requireAuth, async (req, res, next) => {
     try {
         // 1. 전체 피드 목록 (최신순, 좋아요/댓글 수 포함)
         const feeds = await getFeeds();
@@ -154,7 +134,7 @@ router.get("/feed", async (req, res) => {
             feeds.map(async (feed) => {
                 const [detail, likeStatus] = await Promise.all([
                     getFeedDetail(feed.feed_id),
-                    checkLike(feed.feed_id, session.user_id),
+                    checkLike(feed.feed_id, req.user.user_id),
                 ]);
 
                 return {
@@ -168,31 +148,30 @@ router.get("/feed", async (req, res) => {
 
         return res.json({ success: true, feeds: enrichedFeeds });
     } catch (error) {
-        console.error("피드 목록 조회 오류:", error);
-        return res.status(500).json({ success: false, message: "서버 오류" });
+        return next(error);
     }
 });
 
 // ── 피드 삭제 (DELETE /feed/:feed_id) ────────────────────────────────────────
 
-router.delete("/feed/:feed_id", async (req, res) => {
-    const { sessionId } = req.cookies;
-
-    if (!sessionId) {
-        return res.status(401).json({ success: false, message: "로그인이 필요합니다." });
-    }
-
-    const session = await findSession(sessionId);
-    if (!session) {
-        return res.status(401).json({ success: false, message: "로그인이 필요합니다." });
-    }
-
+/**
+ * DELETE /feed/:feed_id
+ *
+ * 피드 삭제 (세션 인증 + 본인 소유 검증)
+ *
+ * 처리 흐름:
+ *   1. 세션 쿠키 확인 → 미로그인 시 401
+ *   2. 세션에서 user_id 추출
+ *   3. FastAPI DELETE /feed/{feed_id}?user_id={user_id}
+ *      → FastAPI에서 WHERE feed_id=? AND user_id=? 조건으로 삭제
+ *      → ON DELETE CASCADE로 feed_images, feed_likes, feed_comments도 자동 삭제
+ */
+router.delete("/feed/:feed_id", requireAuth, async (req, res, next) => {
     try {
-        const result = await deleteFeed(req.params.feed_id, session.user_id);
+        const result = await deleteFeed(req.params.feed_id, req.user.user_id);
         return res.json(result);
     } catch (error) {
-        console.error("피드 삭제 오류:", error);
-        return res.status(500).json({ success: false, message: "서버 오류" });
+        return next(error);
     }
 });
 

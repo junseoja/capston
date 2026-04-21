@@ -14,10 +14,10 @@
 #   - proof_text    : 인증 글 (상세 루틴에서 입력)
 #   - completed_at  : 완료 일시 (자동)
 #
-# 현재 상태:
-#   React 프론트에서 아직 이 API를 직접 호출하지 않음
-#   (완료 처리는 React state에서만 관리 중)
-#   추후 홈 화면 완료 버튼 클릭 시 이 API 연결 예정
+# 연결 상태:
+#   Express completion.js 라우터를 통해 프론트엔드와 연결 완료
+#   홈 화면에서 루틴 완료/취소 시 이 API가 호출됨
+#   마이페이지 "최근 활동" 섹션에서 완료 이력 조회에 사용
 # ============================================================
 
 from fastapi import APIRouter, HTTPException, Query
@@ -44,7 +44,7 @@ class CompletionCreate(BaseModel):
 def create_completion(body: CompletionCreate):
     """루틴 완료 기록 생성
 
-    홈 화면에서 루틴을 완료할 때 호출 예정.
+    홈 화면에서 루틴을 완료할 때 호출됨.
     UUID v7로 completion_id를 생성하고 routine_completions 테이블에 INSERT.
     피드 업로드 시에도 이 completion_id가 feeds 테이블에 FK로 연결됨.
 
@@ -84,7 +84,7 @@ def create_completion(body: CompletionCreate):
 def get_today_completions(user_id: str):
     """오늘 완료한 루틴 목록 조회
 
-    홈 화면 초기 로드 시 오늘 이미 완료한 루틴을 표시하기 위해 사용 예정.
+    홈 화면 초기 로드 시 오늘 이미 완료한 루틴을 표시하기 위해 사용됨.
     DATE(completed_at) = CURDATE() 조건으로 오늘 날짜의 기록만 필터링.
 
     Args:
@@ -125,9 +125,8 @@ def delete_completion(
 ):
     """루틴 완료 취소 (완료 기록 삭제)
 
-    홈 화면에서 완료된 루틴 카드를 클릭해 완료 취소할 때 호출 예정.
-    피드에 올라간 게시물도 함께 삭제해야 하므로
-    feeds 테이블의 ON DELETE CASCADE 설정 여부 확인 필요.
+    홈 화면에서 완료된 루틴 카드를 클릭해 완료 취소할 때 호출됨.
+    feeds 테이블의 ON DELETE CASCADE 설정으로 연관 피드 게시물도 자동 삭제됨.
 
     [수정] 기존에는 completion_id만으로 삭제했으나,
     이제 user_id까지 함께 검증하여 본인 완료 기록만 삭제 가능하도록 강화.
@@ -170,9 +169,8 @@ def delete_completion(
 def get_completion_history(user_id: str):
     """유저 전체 완료 이력 조회 (마이페이지용)
 
-    마이페이지의 "최근 활동" 섹션에서 사용 예정.
-    현재 MyPage.jsx에는 하드코딩된 더미 데이터가 표시되고 있으며,
-    이 API가 연결되면 실제 완료 기록으로 대체 가능.
+    마이페이지의 "최근 활동" 섹션에서 사용됨.
+    MyPage.jsx에서 GET /completion/history를 호출하여 실제 완료 이력을 표시.
 
     routines 테이블과 JOIN하여 루틴 제목, 카테고리, 완료 방식도 함께 반환.
     최신 20건만 조회 (LIMIT 20).

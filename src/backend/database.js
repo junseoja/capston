@@ -2,22 +2,110 @@
 // Express ↔ FastAPI 연결 모듈 (database.js)
 // ============================================================
 // 역할:
-//   Express 라우터(login.js, routine.js)에서 호출하며,
+//   Express 라우터(login.js, routine.js, feed.js, like.js, comment.js)에서 호출하며,
 //   실제 DB 작업은 FastAPI(포트 8000)에 HTTP 요청으로 위임.
 //
 // 아키텍처:
 //   Express 라우터 → 이 모듈의 함수 → HTTP fetch → FastAPI 라우터 → MySQL
 //
 // 함수 분류:
-//   유저 관련  : findUser, createUser
-//   세션 관련  : createSession, findSession, deleteSession
-//   루틴 관련  : createRoutine, getRoutines, deleteRoutine
-//   완료 관련  : createCompletion, getTodayCompletions, getCompletionHistory, deleteCompletion
+//   유저 관련   : findUser, createUser
+//   세션 관련   : createSession, findSession, deleteSession
+//   루틴 관련   : createRoutine, getRoutines, deleteRoutine
+//   완료 관련   : createCompletion, getTodayCompletions, getCompletionHistory, deleteCompletion
+//   피드 관련   : createFeed, addFeedImage, getFeeds, getFeedDetail, deleteFeed
+//   좋아요 관련 : toggleLike, checkLike
+//   댓글 관련   : createComment, getComments, deleteComment
+//
+// [리팩터링 #2] FastAPI 호출 에러 처리 통합 (README 4월 18일 #2)
+//   기존 문제:
+//     - `await res.json()` 직전에 res.ok 검증이 없었음
+//       → FastAPI가 HTML 500을 내려주면 SyntaxError 로 라우터 크래시
+//     - fetch 자체가 네트워크 오류로 throw 하면 스택 전체로 전파
+//     - FastAPI의 {detail: "..."} 에러 페이로드를 그대로 성공처럼 반환
+//   해결:
+//     - 모든 FastAPI 호출을 fetchJson() 단일 헬퍼로 통과시킴
+//     - 네트워크/HTTP/JSON 파싱 에러를 일관된 FastApiError 로 throw
+//     - 라우터는 try/catch 만 붙이면 500 응답을 안전하게 내릴 수 있음
 // ============================================================
 
 const fetch = require("node-fetch"); // HTTP 요청 라이브러리 (node.js 환경용)
 
 const PYTHON_API = process.env.PYTHON_API || "http://localhost:8000"; // FastAPI 서버 주소
+
+// ─── FastAPI 호출 공통 헬퍼 ────────────────────────────────────────────────
+
+/**
+ * FastAPI 호출 시 발생하는 에러를 표준화하기 위한 커스텀 에러.
+ *
+ * 라우터 쪽에서 `error instanceof FastApiError` 로 분기하여
+ * FastAPI 쪽 실패(502/503 상황)와 Express 내부 버그를 구분할 수 있게 함.
+ */
+class FastApiError extends Error {
+    constructor(message, status) {
+        super(message);
+        this.name = "FastApiError";
+        this.status = status; // 0 이면 네트워크 자체 실패 (서버 다운 등)
+    }
+}
+
+/**
+ * FastAPI에 HTTP 요청을 보내고 JSON 응답을 파싱.
+ *
+ * 해결하는 에러 (README 4월 18일 #2):
+ *   1. FastAPI가 HTML 500 응답 반환 → res.json() 이 SyntaxError 로 크래시
+ *      → content-type 체크 + try/catch 로 표준 에러로 변환
+ *   2. res.ok 체크 없음 → FastAPI 에러 응답({detail: "..."})이 성공처럼 반환
+ *      → res.ok 검증 후 false 면 throw
+ *   3. 네트워크 끊김 → fetch 자체가 throw 후 스택 전체 크래시
+ *      → try/catch 로 감싸 FastApiError(status=0) 으로 변환
+ *
+ * @param {string} url - FastAPI 엔드포인트 절대 URL
+ * @param {object} [options] - fetch 옵션 (method, headers, body 등)
+ * @returns {Promise<any>} 파싱된 JSON 응답
+ * @throws {FastApiError} 네트워크/HTTP/JSON 파싱 실패 시
+ */
+async function fetchJson(url, options) {
+    let response;
+    try {
+        response = await fetch(url, options);
+    } catch (error) {
+        // 네트워크 레벨 실패: FastAPI 서버 다운, DNS 실패, 타임아웃 등
+        // 이 throw를 잡지 않으면 기존에는 Express 기본 핸들러가 HTML 500을 내렸음
+        throw new FastApiError(
+            `FastAPI 서버에 연결할 수 없습니다: ${error.message}`,
+            0
+        );
+    }
+
+    // HTTP 에러(4xx/5xx)의 경우에도 body는 비어있을 수도, JSON 일 수도, HTML 일 수도 있음
+    // 우선 텍스트로 읽고 JSON 파싱 시도 → 실패하면 원문 메시지를 사용
+    const rawText = await response.text();
+
+    let parsed;
+    try {
+        parsed = rawText ? JSON.parse(rawText) : null;
+    } catch {
+        // JSON 아닌 응답 (FastAPI 트레이스백 HTML, 프록시 에러 페이지 등)
+        // → 라우터가 res.json()으로 클라이언트에 보내면 안 되므로 여기서 throw
+        throw new FastApiError(
+            `FastAPI 응답을 JSON으로 파싱할 수 없습니다 (status ${response.status})`,
+            response.status
+        );
+    }
+
+    if (!response.ok) {
+        // FastAPI 표준 에러는 { detail: "..." } 형태
+        // 라우터가 "정상 json"처럼 취급하지 않도록 여기서 throw
+        const detail = parsed?.detail || parsed?.message || "FastAPI 오류";
+        throw new FastApiError(
+            `FastAPI ${response.status}: ${detail}`,
+            response.status
+        );
+    }
+
+    return parsed;
+}
 
 // ─── 유저 관련 함수 ────────────────────────────────────────────────────────
 
@@ -29,59 +117,42 @@ const PYTHON_API = process.env.PYTHON_API || "http://localhost:8000"; // FastAPI
  *
  * @param {string} login_id - 로그인 아이디 (예: "hong123")
  * @returns {object|null} 유저 정보 객체 또는 null (없으면 null)
- *   - 반환 예시: { user_id, login_id, password, nickname, email, gender, birth_date }
  */
 async function findUser(login_id) {
-    const res = await fetch(`${PYTHON_API}/user/${login_id}`);
-    const data = await res.json();
+    const data = await fetchJson(`${PYTHON_API}/user/${login_id}`);
     // FastAPI는 유저가 없을 때 빈 객체 {} 반환 → Object.keys로 존재 여부 판단
-    return Object.keys(data).length ? data : null;
+    return data && Object.keys(data).length ? data : null;
 }
 
 /**
  * 회원가입 - 유저 생성
  *
  * FastAPI POST /user/signup 호출.
- * login.js의 POST /signup 라우트에서 유효성 검사 후 호출됨.
  *
- * @param {object} userInfo - 유저 정보
- *   @param {string} userInfo.login_id   - 로그인 아이디
- *   @param {string} userInfo.password   - 비밀번호 (현재 평문 - TODO: 해시 처리 필요)
- *   @param {string} userInfo.nickname   - 닉네임
- *   @param {string} userInfo.birth_date - 생년월일 "YYYY-MM-DD" 형식
- *   @param {string} userInfo.gender     - 성별 ("남"/"여"/"기타")
- *   @param {string} userInfo.email      - 이메일
- * @returns {object} 성공 시 { success: true }, 중복 시 HTTP 409 에러
+ * @returns {object} 성공 시 { success: true }, 중복 시 HTTP 409 → FastApiError throw
  */
 async function createUser(userInfo) {
-    const res = await fetch(`${PYTHON_API}/user/signup`, {
+    return await fetchJson(`${PYTHON_API}/user/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(userInfo),
     });
-    return await res.json();
 }
 
 // ─── 세션 관련 함수 ────────────────────────────────────────────────────────
 
 /**
- * 세션 DB에 저장
+ * 세션 DB에 저장 (FastAPI POST /user/session)
  *
- * FastAPI POST /user/session 호출.
  * 로그인 성공 시 세션 ID와 유저 ID를 sessions 테이블에 저장.
  * 세션은 1일 후 자동 만료됨 (expires_at = NOW() + 1 DAY).
- *
- * @param {string} session_id - UUID v4 세션 ID (Express에서 uuid 라이브러리로 생성)
- * @param {string} user_id    - UUID v7 유저 ID (users 테이블의 PK)
- * @returns {object} { success: true }
  */
 async function createSession(session_id, user_id) {
-    const res = await fetch(`${PYTHON_API}/user/session`, {
+    return await fetchJson(`${PYTHON_API}/user/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id, user_id }),
     });
-    return await res.json();
 }
 
 /**
@@ -89,335 +160,206 @@ async function createSession(session_id, user_id) {
  *
  * FastAPI GET /user/session/{session_id} 호출.
  * 모든 보호된 라우트(/routine, /me, /logout)에서 쿠키의 sessionId로 호출됨.
- * 만료된 세션은 자동으로 null 반환.
+ * 만료된 세션은 FastAPI 측에서 빈 객체 반환 → 여기서 null로 변환.
  *
- * @param {string} session_id - 브라우저 쿠키에서 추출한 세션 ID
- * @returns {object|null} 세션 + 유저 정보 또는 null
- *   - 반환 예시: { session_id, user_id, login_id, nickname }
- *   - 만료 또는 없는 세션: null
+ * @returns {object|null} 세션 + 유저 정보 또는 null (만료/없음)
  */
 async function findSession(session_id) {
-    const res = await fetch(`${PYTHON_API}/user/session/${session_id}`);
-    const data = await res.json();
-    // FastAPI는 세션이 없거나 만료되면 빈 객체 {} 반환
-    return Object.keys(data).length ? data : null;
+    const data = await fetchJson(`${PYTHON_API}/user/session/${session_id}`);
+    return data && Object.keys(data).length ? data : null;
 }
 
 /**
- * 세션 삭제 (로그아웃)
- *
- * FastAPI DELETE /user/session/{session_id} 호출.
- * 로그아웃 시 sessions 테이블에서 해당 세션 레코드를 삭제.
- *
- * @param {string} session_id - 삭제할 세션 ID
- * @returns {object} { success: true }
+ * 세션 삭제 (로그아웃, FastAPI DELETE /user/session/{session_id})
  */
 async function deleteSession(session_id) {
-    const res = await fetch(`${PYTHON_API}/user/session/${session_id}`, {
+    return await fetchJson(`${PYTHON_API}/user/session/${session_id}`, {
         method: "DELETE",
     });
-    return await res.json();
 }
 
 // ─── 루틴 관련 함수 ────────────────────────────────────────────────────────
 
 /**
- * 루틴 생성
- *
- * FastAPI POST /routine/ 호출.
- * routine.js의 POST /routine 라우트에서 세션 인증 후 호출됨.
- * user_id는 세션에서 자동으로 주입되어 전달됨.
- *
- * @param {object} routineData - 루틴 정보
- *   @param {string} routineData.user_id      - UUID v7 (세션에서 자동 주입)
- *   @param {string} routineData.title        - 루틴 제목
- *   @param {string} routineData.category     - 카테고리
- *   @param {string} routineData.time_slot    - 시간대 (morning/lunch/dinner)
- *   @param {string} routineData.routine_mode - 완료 방식 (check/detail)
- *   @param {string} routineData.goal         - 목표 시간 (예: "07:30")
- *   @param {string} routineData.repeat_cycle - 반복 주기
- *   @param {string} routineData.description  - 루틴 설명
- * @returns {object} { success: true }
+ * 루틴 생성 (FastAPI POST /routine/)
+ * user_id는 세션에서 자동 주입되어 전달됨.
  */
 async function createRoutine(routineData) {
-    const res = await fetch(`${PYTHON_API}/routine/`, {
+    return await fetchJson(`${PYTHON_API}/routine/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(routineData),
     });
-    return await res.json();
 }
 
 /**
- * 유저의 루틴 목록 조회
- *
- * FastAPI GET /routine/{user_id} 호출.
- * routine.js의 GET /routine 라우트에서 세션 인증 후 호출됨.
+ * 유저의 루틴 목록 조회 (FastAPI GET /routine/{user_id})
  * 최신 생성 순(created_at DESC)으로 정렬된 배열 반환.
- *
- * @param {string} user_id - UUID v7 유저 ID (세션에서 추출)
- * @returns {Array} 루틴 목록 배열 (DB 컬럼명 그대로: routine_id, time_slot 등)
  */
 async function getRoutines(user_id) {
-    const res = await fetch(`${PYTHON_API}/routine/${user_id}`);
-    return await res.json(); // 배열 그대로 반환 (Express에서 { success: true, routines: [...] }로 감싸서 전달)
+    return await fetchJson(`${PYTHON_API}/routine/${user_id}`);
 }
 
 /**
  * 루틴 삭제 (본인 소유 검증 포함)
- *
  * FastAPI DELETE /routine/{routine_id}?user_id={user_id} 호출.
- * FastAPI에서 WHERE routine_id=? AND user_id=? 조건으로 삭제하여
- * 다른 유저의 루틴을 삭제하지 못하도록 차단.
- *
- * @param {string} routine_id - 삭제할 루틴의 UUID v7
- * @param {string} user_id    - 요청한 유저의 UUID v7 (세션에서 추출)
- * @returns {object} { success: true } 또는 { success: false, message: "..." }
+ * WHERE routine_id=? AND user_id=? 조건으로 타인 루틴 삭제 차단.
  */
 async function deleteRoutine(routine_id, user_id) {
-    const res = await fetch(
+    return await fetchJson(
         `${PYTHON_API}/routine/${routine_id}?user_id=${encodeURIComponent(user_id)}`,
         { method: "DELETE" }
     );
-    return await res.json();
 }
 
 // ─── 완료 이력 관련 함수 ───────────────────────────────────────────────────
 
 /**
  * 유저의 루틴 완료 이력 조회 (최근 20건)
- *
- * FastAPI GET /completion/history/{user_id} 호출.
- * completion.js의 GET /completion/history 라우트에서 세션 인증 후 호출됨.
- * 마이페이지 "최근 활동" 섹션에서 사용.
- *
- * @param {string} user_id - UUID v7 유저 ID (세션에서 추출)
- * @returns {Array} 완료 이력 배열 (최신 20건)
- *   각 항목: { completion_id, routine_id, user_id, proof_text,
- *              completed_at, title, category, routine_mode }
+ * FastAPI GET /completion/history/{user_id}. 마이페이지 "최근 활동" 섹션에서 사용.
  */
 async function getCompletionHistory(user_id) {
-    const res = await fetch(`${PYTHON_API}/completion/history/${user_id}`);
-    return await res.json(); // 배열 그대로 반환
+    return await fetchJson(`${PYTHON_API}/completion/history/${user_id}`);
 }
 
 /**
- * 루틴 완료 기록 생성
- *
- * [추가] 홈 화면의 완료 처리를 DB에 영속화하기 위한 함수.
- * Express completion.js의 POST /completion 라우트에서 세션 인증 후 호출됨.
- *
- * @param {object} completionData
- *   @param {string} completionData.routine_id - 완료한 루틴 UUID v7
- *   @param {string} completionData.user_id    - 세션에서 추출한 유저 UUID v7
- *   @param {string} completionData.proof_text - 인증 글 (체크 루틴은 빈 문자열)
- * @returns {object} { success: true, completion_id: "uuid-v7-..." }
+ * 루틴 완료 기록 생성 (FastAPI POST /completion/)
+ * 홈 화면의 완료 처리를 DB에 영속화.
  */
 async function createCompletion(completionData) {
-    const res = await fetch(`${PYTHON_API}/completion/`, {
+    return await fetchJson(`${PYTHON_API}/completion/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(completionData),
     });
-    return await res.json();
 }
 
 /**
- * 오늘 완료한 루틴 목록 조회
- *
- * [추가] 새로고침 후에도 오늘 완료 상태를 복원할 수 있도록
- * FastAPI GET /completion/today/{user_id}를 중계.
- *
- * @param {string} user_id - 세션에서 추출한 유저 UUID v7
- * @returns {Array} 오늘 완료 기록 배열
+ * 오늘 완료한 루틴 목록 조회 (FastAPI GET /completion/today/{user_id})
+ * 새로고침 후에도 오늘 완료 상태를 복원.
  */
 async function getTodayCompletions(user_id) {
-    const res = await fetch(`${PYTHON_API}/completion/today/${user_id}`);
-    return await res.json();
+    return await fetchJson(`${PYTHON_API}/completion/today/${user_id}`);
 }
 
 /**
  * 완료 기록 삭제 (완료 취소)
- *
- * [추가] completion_id만으로 삭제하지 않고,
- * user_id를 함께 전달하여 FastAPI에서 소유자 검증까지 수행.
- *
- * @param {string} completion_id - 삭제할 완료 기록 UUID v7
- * @param {string} user_id       - 요청한 유저의 UUID v7 (세션에서 추출)
- * @returns {object} { success: true } 또는 { success: false, message: "..." }
+ * user_id 함께 전달하여 FastAPI에서 소유자 검증.
  */
 async function deleteCompletion(completion_id, user_id) {
-    const res = await fetch(
+    return await fetchJson(
         `${PYTHON_API}/completion/${completion_id}?user_id=${encodeURIComponent(user_id)}`,
         { method: "DELETE" }
     );
-    return await res.json();
 }
 
 // ─── 피드 관련 함수 ────────────────────────────────────────────────────────
 
 /**
- * 피드 게시물 생성
- *
- * FastAPI POST /feed/ 호출.
+ * 피드 게시물 생성 (FastAPI POST /feed/)
  * 상세 루틴 완료 시 "피드에도 업로드" 체크한 경우 호출.
- *
- * @param {object} feedData
- *   @param {string} feedData.user_id       - 유저 UUID v7
- *   @param {string} feedData.routine_id    - 루틴 UUID v7
- *   @param {string} feedData.completion_id - 완료 기록 UUID v7
- *   @param {string} feedData.content       - 피드 본문 (인증 글)
- * @returns {object} { success: true, feed_id: "uuid-v7-..." }
  */
 async function createFeed(feedData) {
-    const res = await fetch(`${PYTHON_API}/feed/`, {
+    return await fetchJson(`${PYTHON_API}/feed/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(feedData),
     });
-    return await res.json();
 }
 
 /**
- * 피드 이미지 레코드 추가
- *
- * FastAPI POST /feed/image 호출.
+ * 피드 이미지 레코드 추가 (FastAPI POST /feed/image)
  * 파일은 Express에서 디스크에 저장한 뒤, URL을 이 함수로 전달.
- *
- * @param {object} imageData
- *   @param {string} imageData.feed_id   - 피드 UUID v7
- *   @param {string} imageData.file_url  - 저장된 파일 URL (예: /uploads/xxx.jpg)
- *   @param {string} imageData.file_type - MIME 타입 (예: image/jpeg)
- * @returns {object} { success: true }
  */
 async function addFeedImage(imageData) {
-    const res = await fetch(`${PYTHON_API}/feed/image`, {
+    return await fetchJson(`${PYTHON_API}/feed/image`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(imageData),
     });
-    return await res.json();
 }
 
 /**
- * 전체 피드 목록 조회 (최신순)
- *
- * FastAPI GET /feed/ 호출.
+ * 전체 피드 목록 조회 (FastAPI GET /feed/, 최신순)
  * 좋아요 수, 댓글 수가 포함된 피드 목록 반환.
- *
- * @returns {Array} 피드 목록 배열
  */
 async function getFeeds() {
-    const res = await fetch(`${PYTHON_API}/feed/`);
-    return await res.json();
+    return await fetchJson(`${PYTHON_API}/feed/`);
 }
 
 /**
- * 피드 상세 조회 (이미지 + 댓글 포함)
- *
- * FastAPI GET /feed/{feed_id} 호출.
- *
- * @param {string} feed_id - 피드 UUID v7
- * @returns {object} 피드 상세 (images, comments 포함)
+ * 피드 상세 조회 (이미지 + 댓글 포함, FastAPI GET /feed/{feed_id})
  */
 async function getFeedDetail(feed_id) {
-    const res = await fetch(`${PYTHON_API}/feed/${feed_id}`);
-    return await res.json();
+    return await fetchJson(`${PYTHON_API}/feed/${feed_id}`);
 }
 
 /**
  * 피드 삭제 (본인 소유 검증 포함)
- *
- * @param {string} feed_id - 삭제할 피드 UUID v7
- * @param {string} user_id - 요청한 유저 UUID v7
- * @returns {object} { success: true } 또는 { success: false, message: "..." }
  */
 async function deleteFeed(feed_id, user_id) {
-    const res = await fetch(
+    return await fetchJson(
         `${PYTHON_API}/feed/${feed_id}?user_id=${encodeURIComponent(user_id)}`,
         { method: "DELETE" }
     );
-    return await res.json();
 }
 
 // ─── 좋아요 관련 함수 ─────────────────────────────────────────────────────
 
 /**
- * 좋아요 토글 (추가/취소)
- *
- * @param {string} feed_id - 피드 UUID v7
- * @param {string} user_id - 유저 UUID v7
- * @returns {object} { success: true, liked: true/false }
+ * 좋아요 토글 (추가/취소, FastAPI POST /like/)
  */
 async function toggleLike(feed_id, user_id) {
-    const res = await fetch(`${PYTHON_API}/like/`, {
+    return await fetchJson(`${PYTHON_API}/like/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ feed_id, user_id }),
     });
-    return await res.json();
 }
 
 /**
- * 특정 유저의 좋아요 여부 확인
- *
- * @param {string} feed_id - 피드 UUID v7
- * @param {string} user_id - 유저 UUID v7
- * @returns {object} { liked: true/false }
+ * 특정 유저의 좋아요 여부 확인 (FastAPI GET /like/{feed_id}/{user_id})
  */
 async function checkLike(feed_id, user_id) {
-    const res = await fetch(`${PYTHON_API}/like/${feed_id}/${user_id}`);
-    return await res.json();
+    return await fetchJson(`${PYTHON_API}/like/${feed_id}/${user_id}`);
 }
 
 // ─── 댓글 관련 함수 ──────────────────────────────────────────────────────
 
 /**
- * 댓글 작성
- *
- * @param {object} commentData
- *   @param {string} commentData.feed_id  - 피드 UUID v7
- *   @param {string} commentData.user_id  - 유저 UUID v7
- *   @param {string} commentData.content  - 댓글 내용
- * @returns {object} { success: true, comment_id: "uuid-v7-..." }
+ * 댓글 작성 (FastAPI POST /comment/)
  */
 async function createComment(commentData) {
-    const res = await fetch(`${PYTHON_API}/comment/`, {
+    return await fetchJson(`${PYTHON_API}/comment/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(commentData),
     });
-    return await res.json();
 }
 
 /**
- * 피드 댓글 목록 조회
- *
- * @param {string} feed_id - 피드 UUID v7
- * @returns {Array} 댓글 목록 배열 (작성순)
+ * 피드 댓글 목록 조회 (FastAPI GET /comment/{feed_id})
  */
 async function getComments(feed_id) {
-    const res = await fetch(`${PYTHON_API}/comment/${feed_id}`);
-    return await res.json();
+    return await fetchJson(`${PYTHON_API}/comment/${feed_id}`);
 }
 
 /**
  * 댓글 삭제 (본인 소유 검증 포함)
- *
- * @param {string} comment_id - 삭제할 댓글 UUID v7
- * @param {string} user_id    - 요청한 유저 UUID v7
- * @returns {object} { success: true } 또는 { success: false, message: "..." }
  */
 async function deleteComment(comment_id, user_id) {
-    const res = await fetch(
+    return await fetchJson(
         `${PYTHON_API}/comment/${comment_id}?user_id=${encodeURIComponent(user_id)}`,
         { method: "DELETE" }
     );
-    return await res.json();
 }
 
 // ── 모듈 내보내기 ────────────────────────────────────────────────────────────
 module.exports = {
+    // 헬퍼 / 커스텀 에러 — 라우터에서 `error instanceof FastApiError` 로 구분 가능
+    fetchJson,
+    FastApiError,
+
     findUser,
     createUser,
     createSession,

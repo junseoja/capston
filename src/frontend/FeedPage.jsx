@@ -73,6 +73,15 @@ function FeedPage({ currentUser }) {
 
     // ── 좋아요 토글 ──────────────────────────────────────────────────────────
 
+    /**
+     * handleToggleLike - 좋아요 추가/취소 토글
+     *
+     * POST /like API를 호출하여 좋아요 상태를 토글.
+     * 서버 응답(data.liked)을 기반으로 로컬 상태를 즉시 업데이트하여
+     * 별도의 피드 재조회 없이 UI에 반영 (낙관적 업데이트).
+     *
+     * @param {string} feed_id - 좋아요를 토글할 피드의 UUID v7
+     */
     const handleToggleLike = async (feed_id) => {
         try {
             const res = await fetch(`${EXPRESS_URL}/like`, {
@@ -105,11 +114,17 @@ function FeedPage({ currentUser }) {
 
     // ── 댓글 모달 ─────────────────────────────────────────────────────────────
 
+    /**
+     * openCommentModal - 댓글 모달 열기
+     * 선택된 피드 ID를 설정하고 댓글 입력 초기화
+     * @param {string} feed_id - 댓글을 볼 피드의 UUID v7
+     */
     const openCommentModal = (feed_id) => {
         setSelectedPostId(feed_id);
         setCommentInput("");
     };
 
+    /** closeCommentModal - 댓글 모달 닫기, 선택 상태 및 입력값 초기화 */
     const closeCommentModal = () => {
         setSelectedPostId(null);
         setCommentInput("");
@@ -117,6 +132,15 @@ function FeedPage({ currentUser }) {
 
     // ── 댓글 작성 ─────────────────────────────────────────────────────────────
 
+    /**
+     * handleCommentSubmit - 댓글 작성 폼 제출 핸들러
+     *
+     * POST /comment API를 호출하여 댓글을 DB에 저장.
+     * 성공 시 서버 응답의 comment_id를 사용하여 로컬 상태에 즉시 추가 (재조회 없이 반영).
+     * 현재 유저의 user_id와 nickname을 포함한 로컬 댓글 객체를 생성.
+     *
+     * @param {Event} e - form submit 이벤트 (preventDefault로 페이지 이동 방지)
+     */
     const handleCommentSubmit = async (e) => {
         e.preventDefault();
         if (!selectedPost || !commentInput.trim()) return;
@@ -163,6 +187,15 @@ function FeedPage({ currentUser }) {
 
     // ── 댓글 삭제 ─────────────────────────────────────────────────────────────
 
+    /**
+     * handleDeleteComment - 댓글 삭제 핸들러
+     *
+     * confirm 확인 후 DELETE /comment/:comment_id API 호출.
+     * 본인 댓글만 삭제 가능 (Express에서 세션의 user_id를 FastAPI에 전달하여 소유자 검증).
+     * 성공 시 로컬 상태에서도 해당 댓글을 즉시 제거.
+     *
+     * @param {string} comment_id - 삭제할 댓글의 UUID v7
+     */
     const handleDeleteComment = async (comment_id) => {
         if (!window.confirm("이 댓글을 삭제하시겠습니까?")) return;
 

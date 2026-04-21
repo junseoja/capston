@@ -4,7 +4,7 @@
 // 역할:
 //   - 아이디/비밀번호/닉네임/생년월일/성별/이메일 입력 및 실시간 유효성 검사
 //   - 아이디/닉네임 중복체크 (Express /check-duplicate API 호출)
-//     NOTE: 현재 Express에 /check-duplicate 라우트가 미구현 상태 (버그)
+//     Express → FastAPI /user/check/login_id, /user/check/nickname 중계
 //   - 모든 검사 통과 후 Express /signup API로 POST
 //   - <form onSubmit> 구조로 버튼 클릭 및 Enter 키 모두 제출 가능
 //
@@ -256,7 +256,7 @@ function SignupPage({ onBackToLogin }) {
      * 처리 순서:
      *   1. 로컬 유효성 검사 먼저 수행 (API 호출 최소화)
      *   2. 검사 통과 시 Express /check-duplicate API 호출
-     *      NOTE: 현재 Express에 이 라우트가 미구현 (버그 - 구현 필요)
+     *      Express → FastAPI /user/check/* 엔드포인트 중계
      *   3. 결과에 따라 에러 메시지 또는 성공 메시지 표시
      *
      * @param {"userId"|"nickname"} fieldName - 중복체크할 필드명
@@ -276,7 +276,7 @@ function SignupPage({ onBackToLogin }) {
         }
 
         // Express /check-duplicate?field=userId&value=입력값
-        // NOTE: 이 라우트가 Express에 구현되어야 동작함
+        // Express login.js에서 FastAPI /user/check/* 엔드포인트로 중계
         try {
             const response = await fetch(
                 `${EXPRESS_URL}/check-duplicate?field=${fieldName}&value=${encodeURIComponent(value.trim())}`,

@@ -14,9 +14,12 @@
 //   React(5173) ←→ Express(3000) ←→ FastAPI(8000) ←→ MySQL(AWS RDS)
 //
 // 등록된 라우트:
-//   /login, /signup, /logout, /me, /check-duplicate → loginRouter
-//   /routine (GET, POST, DELETE /routine/:id)        → routineRouter
-//   /completion/history                              → completionRouter
+//   /login, /signup, /logout, /me, /check-duplicate   → loginRouter
+//   /routine (GET, POST, DELETE /routine/:id)          → routineRouter
+//   /completion (POST, GET /today, GET /history, DELETE) → completionRouter
+//   /feed (POST, GET, DELETE /feed/:feed_id)           → feedRouter
+//   /like (POST /like)                                 → likeRouter
+//   /comment (POST, GET /:feed_id, DELETE /:comment_id) → commentRouter
 // ============================================================
 
 require("dotenv").config(); // .env 파일을 process.env에 로드 (가장 먼저 실행)
@@ -102,6 +105,40 @@ app.use("/", likeRouter);
 // - GET    /comment/:feed_id     : 댓글 목록 조회
 // - DELETE /comment/:comment_id  : 댓글 삭제
 app.use("/", commentRouter);
+
+// ── 글로벌 에러 핸들러 ───────────────────────────────────────────────────────
+// 해결하는 에러 (README 4월 18일 #3 — 글로벌 에러 핸들러 없음):
+//   - 기존에는 라우터에서 throw된 에러가 Express 기본 핸들러로 떨어져
+//     HTML 500 페이지가 클라이언트에 반환됨
+//     → 프론트의 res.json()이 SyntaxError 로 크래시하던 문제
+//   - Express 5는 async 핸들러의 throw / reject를 자동으로 next(err)로 넘겨줌
+//     → 여기 한 블록으로 모든 라우트의 미처리 에러를 JSON 500 응답으로 통일
+//
+// FastApiError 처리:
+//   - 4xx (409 아이디 중복 등): 원래 상태코드 그대로 전달
+//   - 5xx 또는 status=0 (FastAPI 자체 다운/네트워크 실패): 502 Bad Gateway 로 변환
+//     → "Express 서버 문제"가 아니라 "업스트림 FastAPI 문제"임을 명시
+//
+// 주의:
+//   - Express는 error handler를 "파라미터 4개짜리 함수"로 판별하므로
+//     next 를 실제로 호출하지 않아도 시그니처 (err, req, res, next) 유지 필수
+//   - 반드시 모든 라우터 등록 뒤에 위치해야 함 (Express 미들웨어 순서)
+const { FastApiError } = require("./database");
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+    console.error(`❌ [${req.method} ${req.path}]`, err);
+
+    let status = 500;
+    let message = err.message || "서버 오류가 발생했습니다.";
+
+    if (err instanceof FastApiError) {
+        // 4xx: 클라이언트 입력 오류 등 → 상태코드 그대로 전달
+        // 그 외 (5xx, 0): 업스트림 장애 → 502 Bad Gateway
+        status = err.status >= 400 && err.status < 500 ? err.status : 502;
+    }
+
+    return res.status(status).json({ success: false, message });
+});
 
 // ── 서버 시작 ────────────────────────────────────────────────────────────────
 

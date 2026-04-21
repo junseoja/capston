@@ -5,14 +5,14 @@
 //   - 로그인 상태(isLoggedIn)를 전역으로 관리
 //   - 루틴 데이터(routines)를 중앙에서 fetch하여 하위 컴포넌트에 props로 전달
 //     (단일 진실 공급원 패턴 - Single Source of Truth)
-//   - 피드 게시물(feedPosts)을 메모리에서 관리 (추후 API 연결 예정)
+//   - 루틴 완료 처리(체크/상세) 및 피드 업로드를 백엔드 API로 처리
 //   - react-router-dom의 Routes로 URL 기반 페이지 이동 처리
 //
 // 상태 구조:
 //   isLoggedIn  : 로그인 여부 (true/false)
 //   routines    : 백엔드에서 fetch한 루틴 배열 (필드명 변환 적용)
-//   feedPosts   : 상세 루틴 인증 시 "피드 업로드" 체크한 게시물 배열 (메모리)
-//   currentUser : 현재 로그인한 유저 정보 (nickname 등)
+//   currentUser : 현재 로그인한 유저 정보 ({ user_id, login_id, nickname, ... })
+//   authChecked : 세션 복구 확인 완료 여부 (리다이렉트 방지용 플래그)
 //
 // 라우트 구조:
 //   /login  → LoginPage  (비로그인 전용)
@@ -217,11 +217,11 @@ function App() {
      * completeCheckRoutine - 체크 루틴 완료 처리
      *
      * 체크 루틴: 버튼 클릭 한 번으로 즉시 완료 처리
+     * POST /completion API를 호출하여 DB에 완료 기록 저장
      * 완료 시간을 "HH:MM" 형식으로 기록 (한국어 24시간제)
      *
-     * TODO: 추후 POST /completion API 연결 후 DB에 완료 기록 저장
-     *
      * @param {string} id - 완료할 루틴의 UUID v7
+     * @returns {boolean} 완료 성공 여부
      */
     const completeCheckRoutine = async (id) => {
         const now = new Date();
@@ -278,14 +278,14 @@ function App() {
      * completeDetailRoutine - 상세 루틴 완료 처리
      *
      * 상세 루틴: 인증 글(proofText) + 파일(proofFiles) + 피드 업로드 여부를 받아 처리
-     * "피드에도 업로드하기" 체크 시 feedPosts에 새 게시물 추가
-     *
-     * TODO: 추후 POST /completion, POST /feed API 연결 후 DB에 저장
+     * 1. POST /completion 으로 완료 기록을 DB에 저장
+     * 2. "피드에도 업로드하기" 체크 시 POST /feed 로 피드 생성 (FormData로 파일 함께 전송)
      *
      * @param {string} id          - 완료할 루틴의 UUID v7
      * @param {string} proofText   - 인증 글 (최대 200자)
-     * @param {Array}  proofFiles  - 첨부 파일 배열 [{ name, type, url }]
+     * @param {Array}  proofFiles  - 첨부 파일 배열 [{ name, type, url, file }]
      * @param {boolean} uploadToFeed - 피드 업로드 여부
+     * @returns {boolean} 완료 성공 여부
      */
     const completeDetailRoutine = async (id, proofText, proofFiles, uploadToFeed) => {
         const now = new Date();
@@ -373,10 +373,9 @@ function App() {
     /**
      * cancelRoutineCompletion - 루틴 완료 취소
      *
-     * 완료된 루틴을 미완료 상태로 되돌리고,
-     * 해당 루틴으로 올라간 피드 게시물도 함께 삭제
-     *
-     * TODO: 추후 DELETE /completion/{completion_id} API 연결
+     * 완료된 루틴을 미완료 상태로 되돌림
+     * DELETE /completion/:completion_id API를 호출하여 DB에서 완료 기록 삭제
+     * 연관 피드 게시물은 DB의 ON DELETE CASCADE로 자동 삭제됨
      * [백엔드 주의] 완료 취소는 FastAPI를 직접 호출하지 말고,
      * 반드시 Express DELETE /completion/:completion_id 경유로 호출해야 함.
      * 이유:
@@ -439,7 +438,7 @@ function App() {
      *
      * 처리 순서:
      *   1. Express POST /logout 요청 → DB에서 세션 삭제 + 쿠키 제거
-     *   2. 프론트 상태 초기화 (isLoggedIn, routines, feedPosts, currentUser)
+     *   2. 프론트 상태 초기화 (isLoggedIn, routines, currentUser)
      *   3. 로그인 페이지("/login")로 이동
      *
      * NOTE: 2단계는 서버 요청 실패 시에도 수행 (try/catch 구조)

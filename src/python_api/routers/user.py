@@ -39,7 +39,7 @@ class UserCreate(BaseModel):
     Express login.js의 createUser() 에서 전달하는 필드와 동일
     """
     login_id: str    # 로그인 아이디 (5~15자, 영문 소문자+숫자)
-    password: str    # 비밀번호 TODO: 현재 평문 → bcrypt 해시로 교체 필요
+    password: str    # 비밀번호 (Express에서 bcryptjs로 해싱된 값이 전달됨)
     nickname: str    # 닉네임 (2~10자)
     birth_date: str  # 생년월일 "YYYY-MM-DD" 형식 (Express에서 변환 후 전달)
     gender: str      # 성별 DB ENUM: "남", "여", "기타"
@@ -245,8 +245,8 @@ def delete_session(session_id: str):
 def check_login_id(login_id: str):
     """회원가입 시 아이디 중복 여부 확인
 
-    Express login.js의 /check-duplicate?field=userId 에서 호출 (구현 필요).
-    또는 회원가입 전 findUser() 호출로도 간접 확인됨.
+    Express login.js의 /check-duplicate?field=userId 에서 호출.
+    SignupPage.jsx의 중복체크 버튼 클릭 시 Express를 경유하여 이 엔드포인트에 도달.
 
     Args:
         login_id (str): 중복 확인할 아이디 (URL 경로 파라미터)
@@ -280,7 +280,8 @@ def check_login_id(login_id: str):
 def check_nickname(nickname: str):
     """회원가입 시 닉네임 중복 여부 확인
 
-    Express login.js의 /check-duplicate?field=nickname 에서 호출 (구현 필요).
+    Express login.js의 /check-duplicate?field=nickname 에서 호출.
+    SignupPage.jsx의 중복체크 버튼 클릭 시 Express를 경유하여 이 엔드포인트에 도달.
 
     Args:
         nickname (str): 중복 확인할 닉네임 (URL 경로 파라미터)

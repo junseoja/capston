@@ -6,11 +6,14 @@
 //
 // 보안:
 //   세션 쿠키로 로그인 여부 확인 후 user_id를 FastAPI에 전달
+//
+// [리팩터링 #12] 세션 인증 4줄 블록을 requireAuth 미들웨어로 대체
 // ============================================================
 
 const express = require("express");
 const router = express.Router();
-const { findSession, toggleLike } = require("../database");
+const { toggleLike } = require("../database");
+const requireAuth = require("../middleware/requireAuth");
 
 // ── 좋아요 토글 (POST /like) ─────────────────────────────────────────────────
 
@@ -18,22 +21,12 @@ const { findSession, toggleLike } = require("../database");
  * POST /like
  *
  * body: { feed_id }
- * user_id는 세션에서 자동 추출하여 FastAPI에 전달
+ * user_id는 requireAuth가 req.user.user_id 에 실어 주므로 별도 전달 불필요
  *
  * 반환: { success: true, liked: true/false }
  */
-router.post("/like", async (req, res) => {
-    const { sessionId } = req.cookies;
-
-    if (!sessionId) {
-        return res.status(401).json({ success: false, message: "로그인이 필요합니다." });
-    }
-
-    const session = await findSession(sessionId);
-    if (!session) {
-        return res.status(401).json({ success: false, message: "로그인이 필요합니다." });
-    }
-
+// [리팩터링 #1+#3] next(err)로 글로벌 핸들러에 위임 — FastApiError 상태코드 보존
+router.post("/like", requireAuth, async (req, res, next) => {
     const { feed_id } = req.body;
 
     if (!feed_id) {
@@ -41,11 +34,10 @@ router.post("/like", async (req, res) => {
     }
 
     try {
-        const result = await toggleLike(feed_id, session.user_id);
+        const result = await toggleLike(feed_id, req.user.user_id);
         return res.json(result);
     } catch (error) {
-        console.error("좋아요 토글 오류:", error);
-        return res.status(500).json({ success: false, message: "서버 오류" });
+        return next(error);
     }
 });
 

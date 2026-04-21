@@ -12,10 +12,11 @@
 #   feeds        : 피드 게시물 (feed_id PK, user_id FK, routine_id FK, completion_id FK, content)
 #   feed_images  : 피드 첨부 이미지 (image_id PK, feed_id FK, file_url, file_type)
 #
-# 현재 상태:
-#   React 프론트의 FeedPage는 App.jsx의 feedPosts state(메모리)를 사용 중
-#   이 API는 구현되어 있지만 아직 프론트와 연결되지 않음
-#   추후 FeedPage에서 직접 이 API를 호출하도록 연결 예정
+# 연결 상태:
+#   Express feed.js 라우터를 통해 프론트엔드와 연결 완료
+#   FeedPage.jsx에서 GET /feed로 피드 목록 조회
+#   App.jsx에서 POST /feed로 피드 생성 (상세 루틴 완료 시 피드 업로드)
+#   파일 업로드는 Express multer가 디스크에 저장 후 URL을 POST /feed/image로 전달
 # ============================================================
 
 from fastapi import APIRouter, HTTPException, Query
@@ -40,7 +41,7 @@ class FeedCreate(BaseModel):
 class ImageCreate(BaseModel):
     """피드 이미지 추가 요청 데이터 스키마"""
     feed_id: str                        # UUID v7 (feeds.feed_id FK)
-    file_url: str                       # 업로드된 이미지/영상 URL (S3 등)
+    file_url: str                       # 업로드된 이미지/영상 URL (Express uploads/ 경로)
     file_type: Optional[str] = ""      # 파일 MIME 타입 (예: "image/jpeg", "video/mp4")
 
 # ── 피드 생성 (POST /feed/) ───────────────────────────────────────────────────
@@ -49,7 +50,7 @@ class ImageCreate(BaseModel):
 def create_feed(body: FeedCreate):
     """피드 게시물 생성
 
-    루틴 완료 후 "피드에도 업로드하기" 체크 시 호출 예정.
+    루틴 완료 후 "피드에도 업로드하기" 체크 시 Express feed.js를 통해 호출됨.
     feeds 테이블에 INSERT 후 생성된 feed_id를 반환.
     이미지/영상은 별도로 POST /feed/image로 추가 필요.
 
@@ -90,7 +91,7 @@ def add_feed_image(body: ImageCreate):
 
     피드 생성 후 첨부 파일을 추가할 때 호출.
     파일당 한 번씩 호출하며, 여러 파일이면 여러 번 호출.
-    file_url은 S3 등 외부 스토리지에 업로드 후 받은 URL을 전달.
+    file_url은 Express multer가 디스크에 저장한 파일의 경로 (예: /uploads/xxx.jpg).
 
     Args:
         body (ImageCreate): 이미지 데이터 (feed_id, file_url, file_type)
@@ -124,7 +125,7 @@ def add_feed_image(body: ImageCreate):
 def get_feeds():
     """전체 피드 목록 조회 (최신순, 좋아요/댓글 수 포함)
 
-    FeedPage에서 피드 목록을 불러올 때 호출 예정.
+    FeedPage에서 피드 목록을 불러올 때 Express feed.js를 통해 호출됨.
     users, routines 테이블과 JOIN하여 닉네임, 루틴 제목, 카테고리도 함께 반환.
     feed_likes, feed_comments와 LEFT JOIN + COUNT로 좋아요/댓글 수도 포함.
 
@@ -172,7 +173,7 @@ def get_feeds():
 def get_feed_detail(feed_id: str):
     """특정 피드 상세 조회 (이미지 + 댓글 포함)
 
-    피드 상세 페이지에서 호출 예정.
+    Express feed.js의 GET /feed 라우트에서 각 피드별 이미지/댓글 조회를 위해 호출됨.
     피드 기본 정보 + 첨부 이미지 목록 + 댓글 목록을 한 번에 반환.
 
     Args:

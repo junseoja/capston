@@ -4,6 +4,46 @@
 
 ---
 
+## ⚡ 빠른 설치
+
+### 1. 프론트엔드 루트 모듈 설치
+
+```bash
+npm install
+```
+
+설치되는 주요 npm 모듈
+- `react`, `react-dom`, `react-router-dom`
+- `vite`, `@vitejs/plugin-react`
+- `eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`
+- `@types/react`, `@types/react-dom`, `globals`
+
+### 2. Express 백엔드 모듈 설치
+
+```bash
+cd src/backend
+npm install
+```
+
+설치되는 주요 npm 모듈
+- `express`, `cors`, `cookie-parser`
+- `bcryptjs`, `dotenv`
+- `node-fetch`, `uuid`
+- `multer`
+
+### 3. 처음 세팅할 때 권장 순서
+
+```bash
+npm install
+cd src/backend && npm install
+cd ../python_api
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+---
+
 ## 🛠 기술 스택
 
 ### Frontend
@@ -44,7 +84,7 @@ npm install
 | eslint-plugin-react-refresh | ^0.5.2 | HMR 안전성 검사 |
 | @types/react | ^19.2.14 | React 타입 정의 |
 | @types/react-dom | ^19.2.3 | ReactDOM 타입 정의 |
-| globals | ^17.0.0 | ESLint 전역 변수 목록 |
+| globals | ^17.4.0 | ESLint 전역 변수 목록 |
 
 ---
 
@@ -64,7 +104,7 @@ npm install
 | dotenv | ^16.6.1 | `.env` 환경변수 로드 |
 | node-fetch | ^2.7.0 | Express → FastAPI HTTP 요청 |
 | uuid | ^13.0.0 | UUID v4 세션 ID 생성 |
-| multer | ^1.4.5-lts.2 | 파일 업로드 처리 (multipart/form-data) |
+| multer | ^2.1.1 | 파일 업로드 처리 (multipart/form-data) |
 
 ---
 
@@ -149,7 +189,7 @@ capston-main/
 > ⚠️ `.env` 파일은 모두 `.gitignore`에 등록되어 있어 Git에 올라가지 않습니다.  
 > 각 `.env.example` 파일을 복사해서 `.env`로 이름을 바꾼 뒤 값을 채우세요.
 
-### 1. 프론트엔드 — 프로젝트 루트 `.env`
+### 1. 프로젝트 루트 `.env`
 
 ```bash
 cp .env.example .env
@@ -160,7 +200,7 @@ cp .env.example .env
 VITE_EXPRESS_URL=http://localhost:3000
 ```
 
-### 2. Express 백엔드 — `src/backend/.env`
+### 2. Express 백엔드 `.env`
 
 ```bash
 cp src/backend/.env.example src/backend/.env
@@ -177,7 +217,7 @@ PYTHON_API=http://localhost:8000
 FRONTEND_URL=http://localhost:5173
 ```
 
-### 3. Python FastAPI — `src/python_api/.env`
+### 3. Python FastAPI `.env`
 
 ```bash
 cp src/python_api/.env.example src/python_api/.env   # .env.example이 없으면 직접 생성
@@ -195,34 +235,51 @@ DB_PORT=3306
 
 ## 🚀 서버 실행 방법
 
-### 한번에 실행 (추천)
+### 빠른 실행 순서
+
+#### 1. 의존성 설치
+
+```bash
+npm install
+cd src/backend && npm install
+cd ../python_api
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+#### 2. `.env` 파일 3개 설정
+
+- 프로젝트 루트 `.env`
+- `src/backend/.env`
+- `src/python_api/.env`
+
+위 값들을 모두 채운 뒤 실행하세요.
+
+#### 3. 한번에 실행 (추천)
 
 ```bash
 chmod +x start.sh  # 최초 1회만
 ./start.sh
 ```
 
-### 개별 실행
+#### 4. 개별 실행
 
 **React 프론트엔드 (포트 5173)**
 ```bash
-npm install
 npm run dev
 ```
 
 **Node.js Express 서버 (포트 3000)**
 ```bash
 cd src/backend
-npm install
 node app.js
 ```
 
 **Python FastAPI 서버 (포트 8000)**
 ```bash
 cd src/python_api
-python3 -m venv venv
 source venv/bin/activate   # Mac/Linux
-pip install -r requirements.txt
 uvicorn app:app --reload --port 8000
 ```
 
@@ -232,6 +289,12 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\venv\Scripts\Activate.ps1
 python -m uvicorn app:app --reload --port 8000
 ```
+
+#### 5. 접속 주소
+
+- React: `http://localhost:5173`
+- Express: `http://localhost:3000`
+- FastAPI: `http://localhost:8000`
 
 ---
 
@@ -961,6 +1024,37 @@ src/                            src/
 | GET | /comment/:feed_id | 피드 댓글 목록 조회 (세션 인증) |
 | DELETE | /comment/:comment_id | 댓글 삭제 (세션 인증 + 본인 소유 검증) |
 
+#### 1-4 에로사항
+ 요약 (우선순위별)
+
+  ┌──────────┬──────────────────────────────────────────────────────┬────────────────────────────────┐
+  │ 우선순위 │                         문제                         │              영향              │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 긴급     │ Express 라우트 try/catch 누락 (routine.js, login.js) │ FastAPI 다운 시 Express 크래시 │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 긴급     │ database.js 함수에 에러 처리 없음                    │ 비정상 응답 시 json 파싱 에러  │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 긴급     │ 글로벌 에러 핸들러 없음 (app.js)                     │ 미처리 에러 시 HTML 500 응답   │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 높음     │ 피드 삭제/실패 시 파일 미정리                        │ 디스크 공간 지속적 증가        │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 높음     │ GET /feed N+1 쿼리 + 페이지네이션 없음               │ 피드 증가 시 심각한 성능 저하  │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 높음     │ 타임존 이슈 (CURDATE vs KST)                         │ 자정~9시 완료 루틴 날짜 오류   │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 중간     │ 평문 비밀번호 폴백                                   │ DB 유출 시 비밀번호 노출       │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 중간     │ like.py 커넥션 rollback 누락                         │ 잠재적 에러/리소스 누수        │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 중간     │ DB 커넥션 풀 미사용                                  │ 동시 요청 시 커넥션 고갈       │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 낮음     │ secure: false 하드코딩                               │ 프로덕션 배포 시 보안 취약     │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 낮음     │ Rate limiting 없음                                   │ 무차별 공격 가능               │
+  ├──────────┼──────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ 낮음     │ 세션 인증 코드 반복                                  │ 유지보수성 저하                │
+  └──────────┴──────────────────────────────────────────────────────┴────────────────────────────────┘
+
 ---
 
 ### 2. Express ↔ FastAPI 브리지 함수 추가 (`database.js`)
@@ -1079,11 +1173,183 @@ src/                            src/
 
 ---
 
+## 🔧 2026-04-22 작업 내역
+
+### 1. 4월 18일자 에로사항 12개 항목 코드 실태 점검
+
+README 4월 18일 섹션 1-4 "에로사항" 표의 12개 항목을 실제 소스 코드와 하나씩 대조 → **12개 전부 미해결 상태**로 확인. 아래 표의 "발견 상태"는 점검 시점 기준.
+
+| 우선순위 | 항목 | 발견 위치 | 발견 상태 |
+|---|---|---|---|
+| 🔴 긴급 | #1 Express 라우트 try/catch 누락 | `routes/routine.js` 전체, `routes/login.js`의 `/signup`·`/login`·`/me`·`/logout` | 미해결 |
+| 🔴 긴급 | #2 `database.js` 함수 에러 처리 없음 | 21개 함수 전부 `await res.json()` 직행, `res.ok` 검증 없음 | 미해결 |
+| 🔴 긴급 | #3 글로벌 에러 핸들러 없음 | `src/backend/app.js` | 미해결 |
+| 🟠 높음 | #4 피드 삭제/실패 시 파일 미정리 | `routes/feed.js` POST/DELETE | 미해결 |
+| 🟠 높음 | #5 GET /feed N+1 쿼리 + 페이지네이션 없음 | `routes/feed.js:150` `Promise.all` 반복, `FastAPI feed.py:144` `LIMIT` 없음 | 미해결 |
+| 🟠 높음 | #6 타임존 이슈 (CURDATE vs KST) | `routers/completion.py:106` `DATE(completed_at) = CURDATE()` | 미해결 |
+| 🟡 중간 | #7 평문 비밀번호 폴백 | `routes/login.js:126-129` `isBcryptHash` 분기 | 미해결 |
+| 🟡 중간 | #8 `like.py` 커넥션 rollback 누락 | `routers/like.py:73-86` `IntegrityError` 시 `conn2` 재생성 | 미해결 |
+| 🟡 중간 | #9 DB 커넥션 풀 미사용 | `python_api/database.py:42-50` 요청마다 신규 커넥션 | 미해결 |
+| 🟢 낮음 | #10 `secure: false` 하드코딩 | `routes/login.js:139` | 미해결 |
+| 🟢 낮음 | #11 Rate limiting 없음 | Express 의존성/미들웨어 전무 | 미해결 |
+| 🟢 낮음 | #12 세션 인증 코드 반복 | 보호 라우트 6+ 곳에서 동일 4줄 블록 복붙 | 미해결 |
+
+---
+
+### 2. 이번 세션에서 해결한 항목 (4건)
+
+"크래시 빈도가 가장 높은 뿌리" 계열 4건(#12 → #2 → #3 → #1) 순으로 처리. 미들웨어 추출로 코드 중복을 먼저 제거한 뒤, 에러 전파 경로를 정비하는 순서로 진행.
+
+| 항목 | 해결 방식 | 성공 여부 |
+|---|---|---|
+| #12 세션 인증 중복 | `src/backend/middleware/requireAuth.js` 신규 생성, 보호 라우트 14곳에 `requireAuth` 적용 | ✅ 완료 |
+| #2 `database.js` 에러 처리 | `fetchJson()` 공통 헬퍼 + `FastApiError` 커스텀 에러 도입, 21개 함수 전부 이 헬퍼로 통과 | ✅ 완료 |
+| #3 글로벌 에러 핸들러 | `app.js` 맨 끝에 4-arity 미들웨어 추가, `FastApiError` 상태코드 보존 처리 | ✅ 완료 |
+| #1 라우트 try/catch 누락 | `routine.js` 3개 + `login.js` 4개 라우트에 `try/catch + next(err)` 추가, 기존 `feed/like/comment/completion` catch 블록도 동일 패턴으로 통일 | ✅ 완료 |
+
+#### 2-1. `requireAuth` 미들웨어 (#12 해결)
+
+- **원인**: `routine/feed/like/comment/completion` 라우터가 각자 "쿠키 꺼내기 → `findSession` → 401" 4줄을 복붙해서 6+ 곳에서 중복
+- **해결**:
+  - `src/backend/middleware/requireAuth.js` 생성
+  - 세션 검증 성공 시 `req.user` 에 세션 정보(user_id, login_id, nickname 등) 주입
+  - `findSession` 실패 시 미들웨어 내부 try/catch로 500 JSON 응답
+- **적용 범위**: `/routine` 3건, `/feed` 3건, `/like` 1건, `/comment` 3건, `/completion` 4건, `/me` 1건 = **14곳**
+
+#### 2-2. `fetchJson` 공통 헬퍼 (#2 해결)
+
+- **원인**:
+  - `await res.json()` 앞에 `res.ok` 검증 없음 → FastAPI 4xx/5xx 에러 응답도 성공처럼 반환
+  - FastAPI가 HTML 500(트레이스백)을 반환하면 `res.json()`이 `SyntaxError` throw → 라우터 크래시
+  - `fetch()` 자체가 네트워크 오류로 throw하면 스택 전체 전파
+- **해결**:
+  - `fetchJson(url, options)` 단일 헬퍼로 모든 FastAPI 호출 통일
+  - 네트워크 실패 → `FastApiError(status=0)` 변환
+  - HTML/비-JSON 응답 → `text()` 후 `JSON.parse` try/catch → `FastApiError` 변환
+  - `res.ok === false` → `{detail}`을 메시지로 담아 `FastApiError` throw
+  - `FastApiError` 는 `database.js`에서 export → 라우터가 `error instanceof FastApiError` 로 분기 가능
+
+#### 2-3. 글로벌 에러 핸들러 (#3 해결)
+
+- **원인**: 라우터에서 throw된 에러가 Express 기본 핸들러로 떨어져 HTML 500 응답 → 프론트 `res.json()` 크래시
+- **해결**:
+  - `app.js` 맨 끝(모든 라우터 등록 뒤)에 `app.use((err, req, res, _next) => {...})` 추가
+  - **상태코드 매핑**:
+    - `FastApiError` 이면서 status가 4xx → 원래 상태코드 그대로 전달 (예: 409 중복 아이디)
+    - `FastApiError` 이면서 5xx 또는 status=0(네트워크 실패) → **502 Bad Gateway** 로 변환하여 "업스트림 FastAPI 장애"임을 명시
+    - 그 외 일반 에러 → 500
+  - 모든 응답이 `{ success: false, message }` JSON 포맷 → 프론트 파싱 보장
+- **주의사항**: Express는 error handler를 "파라미터 4개짜리 함수"로 판별하므로 `_next` 파라미터는 호출하지 않더라도 시그니처를 유지
+
+#### 2-4. 라우트 try/catch + next(err) 통일 (#1 해결)
+
+- **원인**:
+  - `routine.js` 전 3개 라우트, `login.js`의 `/signup`·`/login`·`/me`·`/logout` 이 try/catch 없이 `await` 호출 → #2 적용 후 `FastApiError` throw 시 Express 기본 핸들러로 흘러가 HTML 500 응답
+  - 기존 `feed/like/comment/completion` 의 catch 블록은 `res.status(500).json(...)` 으로 하드코딩되어 `FastApiError` 의 실제 상태코드(예: 404, 409)가 500으로 뭉개짐
+- **해결**:
+  - **신규 추가 (7개 라우트)**: `routine.js × 3`, `login.js × 4` 에 `try { ... } catch (error) { return next(error); }` 추가
+  - **기존 통일 (11개 라우트)**: `feed/like/comment/completion` 의 catch 블록을 `next(error)` 로 교체 → 글로벌 핸들러가 `FastApiError` 상태코드를 그대로 응답
+- **효과**:
+  - 409 중복 아이디 → 500으로 뭉개지지 않고 409 그대로 전달
+  - FastAPI 다운 → 500이 아닌 502 Bad Gateway 로 "서버 오류"와 "업스트림 장애" 명확히 구분
+
+---
+
+### 3. 에러 전파 경로 변화 (Before → After)
+
+```
+[Before]
+FastAPI가 HTML 500 응답
+  → database.js: res.json() SyntaxError
+  → routine.js: try/catch 없음 → Express 기본 핸들러
+  → 클라이언트에 HTML 500 응답
+  → 프론트 fetch().then(res => res.json()) 에서 또 SyntaxError → 화면 crash
+
+[After]
+FastAPI가 HTML 500 응답
+  → fetchJson(): FastApiError(status=500) throw
+  → routine.js catch: next(error)
+  → 글로벌 핸들러: FastApiError 5xx → 502 Bad Gateway + JSON body
+  → 클라이언트에 { success: false, message } 깔끔 전달
+```
+
+---
+
+### 4. 변경 파일 목록 (9개)
+
+| 파일 | 변경 내용 |
+|---|---|
+| `src/backend/middleware/requireAuth.js` | 🆕 신규 — 세션 검증 미들웨어 |
+| `src/backend/app.js` | 글로벌 에러 핸들러 추가 (`FastApiError` 상태코드 보존) |
+| `src/backend/database.js` | `fetchJson` + `FastApiError` 도입, 21개 함수 전부 헬퍼로 통과 |
+| `src/backend/routes/login.js` | `requireAuth` 적용(`/me`), `/signup`·`/login`·`/me`·`/logout` try/catch 추가 |
+| `src/backend/routes/routine.js` | `requireAuth` 적용, 3개 라우트 try/catch + next(err) 추가 |
+| `src/backend/routes/feed.js` | `requireAuth` 적용, catch 블록 `next(err)` 통일 |
+| `src/backend/routes/like.js` | `requireAuth` 적용, catch 블록 `next(err)` 통일 |
+| `src/backend/routes/comment.js` | `requireAuth` 적용, catch 블록 `next(err)` 통일 |
+| `src/backend/routes/completion.js` | `requireAuth` 적용, catch 블록 `next(err)` 통일 |
+
+#### 검증
+- `node --check` — 전 파일 문법 통과
+- `npm run lint` — ESLint 경고 없음
+
+---
+
+### 5. 남은 8개 항목 — 다음 우선순위
+
+이번 세션에서 #1, #2, #3, #12 (크래시 계열)를 해결했으므로 다음 순서는 **데이터 정합성 + 보안** 계열.
+
+#### 🟠 높음 — 즉시 처리 권장
+
+| # | 항목 | 왜 높은가 | 예상 작업 |
+|---|---|---|---|
+| #6 | 타임존 (CURDATE vs KST) | 한국 시간 00~09시 완료 루틴이 전날로 집계되는 **데이터 정합성** 문제. 사용자 혼란 직결 | `completion.py` 의 `CURDATE()` 를 `DATE(CONVERT_TZ(completed_at, '+00:00', '+09:00'))` 로 교체, 또는 RDS 파라미터 그룹의 `time_zone` 을 `Asia/Seoul` 로 설정 |
+| #4 | 피드 업로드/삭제 시 파일 미정리 | 디스크 누수 — 장기 운영 시 서버 멈춤 위험 | POST 실패 시 `fs.unlink`로 롤백, DELETE 시 `feed_images.file_url` 조회 후 디스크 파일 함께 삭제 |
+| #5 | GET /feed N+1 + 페이지네이션 없음 | 피드 100개 → HTTP 호출 201회. 피드 증가 시 기하급수적 성능 저하 | FastAPI `GET /feed/` 가 images/likes/comments 를 한 번에 JOIN 해서 반환하도록 개선, `?page=&limit=` 쿼리 파라미터 추가 |
+
+#### 🟡 중간
+
+| # | 항목 | 예상 작업 |
+|---|---|---|
+| #7 | 평문 비밀번호 폴백 | 기존 평문 계정 마이그레이션(로그인 시 재해싱) 후 `isBcryptHash` 분기 제거 |
+| #8 | `like.py` rollback 누락 | `IntegrityError` 시 `conn.rollback()` 호출 후 동일 커넥션으로 DELETE 재시도 — `conn2` 신규 생성 불필요 |
+| #9 | DB 커넥션 풀 미사용 | `pymysql` 대신 `sqlalchemy` + `QueuePool` 또는 `aiomysql.Pool` 도입 |
+
+#### 🟢 낮음 — 배포 직전에
+
+| # | 항목 | 예상 작업 |
+|---|---|---|
+| #10 | `secure: false` 하드코딩 | `NODE_ENV === 'production'` 이면 `secure: true` 로 분기 |
+| #11 | Rate limiting 없음 | `express-rate-limit` 추가, `/login` · `/signup` · `/check-duplicate` 에 제한 적용 |
+
+---
+
+### 6. 권장 다음 커밋 단위
+
+1. **타임존(#6)** — 1커밋, 테스트는 자정 근처 타임스탬프로 확인
+2. **파일 정리(#4)** — 1커밋, `fs/promises` 로 async 파일 삭제
+3. **페이지네이션(#5 일부)** — 1커밋, `LIMIT/OFFSET` 만 먼저 추가해도 급한 불은 끄는 수준
+4. **N+1 쿼리 개선(#5 나머지)** — 1커밋, FastAPI JOIN 쿼리 재작성
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
 - [x] ~~댓글 기능 → 현재 프론트 메모리 기준이며 댓글 API 연결 필요~~ ✅ 2026-04-18 완료
 - [x] ~~피드 업로드 → 실제 백엔드 API(`/feed`)와 연결 필요~~ ✅ 2026-04-18 완료
+- [x] ~~Express 라우트 try/catch 누락 (#1)~~ ✅ 2026-04-22 완료
+- [x] ~~`database.js` 함수 에러 처리 없음 (#2)~~ ✅ 2026-04-22 완료
+- [x] ~~글로벌 에러 핸들러 없음 (#3)~~ ✅ 2026-04-22 완료
+- [x] ~~세션 인증 코드 반복 (#12)~~ ✅ 2026-04-22 완료
+- [ ] 타임존 이슈 (CURDATE vs KST) — #6
+- [ ] 피드 업로드/삭제 시 파일 미정리 — #4
+- [ ] GET /feed N+1 쿼리 + 페이지네이션 없음 — #5
+- [ ] 평문 비밀번호 폴백 로직 제거 — #7
+- [ ] `like.py` rollback 누락 — #8
+- [ ] DB 커넥션 풀 도입 — #9
+- [ ] `secure: false` 환경변수화 — #10
+- [ ] Rate limiting 추가 — #11
 - [ ] 마이페이지 → 이번 주 달성률, 인증 게시글 수 백엔드 연결
 - [ ] 현재 루틴을 추가하면 인증한 루틴 표시가 사라지는 버그 확인 필요
 - [ ] 피드 이미지 → 현재 로컬 디스크 저장 방식, 추후 S3 등 클라우드 스토리지 전환 고려

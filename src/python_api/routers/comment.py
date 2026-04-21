@@ -13,10 +13,10 @@
 #   - content    : 댓글 내용
 #   - created_at : 작성 일시 (자동)
 #
-# 현재 상태:
-#   FeedPage.jsx의 댓글 버튼은 disabled 처리되어 있어 UI에서 사용 불가
-#   이 API는 구현되어 있으나 프론트와 아직 연결 안됨
-#   추후 댓글 입력 UI 추가 후 연결 예정
+# 연결 상태:
+#   Express comment.js 라우터를 통해 프론트엔드와 연결 완료
+#   FeedPage.jsx에서 댓글 모달을 통해 댓글 작성/삭제 기능 사용 가능
+#   댓글 목록은 Express GET /feed 에서 피드 상세 조회 시 함께 반환됨
 # ============================================================
 
 from fastapi import APIRouter, HTTPException, Query
@@ -78,7 +78,7 @@ def create_comment(body: CommentCreate):
 def get_comments(feed_id: str):
     """특정 피드의 댓글 목록 조회
 
-    피드 상세 화면에서 댓글 목록을 불러올 때 사용.
+    피드 상세 화면에서 댓글 목록을 불러올 때 사용됨.
     users 테이블과 JOIN하여 작성자 닉네임과 프로필 이미지도 함께 반환.
     작성 순서대로(created_at ASC) 정렬.
 

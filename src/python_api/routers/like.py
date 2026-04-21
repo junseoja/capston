@@ -131,7 +131,7 @@ def check_like(feed_id: str, user_id: str):
     """특정 유저가 특정 피드에 좋아요 했는지 확인
 
     피드 페이지 로드 시 현재 유저의 좋아요 상태(하트 채워짐/비어있음)를
-    초기화할 때 사용 예정.
+    초기화할 때 사용됨. Express feed.js의 GET /feed에서 각 피드별로 호출.
 
     Args:
         feed_id (str): 확인할 피드의 UUID v7 (URL 경로 파라미터)
