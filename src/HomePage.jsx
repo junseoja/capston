@@ -27,6 +27,8 @@ function HomePage({
   // 인증 박스 열림 상태
   const [openProofId, setOpenProofId] = useState(null);
 
+  const [selectedTitle, setSelectedTitle] = useState("");
+
   const filteredRoutines = routines.filter((routine) => routine.time === time);
 
   const getTimeTitle = () => {
@@ -214,6 +216,7 @@ function HomePage({
             이 시간대에 등록된 루틴이 아직 없어요.
           </p>
         ) : (
+          <>
           <div className="home-routine-list">
             {filteredRoutines.map((routine) => {
               const timeStatus = getRoutineTimeStatus(routine.time);
@@ -222,14 +225,15 @@ function HomePage({
 
               return (
                 <div
-                  className={`home-routine-card ${
-                    routine.completed ? "home-routine-card-completed" : ""
-                  }`}
+                  className={`home-routine-card ${routine.completed ? "home-routine-card-completed" : ""
+                    }`}
                   key={routine.id}
                 >
                   <div className="home-routine-card-left">
                     <div className="home-routine-card-top">
-                      <h3>{routine.title}</h3>
+                      <h3 onClick={() => setSelectedTitle(routine.title)}>
+                        {routine.title}
+                      </h3>
                       <span className="home-routine-badge">
                         {routine.category}
                       </span>
@@ -393,10 +397,31 @@ function HomePage({
                     )}
                   </div>
                 </div>
+                
               );
-            })}
+                       })}
           </div>
+
+          {/* 🔥 모달 */}
+          {selectedTitle && (
+            <div
+              className="title-modal-overlay"
+              onClick={() => setSelectedTitle("")}
+            >
+              <div
+                className="title-modal"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p>{selectedTitle}</p>
+                <button onClick={() => setSelectedTitle("")}>
+                  닫기
+                </button>
+              </div>
+            </div>
+          )}
+</>
         )}
+      
       </div>
     </div>
   );

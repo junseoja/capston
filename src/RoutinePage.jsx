@@ -10,25 +10,19 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
   const [description, setDescription] = useState("");
   const [routineMode, setRoutineMode] = useState("check");
 
+  const [selectedTitle, setSelectedTitle] = useState("");
+
   const weekDays = ["월", "화", "수", "목", "금", "토", "일"];
 
-  // 입력한 시간에 따라 아침 / 점심 / 저녁 자동 분류
   const getTimeSection = (goalTime) => {
     const [hour, minute] = goalTime.split(":").map(Number);
     const totalMinutes = hour * 60 + minute;
 
-    if (totalMinutes >= 360 && totalMinutes <= 719) {
-      return "morning";
-    }
-
-    if (totalMinutes >= 720 && totalMinutes <= 1079) {
-      return "lunch";
-    }
-
+    if (totalMinutes >= 360 && totalMinutes <= 719) return "morning";
+    if (totalMinutes >= 720 && totalMinutes <= 1079) return "lunch";
     return "dinner";
   };
 
-  // 반복 요일 선택
   const handleRepeatDayClick = (day) => {
     setRepeat((prev) =>
       prev.includes(day)
@@ -205,7 +199,13 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
           <div className="routine-card" key={routine.id}>
             <div className="routine-card-left">
               <div className="routine-card-top">
-                <h3>{routine.title}</h3>
+                <h3
+                  title={routine.title}
+                  onClick={() => setSelectedTitle(routine.title)}
+                >
+                  {routine.title}
+                </h3>
+
                 <span className="routine-badge">{routine.category}</span>
               </div>
 
@@ -256,6 +256,21 @@ function RoutinePage({ routines, onAddRoutine, onDeleteRoutine }) {
           </div>
         ))}
       </div>
+
+      {selectedTitle && (
+        <div
+          className="title-modal-overlay"
+          onClick={() => setSelectedTitle("")}
+        >
+          <div
+            className="title-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p>{selectedTitle}</p>
+            <button onClick={() => setSelectedTitle("")}>닫기</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

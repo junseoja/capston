@@ -207,10 +207,10 @@ button {
 
 /* 루틴 카드 제목 글씨 스타일 */
 .home-routine-card h3 {
-  margin: 0;
-  font-size: 24px;
-  color: #111827;
-  word-break: keep-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 
 /* 루틴 카테고리 뱃지 스타일 */
@@ -784,10 +784,10 @@ button {
 }
 
 .routine-card h3 {
-  margin: 0;
-  font-size: 24px;
-  color: #111827;
-  word-break: keep-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 
 .routine-card p {
@@ -1313,3 +1313,32 @@ button {
 }
 
 /*여기까지 마이페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+
+
+/*홈페이지랑 루틴 페이지 h3 글 길어졌을 때 클릭하여 나오는 박스*/
+.title-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.title-modal {
+  background: white;
+  padding: 24px;
+  border-radius: 16px;
+  max-width: 400px;
+  width: 80%;
+  text-align: center;
+}
+
+.title-modal p {
+  margin-bottom: 16px;
+  font-size: 18px;
+}
