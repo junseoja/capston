@@ -41,7 +41,7 @@ def add_like(body: LikeCreate):
     처리 흐름:
         1. feed_likes 테이블에 (feed_id, user_id) INSERT 시도
         2. 이미 좋아요 했으면 → IntegrityError(UNIQUE 중복) 발생
-           → 해당 레코드를 DELETE (좋아요 취소)
+        → 해당 레코드를 DELETE (좋아요 취소)
         3. 처음 좋아요 → INSERT 성공
 
     Args:
@@ -49,7 +49,7 @@ def add_like(body: LikeCreate):
 
     Returns:
         dict: {"success": True, "liked": True}  → 좋아요 추가됨
-              {"success": True, "liked": False} → 좋아요 취소됨
+                {"success": True, "liked": False} → 좋아요 취소됨
 
     Raises:
         HTTPException 500: 예상치 못한 DB 오류
@@ -139,7 +139,7 @@ def check_like(feed_id: str, user_id: str):
 
     Returns:
         dict: {"liked": True}  → 이 유저가 이 피드에 좋아요 누른 상태
-              {"liked": False} → 좋아요 안 누른 상태
+            {"liked": False} → 좋아요 안 누른 상태
 
     Raises:
         HTTPException 500: DB 조회 오류
