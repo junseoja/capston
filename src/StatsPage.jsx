@@ -39,7 +39,6 @@ function StatsPage({ setPage }) {
     }
   };
 
-  // --- 공통 호버 효과 스타일 생성 함수 ---
   const hoverEffect = {
     transition: "all 0.2s ease",
     cursor: "pointer"
@@ -55,7 +54,7 @@ function StatsPage({ setPage }) {
       width: '14.28%', padding: '10px 0', textAlign: 'center', fontSize: '13px', borderRadius: '8px',
       backgroundColor: (isStart || isEnd) ? '#4f46e5' : isInRange ? '#eef2ff' : 'transparent',
       color: (isStart || isEnd) ? '#fff' : '#374151',
-      ...hoverEffect // 달력 날짜에 포인터 추가
+      ...hoverEffect 
     };
   };
 
@@ -64,19 +63,13 @@ function StatsPage({ setPage }) {
       {/* 1. 상단 헤더 */}
       <div style={{ padding: "20px", background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #f3f4f6" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-          <button 
-            onClick={() => setPage("mypage")} 
-            className="hover-btn"
-            style={{ background: "none", border: "none", fontSize: "20px", ...hoverEffect }}>←</button>
+          <button onClick={() => setPage("mypage")} style={{ background: "none", border: "none", fontSize: "20px", ...hoverEffect }}>←</button>
           <h1 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>상세 분석 리포트</h1>
         </div>
-        <button 
-            onClick={() => setShowPicker(!showPicker)} 
-            className="hover-btn"
-            style={{ background: "#f3f4f6", border: "none", padding: "8px 12px", borderRadius: "10px", fontSize: "18px", ...hoverEffect }}>📅</button>
+        <button onClick={() => setShowPicker(!showPicker)} style={{ background: "#f3f4f6", border: "none", padding: "8px 12px", borderRadius: "10px", fontSize: "18px", ...hoverEffect }}>📅</button>
       </div>
 
-      {/* 달력 팝업 */}
+      {/* 달력 팝업 생략 (기존과 동일) */}
       {showPicker && (
         <div style={{ position: "absolute", top: "70px", right: "20px", width: "300px", background: "#fff", borderRadius: "20px", boxShadow: "0 10px 30px rgba(0,0,0,0.15)", zIndex: 100, padding: "20px", border: "1px solid #eee" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
@@ -90,44 +83,28 @@ function StatsPage({ setPage }) {
           <div style={{ display: "flex", flexWrap: "wrap" }}>
             {Array.from({ length: new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate() }).map((_, i) => {
               const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i + 1);
-              return <div key={i + 1} onClick={() => handleDateClick(date)} style={getDayStyle(date)} className="calendar-day">{i + 1}</div>;
+              return <div key={i + 1} onClick={() => handleDateClick(date)} style={getDayStyle(date)}>{i + 1}</div>;
             })}
           </div>
         </div>
       )}
 
-      {/* 2. 주간/월간 탭 - 호버 시 배경색이 살짝 변하는 클래스 적용 */}
+      {/* 2. 주간/월간 탭 */}
       <div style={{ display: "flex", background: "#fff", padding: "10px 20px", gap: "10px", borderBottom: "1px solid #f3f4f6" }}>
         {["weekly", "monthly"].map((mode) => (
-          <button 
-            key={mode}
-            onClick={() => setViewMode(mode)} 
-            style={{ 
-              flex: 1, padding: "12px", borderRadius: "12px", border: "none", 
-              background: viewMode === mode ? "#4f46e5" : "#f3f4f6", 
-              color: viewMode === mode ? "#fff" : "#9ca3af", 
-              fontWeight: "bold",
-              ...hoverEffect // 호버 효과 추가
-            }}
-            onMouseOver={(e) => { if(viewMode !== mode) e.target.style.background = "#e5e7eb" }}
-            onMouseOut={(e) => { if(viewMode !== mode) e.target.style.background = "#f3f4f6" }}
-          >
+          <button key={mode} onClick={() => setViewMode(mode)} style={{ flex: 1, padding: "12px", borderRadius: "12px", border: "none", background: viewMode === mode ? "#4f46e5" : "#f3f4f6", color: viewMode === mode ? "#fff" : "#9ca3af", fontWeight: "bold", ...hoverEffect }} onMouseOver={(e) => { if(viewMode !== mode) e.target.style.background = "#e5e7eb" }} onMouseOut={(e) => { if(viewMode !== mode) e.target.style.background = "#f3f4f6" }}>
             {mode === "weekly" ? "주간 통계" : "월간 통계"}
           </button>
         ))}
       </div>
 
-      {/* 3. 통합 달성률 섹션 (기존 동일) */}
+      {/* 3. 통합 달성률 섹션 */}
       <div style={{ padding: "25px 20px", background: "#fff", marginBottom: "10px" }}>
         <h3 style={{ fontSize: "16px", color: "#4f46e5", marginBottom: "8px", fontWeight: "800" }}>
-          {viewMode === "weekly" 
-            ? `${weeklyRange.start.getMonth() + 1}월 ${Math.ceil(weeklyRange.start.getDate() / 7)}주차 통합 달성률` 
-            : `${monthlyRange.start.getMonth() + 1}월 통합 달성률`}
+          {viewMode === "weekly" ? `${weeklyRange.start.getMonth() + 1}월 ${Math.ceil(weeklyRange.start.getDate() / 7)}주차 통합 달성률` : `${monthlyRange.start.getMonth() + 1}월 통합 달성률`}
         </h3>
         <p style={{ margin: "0 0 15px 0", fontSize: "14px", color: "#6b7280", fontWeight: "600" }}>
-          {viewMode === "weekly" 
-            ? `${weeklyRange.start.toLocaleDateString()} ~ ${weeklyRange.end.toLocaleDateString()}` 
-            : `${monthlyRange.start.toLocaleDateString()} ~ ${monthlyRange.end.toLocaleDateString()}`}
+          {viewMode === "weekly" ? `${weeklyRange.start.toLocaleDateString()} ~ ${weeklyRange.end.toLocaleDateString()}` : `${monthlyRange.start.toLocaleDateString()} ~ ${monthlyRange.end.toLocaleDateString()}`}
         </p>
         <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
           <div style={{ flex: 1, height: "12px", background: "#f3f4f6", borderRadius: "6px", overflow: "hidden" }}>
@@ -137,37 +114,45 @@ function StatsPage({ setPage }) {
         </div>
       </div>
 
-      {/* 4. 요일별/주차별 분석 그래프 (기존 동일) */}
+      {/* 4. 요일별/주차별 분석 그래프 (★수치 확인 가능하도록 이 부분 집중 수정★) */}
       <div style={{ padding: "25px 20px", background: "#fff", marginBottom: "10px" }}>
         <h3 style={{ fontSize: "15px", color: "#374151", marginBottom: "30px", fontWeight: "700" }}>{viewMode === "weekly" ? "요일별" : "주차별"} 목표 달성률</h3>
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", height: "100px" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", height: "140px" }}>
           {(viewMode === "weekly" ? weeklyData : monthlyData).chart.map((item, i) => (
-            <div key={i} style={{ textAlign: "center", flex: 1 }}>
-              <div style={{ height: `${(item.rate / 100) * 80}px`, background: "#4f46e5", borderRadius: "4px", margin: "0 auto", width: viewMode === "weekly" ? "20px" : "35px" }}></div>
+            <div key={i} style={{ textAlign: "center", flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+              
+              {/* [수정] 정확한 퍼센트 숫자 표시 */}
+              <span style={{ fontSize: "11px", fontWeight: "800", color: "#4f46e5", marginBottom: "8px" }}>
+                {item.rate}%
+              </span>
+
+              {/* [수정] 100% 기준 배경 막대 안에 파란 막대 배치 */}
+              <div style={{ 
+                height: "80px", 
+                width: viewMode === "weekly" ? "16px" : "28px", 
+                background: "#f3f4f6", 
+                borderRadius: "8px", 
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-end",
+                overflow: "hidden"
+              }}>
+                <div style={{ height: `${item.rate}%`, background: "#4f46e5", borderRadius: "8px", transition: "height 0.3s ease" }}></div>
+              </div>
+
               <span style={{ fontSize: "12px", color: "#9ca3af", marginTop: "10px", display: "block" }}>{item.label}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* 5. 시간대별 상세 성취도 - 아침/점심/저녁 호버 효과 추가 */}
+      {/* 5, 6, 7 섹션 생략 (기존과 동일) */}
       <div style={{ padding: "25px 20px", background: "#fff", marginBottom: "10px" }}>
         <h3 style={{ fontSize: "15px", color: "#374151", marginBottom: "20px", fontWeight: "700" }}>시간대별 상세 성취도</h3>
         <div style={{ display: "flex", background: "#f3f4f6", borderRadius: "10px", padding: "4px", marginBottom: "20px" }}>
           {["morning", "lunch", "dinner"].map((slot) => (
-            <button 
-              key={slot} 
-              onClick={() => setTimeSlot(slot)} 
-              style={{ 
-                flex: 1, padding: "10px", border: "none", borderRadius: "8px", 
-                background: timeSlot === slot ? "#4f46e5" : "transparent", 
-                color: timeSlot === slot ? "#fff" : "#9ca3af", 
-                fontSize: "13px", fontWeight: "bold",
-                ...hoverEffect // 호버 효과 추가
-              }}
-              onMouseOver={(e) => { if(timeSlot !== slot) e.target.style.background = "#e5e7eb" }}
-              onMouseOut={(e) => { if(timeSlot !== slot) e.target.style.background = "transparent" }}
-            >
+            <button key={slot} onClick={() => setTimeSlot(slot)} style={{ flex: 1, padding: "10px", border: "none", borderRadius: "8px", background: timeSlot === slot ? "#4f46e5" : "transparent", color: timeSlot === slot ? "#fff" : "#9ca3af", fontSize: "13px", fontWeight: "bold", ...hoverEffect }} onMouseOver={(e) => { if(timeSlot !== slot) e.target.style.background = "#e5e7eb" }} onMouseOut={(e) => { if(timeSlot !== slot) e.target.style.background = "transparent" }}>
               {slot === "morning" ? "아침" : slot === "lunch" ? "점심" : "저녁"}
             </button>
           ))}
@@ -180,7 +165,6 @@ function StatsPage({ setPage }) {
         ))}
       </div>
 
-      {/* 6. 카테고리별 분석 및 7. 성과 요약 (기존 동일) */}
       <div style={{ padding: "25px 20px", background: "#fff", marginBottom: "10px" }}>
         <h3 style={{ fontSize: "15px", color: "#374151", marginBottom: "20px", fontWeight: "700" }}>카테고리별 분석</h3>
         {categoryStats.map((cat, i) => (
