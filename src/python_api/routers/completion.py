@@ -4,7 +4,7 @@
 # 담당 엔드포인트:
 #   POST   /completion/                   : 루틴 완료 기록 생성
 #   GET    /completion/today/{user_id}    : 오늘 완료한 루틴 목록 조회
-#   DELETE /completion/{completion_id}    : 완료 기록 삭제 (완료 취소)
+#   DELETE /completion/{completion_id}    : 완료 기록 삭제 (Soft Delete)
 #   GET    /completion/history/{user_id}  : 전체 완료 이력 조회 (마이페이지용)
 #
 # DB 테이블: routine_completions
@@ -13,12 +13,29 @@
 #   - user_id       : UUID v7 (FK → users.user_id)
 #   - proof_text    : 인증 글 (상세 루틴에서 입력)
 #   - completed_at  : 완료 일시 (자동)
+#   - deleted_at    : 삭제 시각 (NULL=활성, NOT NULL=취소됨)  [추가 2026-05-01]
 #
 # 연결 상태:
 #   Express completion.js 라우터를 통해 프론트엔드와 연결 완료
 #   홈 화면에서 루틴 완료/취소 시 이 API가 호출됨
 #   마이페이지 "최근 활동" 섹션에서 완료 이력 조회에 사용
-# ============================================================
+#
+# ─────────────────────────────────────────────────────────────────
+# [Soft Delete 도입 2026-05-01]
+# ─────────────────────────────────────────────────────────────────
+# routines 와 동일 정책: DELETE 행 제거 대신 UPDATE deleted_at = NOW().
+#
+# 정책 분기:
+#   - GET /completion/today           → 활성 행만 조회 (deleted_at IS NULL)
+#   - GET /completion/history         → 활성 행만 조회 (취소된 완료 기록은 숨김)
+#                                        단, 연결된 routines 가 soft delete 됐어도
+#                                        completion 자체는 살아있으면 그대로 표시 ←
+#                                        사용자 결정사항 2(a) "삭제된 루틴의
+#                                        완료 기록도 표시"
+#   - DELETE /completion/{id}         → UPDATE deleted_at = NOW()
+#                                        (CASCADE 가 더 이상 트리거되지 않으므로
+#                                         연결된 피드/이미지/댓글/좋아요는 보존)
+# ─────────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -53,7 +70,7 @@ def create_completion(body: CompletionCreate):
 
     Returns:
         dict: {"success": True, "completion_id": "uuid-v7-..."}
-              completion_id는 피드 생성 시 feeds.completion_id FK로 사용됨
+            completion_id는 피드 생성 시 feeds.completion_id FK로 사용됨
 
     Raises:
         HTTPException 500: DB 저장 오류
@@ -100,12 +117,25 @@ def get_today_completions(user_id: str):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # ────────────────────────────────────────────────────────────
+            # [주석 보강 2026-04-29] CURDATE() 의 의미 확정
+            # ────────────────────────────────────────────────────────────
+            # database.get_connection() 에서 init_command 로
+            # `SET time_zone = '+09:00'` 을 실행하므로,
+            # 이 쿼리의 CURDATE() 는 항상 KST 기준 "오늘 날짜"를 반환한다.
+            # DATE(completed_at) 도 동일 세션의 KST 타임존으로 해석되므로
+            # 자정 전후 완료 기록이 누락되던 기존 버그는 발생하지 않는다.
+            # ────────────────────────────────────────────────────────────
+            # [수정 2026-05-01] Soft Delete 필터 추가:
+            #   AND deleted_at IS NULL → 완료 취소된 기록은 화면에서 숨김.
+            #   인덱스 idx_completions_user_active(user_id, deleted_at) 가
+            #   user_id + deleted_at 조합을 빠르게 커버한다.
             cursor.execute(
                 """SELECT * FROM routine_completions
                 WHERE user_id = %s
-                AND DATE(completed_at) = CURDATE()
+                  AND deleted_at IS NULL
+                  AND DATE(completed_at) = CURDATE()
                 ORDER BY completed_at DESC""",
-                # DATE(completed_at) = CURDATE(): 서버 시간 기준 오늘 날짜만 조회
                 (user_id,)
             )
             completions = cursor.fetchall()  # 오늘 완료 기록 전체 (없으면 빈 리스트)
@@ -123,13 +153,16 @@ def delete_completion(
     completion_id: str,
     user_id: str = Query(..., description="요청한 유저의 UUID v7 — 본인 완료 기록만 삭제 가능")
 ):
-    """루틴 완료 취소 (완료 기록 삭제)
+    """루틴 완료 취소 (Soft Delete)
 
     홈 화면에서 완료된 루틴 카드를 클릭해 완료 취소할 때 호출됨.
-    feeds 테이블의 ON DELETE CASCADE 설정으로 연관 피드 게시물도 자동 삭제됨.
 
-    [수정] 기존에는 completion_id만으로 삭제했으나,
-    이제 user_id까지 함께 검증하여 본인 완료 기록만 삭제 가능하도록 강화.
+    [수정 2026-05-01] Soft Delete 전환:
+        UPDATE routine_completions SET deleted_at = NOW() 만 수행하므로
+        ON DELETE CASCADE 가 트리거되지 않는다 → 연관 피드/이미지/댓글/좋아요는
+        그대로 보존되어 SNS 성격의 인증 기록이 사라지지 않는다.
+
+    [수정] user_id 까지 WHERE 에 포함시켜 본인 완료 기록만 처리 가능하도록 강화.
 
     Args:
         completion_id (str): 삭제할 완료 기록의 UUID v7 (URL 경로 파라미터)
@@ -137,7 +170,7 @@ def delete_completion(
 
     Returns:
         dict: {"success": True}                     → 삭제 성공
-              {"success": False, "message": "..."} → 권한 없음 또는 대상 없음
+            {"success": False, "message": "..."} → 권한 없음 또는 대상 없음
 
     Raises:
         HTTPException 500: DB 삭제 오류
@@ -145,16 +178,33 @@ def delete_completion(
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # [수정 2026-05-01] Soft Delete 전환
+            #   기존: DELETE FROM routine_completions  → CASCADE 로 연결된 피드/이미지/댓글/좋아요 모두 사라짐
+            #   변경: UPDATE ... SET deleted_at = NOW()
+            #         → 사용자 화면에는 안 보이지만, 연결된 피드/이미지 등은 그대로 보존됨
+            #         → 사용자 결정사항 1(a)/2(a) 와 일관 (피드는 표시, 마이페이지 활동도 표시)
+            #
+            # WHERE 절:
+            #   completion_id = %s            : 대상 완료 기록
+            #   AND user_id = %s              : 본인 소유 검증
+            #   AND deleted_at IS NULL        : 이미 취소된 기록은 다시 처리하지 않음
             cursor.execute(
-                "DELETE FROM routine_completions WHERE completion_id = %s AND user_id = %s",
+                """UPDATE routine_completions
+                   SET deleted_at = NOW()
+                 WHERE completion_id = %s
+                   AND user_id = %s
+                   AND deleted_at IS NULL""",
                 (completion_id, user_id)
             )
             affected = cursor.rowcount
         conn.commit()
 
-        # [추가] 삭제된 행이 없으면 존재하지 않거나 본인 소유가 아님
+        # [수정 2026-05-01] 갱신된 행이 0이면 다음 셋 중 하나:
+        #   1) 존재하지 않는 completion_id
+        #   2) 본인 소유 아님
+        #   3) 이미 취소된 상태(중복 호출)
         if affected == 0:
-            return {"success": False, "message": "삭제 권한이 없거나 존재하지 않는 완료 기록입니다."}
+            return {"success": False, "message": "삭제 권한이 없거나 이미 취소된 완료 기록입니다."}
 
         return {"success": True}
     except Exception as e:
@@ -181,7 +231,7 @@ def get_completion_history(user_id: str):
     Returns:
         list[dict]: 완료 이력 목록 (최신 20건, 최신순)
                     각 항목: completion_id, routine_id, user_id, proof_text,
-                             completed_at, title(루틴), category, routine_mode
+                            completed_at, title(루틴), category, routine_mode
 
     Raises:
         HTTPException 500: DB 조회 오류
@@ -189,15 +239,34 @@ def get_completion_history(user_id: str):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # [수정 2026-05-01] Soft Delete + 삭제 루틴 fallback 처리
+            #   1) JOIN → LEFT JOIN
+            #      삭제된 루틴(routines.deleted_at NOT NULL)도 결과에 포함되도록.
+            #      INNER JOIN 이면 삭제 루틴의 완료 기록이 결과에서 사라짐.
+            #      → 사용자 결정사항 2(a) "삭제된 루틴의 완료 기록도 표시" 충족
+            #   2) COALESCE(r.title, '(삭제된 루틴)')
+            #      만약 routine 행 자체가 hard delete 되었거나(과거 데이터) JOIN 실패 시
+            #      "(삭제된 루틴)" 라벨로 표시.
+            #      현재는 routines 도 soft delete 정책이라 r.title 은 항상 조회되지만,
+            #      방어 코드로 두어 데이터 정합성 변화에 견고하게.
+            #   3) AND rc.deleted_at IS NULL
+            #      완료 기록 자체가 취소된 것은 숨김 (이력에 남지 않음)
+            #
+            # 주의:
+            #   r.* 를 SELECT 하지 않고 r.title / r.category / r.routine_mode 만 명시.
+            #   r.deleted_at 같은 새 컬럼이 결과에 섞여 프론트 매핑을 헷갈리게 하는
+            #   부작용 방지.
             cursor.execute(
-                """SELECT rc.*, r.title, r.category, r.routine_mode
+                """SELECT rc.*,
+                          COALESCE(r.title, '(삭제된 루틴)') AS title,
+                          r.category,
+                          r.routine_mode
                 FROM routine_completions rc
-                JOIN routines r ON rc.routine_id = r.routine_id
+                LEFT JOIN routines r ON rc.routine_id = r.routine_id
                 WHERE rc.user_id = %s
+                  AND rc.deleted_at IS NULL
                 ORDER BY rc.completed_at DESC
                 LIMIT 20""",
-                # JOIN으로 루틴 제목/카테고리도 함께 조회
-                # LIMIT 20: 최근 20건만 반환 (성능 + 페이지 분량)
                 (user_id,)
             )
             history = cursor.fetchall()

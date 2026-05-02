@@ -4,7 +4,7 @@
 # 담당 엔드포인트:
 #   POST   /routine/             : 루틴 생성 (UUID v7 PK 사용)
 #   GET    /routine/{user_id}    : 특정 유저의 루틴 전체 조회 (최신순)
-#   DELETE /routine/{routine_id} : 루틴 삭제
+#   DELETE /routine/{routine_id} : 루틴 삭제 (Soft Delete)
 #
 # 호출 흐름:
 #   React(RoutinePage) → Express /routine → 이 라우터 → MySQL routines 테이블
@@ -20,7 +20,27 @@
 #   - repeat_cycle: 반복 주기 (예: "매일" 또는 "월, 수, 금")
 #   - description: 루틴 설명
 #   - created_at : 생성 일시 (자동)
-# ============================================================
+#   - deleted_at : 삭제 시각 (NULL=활성, NOT NULL=삭제됨)  [추가 2026-05-01]
+#
+# ─────────────────────────────────────────────────────────────────
+# [Soft Delete 도입 2026-05-01]
+# ─────────────────────────────────────────────────────────────────
+# 변경 이유:
+#   기존에는 DELETE FROM routines 시 ON DELETE CASCADE 로
+#   routine_completions / feeds / feed_images / feed_likes / feed_comments
+#   가 모두 함께 사라졌음. 사용자 인증 글(피드)은 SNS 게시물 성격이므로
+#   "내 루틴을 삭제했다고 해서 과거 인증 기록까지 사라지는 것은 부자연스럽다"
+#   는 요구가 있었음.
+#
+# 적용 정책:
+#   - 본 라우터의 DELETE 는 더 이상 행을 지우지 않고
+#     UPDATE routines SET deleted_at = NOW() 만 수행한다.
+#   - 모든 SELECT 는 WHERE deleted_at IS NULL 을 추가하여
+#     사용자 화면에서는 삭제된 루틴이 보이지 않도록 한다.
+#   - 단, 피드 화면(feed.py) 과 마이페이지 최근 활동(completion.history)
+#     에서는 삭제된 루틴의 인증 기록이 그대로 표시되어야 하므로
+#     해당 라우터들은 routines 의 deleted_at 을 필터링하지 않는다.
+# ─────────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -111,9 +131,15 @@ def get_routines(user_id: str):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # [수정 2026-05-01] Soft Delete 적용:
+            #   AND deleted_at IS NULL → 삭제된 루틴은 사용자 화면에서 숨김
+            #   복합 인덱스 idx_routines_user_active(user_id, deleted_at) 가
+            #   이 WHERE 절을 정확히 커버함.
             cursor.execute(
-                # ORDER BY created_at DESC: 최신 루틴이 먼저 나오도록 정렬
-                "SELECT * FROM routines WHERE user_id = %s ORDER BY created_at DESC",
+                """SELECT * FROM routines
+                WHERE user_id = %s
+                  AND deleted_at IS NULL
+                ORDER BY created_at DESC""",
                 (user_id,)
             )
             routines = cursor.fetchall()  # DictCursor → dict 배열 반환 (없으면 빈 리스트)
@@ -131,11 +157,22 @@ def delete_routine(
     routine_id: str,
     user_id: str = Query(..., description="소유자 UUID v7 — Express 세션에서 전달")
 ):
-    """루틴 삭제 API (소유자 검증 포함)
+    """루틴 삭제 API (소유자 검증 포함, Soft Delete)
 
     Express의 deleteRoutine(routine_id, user_id) 에서 호출.
-    WHERE routine_id = %s AND user_id = %s 조건으로 삭제하여
-    다른 유저의 루틴은 삭제되지 않도록 보장.
+    WHERE routine_id = %s AND user_id = %s 조건으로 본인 소유 루틴만 처리.
+
+    [수정 2026-05-01] Soft Delete 전환
+        기존: DELETE FROM routines  → CASCADE 로 completions/feeds/이미지/좋아요/댓글 모두 삭제됨
+        변경: UPDATE routines SET deleted_at = NOW()
+              → DB 레코드는 보존되고, 연결된 피드/완료기록도 그대로 살아남음
+              → 사용자 화면에선 deleted_at IS NULL 필터로 자동으로 숨겨짐
+              → 피드/마이페이지 최근활동에서는 "(삭제된 루틴)" 라벨로 표시
+
+        멱등성:
+          - 이미 삭제된 행을 다시 호출해도 deleted_at 만 갱신될 뿐 부작용 없음
+          - 단, "이미 삭제된 루틴은 삭제 불가" 처럼 보이게 하기 위해
+            WHERE 절에 AND deleted_at IS NULL 을 추가 → 두 번째 호출은 0행 affected.
 
     Args:
         routine_id (str): 삭제할 루틴의 UUID v7 (URL 경로 파라미터)
@@ -143,26 +180,38 @@ def delete_routine(
 
     Returns:
         dict: {"success": True}                     → 삭제 성공
-              {"success": False, "message": "..."}  → 권한 없음 (본인 루틴 아님)
+              {"success": False, "message": "..."}  → 권한 없음/이미 삭제됨/존재하지 않음
 
     Raises:
-        HTTPException 500: DB 삭제 오류
+        HTTPException 500: DB 업데이트 오류
     """
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # AND user_id = %s: 본인 루틴이 아니면 WHERE 조건 불일치 → 0행 삭제
+            # [수정 2026-05-01] DELETE → UPDATE deleted_at
+            # WHERE 절:
+            #   routine_id = %s            : 대상 루틴
+            #   AND user_id = %s            : 본인 소유 검증 (타인 루틴 차단)
+            #   AND deleted_at IS NULL      : 이미 삭제된 행은 다시 처리하지 않음
             cursor.execute(
-                "DELETE FROM routines WHERE routine_id = %s AND user_id = %s",
+                """UPDATE routines
+                   SET deleted_at = NOW()
+                 WHERE routine_id = %s
+                   AND user_id = %s
+                   AND deleted_at IS NULL""",
                 (routine_id, user_id)
             )
-            affected = cursor.rowcount  # 실제로 삭제된 행 수
+            affected = cursor.rowcount  # 실제로 갱신된 행 수
 
         conn.commit()
 
         if affected == 0:
-            # 삭제된 행이 없음: 존재하지 않거나 본인 소유 아님
-            return {"success": False, "message": "삭제 권한이 없거나 존재하지 않는 루틴입니다."}
+            # 갱신된 행이 없음 → 다음 중 하나:
+            #   1) 존재하지 않는 routine_id
+            #   2) 본인 소유가 아님
+            #   3) 이미 deleted_at 이 채워진 상태(중복 삭제 호출)
+            # 어느 경우든 사용자에게는 같은 메시지로 응답해도 보안상 문제없음.
+            return {"success": False, "message": "삭제 권한이 없거나 이미 삭제된 루틴입니다."}
 
         return {"success": True}
     except Exception as e:

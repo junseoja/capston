@@ -139,6 +139,35 @@ async function createUser(userInfo) {
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// [추가 2026-04-29] 비밀번호 해시 업데이트 (평문 → bcrypt Lazy Migration 용)
+// ─────────────────────────────────────────────────────────────────────────────
+// 사용처:
+//   src/backend/routes/login.js 에서 평문 비밀번호 매치 성공 시 호출.
+//   bcrypt.hash(평문, 10) 로 해시 생성한 뒤 이 함수를 통해 DB 의 password
+//   컬럼을 해시값으로 교체한다.
+//
+// 주의:
+//   - hashed_password 인자에는 반드시 "이미 bcrypt 로 해싱된 문자열" 을 전달.
+//     평문을 넘기면 평문이 그대로 DB 에 저장되어 보안 사고가 된다.
+//   - FastAPI(8000) 는 외부 비공개여야 하며, 인증 헤더 없이 호출됨.
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * 유저의 비밀번호 해시값을 DB 에 업데이트.
+ *
+ * @param {string} user_id - 대상 유저의 UUID v7
+ * @param {string} hashed_password - bcrypt 해시 문자열 ($2b$... 형식)
+ * @returns {Promise<object>} { success: true } 또는 { success: false, message }
+ * @throws {FastApiError} HTTP/네트워크 오류 시
+ */
+async function updateUserPassword(user_id, hashed_password) {
+    return await fetchJson(`${PYTHON_API}/user/password/${encodeURIComponent(user_id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: hashed_password }),
+    });
+}
+
 // ─── 세션 관련 함수 ────────────────────────────────────────────────────────
 
 /**
@@ -362,6 +391,8 @@ module.exports = {
 
     findUser,
     createUser,
+    // [추가 2026-04-29] 평문→bcrypt Lazy Migration 용
+    updateUserPassword,
     createSession,
     findSession,
     deleteSession,

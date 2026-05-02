@@ -1333,6 +1333,486 @@ FastAPI가 HTML 500 응답
 
 ---
 
+## 🔧 2026-04-29 작업 내역
+
+### 1. 이번 세션 개요
+
+4월 22일 점검에서 미해결로 분류되었던 12개 항목 중 **Critical 등급 3건**(#6 타임존, #4 고아 파일, #7 평문 비밀번호 폴백)을 일괄 처리. 추가로 쿠키 `secure` 옵션 환경변수화(#10)도 함께 적용.
+
+| 항목 | 등급 | 처리 결과 | 영향 파일 |
+|---|---|---|---|
+| #6 타임존 (CURDATE vs KST) | 🔴 Critical | ✅ 완료 | `src/python_api/database.py`, `src/python_api/routers/completion.py` |
+| #4 피드 업로드/삭제 파일 미정리 | 🔴 Critical | ✅ 완료 | `src/backend/routes/feed.js` |
+| #7 평문 비밀번호 폴백 | 🔴 Critical | ✅ 완료 (Lazy Migration) | `src/backend/routes/login.js`, `src/backend/database.js`, `src/python_api/routers/user.py` |
+| #10 `secure: false` 하드코딩 | 🟢 낮음 | ✅ 완료 | `src/backend/routes/login.js` |
+
+---
+
+### 2. #6 타임존 버그 — DB 커넥션 KST 강제 설정
+
+#### 문제
+
+AWS RDS MySQL 의 기본 타임존은 UTC. `routers/completion.py:106` 의 `DATE(completed_at) = CURDATE()` 가 UTC 기준으로 동작하여, **KST 자정~오전 09:00 사이에 완료한 루틴이 새로고침 시 "오늘 목록"에서 사라지는** 버그가 있었음.
+
+| KST 완료 시각 | UTC 저장값 | `CURDATE()` (UTC) | 결과 |
+|---|---|---|---|
+| 04/30 02:00 (KST) | 04/29 17:00 (UTC) | 04/30 (UTC) | 🔴 어제 기록으로 누락 |
+| 04/30 08:59 (KST) | 04/29 23:59 (UTC) | 04/30 (UTC) | 🔴 어제 기록으로 누락 |
+
+#### 해결
+
+`get_connection()` 에서 `init_command="SET time_zone = '+09:00'"` 를 사용하여 **세션 단위로** 타임존을 KST 로 고정. 인스턴스 글로벌 설정 변경 권한이 없어도 적용 가능하며, 저장된 DATETIME 원본값(UTC)은 변경되지 않으므로 데이터 마이그레이션 불필요.
+
+```python
+# src/python_api/database.py
+return pymysql.connect(
+    ...
+    init_command="SET time_zone = '+09:00'",  # [추가 2026-04-29]
+)
+```
+
+#### 검증 방법
+
+KST 자정 직후(예: 00:30) 루틴 완료 → 새로고침 → 홈 화면 "오늘 완료" 목록에 표시되는지 확인.
+
+---
+
+### 3. #4 피드 업로드/삭제 시 파일 미정리
+
+#### 문제 1 — POST /feed (업로드)
+
+`multer` 가 디스크에 파일을 먼저 저장한 뒤 FastAPI `createFeed()` / `addFeedImage()` 가 실패하면, **DB 레코드 없는 고아 파일이 `/uploads` 에 영구 보관**되어 디스크 사용량이 누적.
+
+#### 문제 2 — DELETE /feed/:feed_id (삭제)
+
+FastAPI 의 `ON DELETE CASCADE` 로 `feeds`/`feed_images` 행은 삭제되지만 **디스크 실제 파일은 삭제되지 않아** 동일하게 고아 파일 누적.
+
+#### 해결
+
+**POST 분기**: `cleanupFiles()` 헬퍼를 추가하여 검증 실패 / FastAPI 실패 / throw 모든 분기에서 `req.files` 디스크 정리. `Promise.allSettled` 를 사용해 일부 실패해도 나머지 정리를 멈추지 않음.
+
+**DELETE 분기**: CASCADE 실행 전 `getFeedDetail()` 로 `file_url` 목록을 미리 확보 → DB 삭제가 실제 성공한 경우에만 (`result.success === true`) 디스크에서 `fs.unlink`. 보안을 위해 `path.basename()` 으로 파일명만 추출하여 `../../etc/passwd` 같은 디렉터리 트래버설 공격을 차단.
+
+```javascript
+// src/backend/routes/feed.js (요약)
+const fs = require("fs/promises");
+const UPLOAD_DIR = path.join(__dirname, "../uploads");
+
+// POST: cleanupFiles() — 모든 실패 분기에서 호출
+// DELETE: 선조회 → DB 삭제 성공 → path.basename() 으로 안전한 unlink
+```
+
+#### 검증 방법
+
+1. FastAPI 강제 종료 → Express 만 켠 상태에서 피드 업로드 시도 → `/uploads` 에 잔여 파일 없는지 확인
+2. 피드 삭제 후 `ls src/backend/uploads/` 에서 해당 파일이 사라졌는지 확인
+
+---
+
+### 4. #7 평문 비밀번호 폴백 — Lazy Migration
+
+#### 문제
+
+`routes/login.js:139-142` 의 `isBcryptHash` 분기에서 평문 비밀번호도 그대로 받아주는 폴백이 있었음. DB 유출 시 즉시 탈취되며, 같은 비밀번호를 다른 서비스에 재사용하는 사용자에게 연쇄 피해 가능.
+
+#### 해결 — Lazy Migration 패턴
+
+폴백을 즉시 제거하면 평문 계정 사용자 로그인 불가가 되므로, **로그인 성공 시점에 자동으로 bcrypt 해시로 업그레이드** 하는 패턴 도입.
+
+흐름:
+1. 평문 일치 확인 (기존 폴백 그대로)
+2. 매치 성공 시 `bcrypt.hash(password, 10)` 으로 해시 생성
+3. FastAPI `PATCH /user/password/{user_id}` 호출하여 DB 의 `password` 컬럼 교체
+4. 다음 로그인부터는 `bcrypt.compare` 분기로만 동작
+
+업그레이드 자체가 실패해도 로그인은 통과 (UX 우선) — 다음 로그인 때 재시도되며 멱등.
+
+#### 신규 추가된 부분
+
+| 위치 | 내용 |
+|---|---|
+| `src/python_api/routers/user.py` | `PATCH /user/password/{user_id}` 엔드포인트 + `PasswordUpdate` 스키마 |
+| `src/backend/database.js` | `updateUserPassword(user_id, hashed_password)` 헬퍼 + export |
+| `src/backend/routes/login.js` | 평문 매치 분기 안에 `bcrypt.hash()` + `updateUserPassword()` 호출 |
+
+#### 향후 정리
+
+다음 SQL 결과가 0 건이 되면 평문 분기를 완전히 제거 가능:
+
+```sql
+SELECT user_id, login_id FROM users WHERE password NOT LIKE '$2%';
+```
+
+#### ⚠️ 보안 주의
+
+새로 추가한 `PATCH /user/password/{user_id}` 는 인증/세션 검증 없이 호출되므로, FastAPI(8000)는 반드시 외부 비공개로 운영해야 함 (Express(3000) → localhost 8000 만 호출). 일반적인 "비밀번호 변경" UI 가 추가될 경우 별도 엔드포인트로 분리 필요.
+
+---
+
+### 5. #10 쿠키 `secure` 옵션 환경변수화
+
+#### 문제
+
+`routes/login.js:152` 의 `secure: false` 가 하드코딩되어 있어, 프로덕션(HTTPS) 배포 시 쿠키 탈취 위험.
+
+#### 해결
+
+`secure: process.env.NODE_ENV === "production"` 으로 자동 결정. 발급 측(`res.cookie`)과 제거 측(`res.clearCookie`) 옵션을 동일하게 정렬하여 일부 브라우저에서 쿠키가 제거되지 않는 문제도 함께 예방.
+
+```javascript
+// src/backend/routes/login.js
+res.cookie("sessionId", sessionId, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",  // [수정 2026-04-29]
+    sameSite: "lax",
+    maxAge: 1000 * 60 * 60 * 24,
+});
+```
+
+---
+
+### 6. 검증 결과
+
+- 수정한 모든 JS 파일: `node -c` 문법 검증 통과
+- 수정한 모든 Python 파일: `ast.parse()` 문법 검증 통과
+- 모든 추가/수정 라인에 `[추가 2026-04-29]` / `[수정 2026-04-29]` 주석으로 변경 사유와 영향 명시
+
+---
+
+### 7. 4월 22일 표 기준 잔여 항목 갱신
+
+| # | 등급 | 항목 | 4/22 상태 | 4/29 상태 |
+|---|---|---|---|---|
+| #1 | 🔴 | Express 라우트 try/catch | ✅ | ✅ |
+| #2 | 🔴 | database.js 에러 처리 | ✅ | ✅ |
+| #3 | 🔴 | 글로벌 에러 핸들러 | ✅ | ✅ |
+| #4 | 🟠 | 피드 파일 미정리 | 미해결 | **✅ 완료** |
+| #5 | 🟠 | GET /feed N+1 + 페이지네이션 | 미해결 | 미해결 |
+| #6 | 🟠 | 타임존 (CURDATE vs KST) | 미해결 | **✅ 완료** |
+| #7 | 🟡 | 평문 비밀번호 폴백 | 미해결 | **✅ 완료 (Lazy Migration)** |
+| #8 | 🟡 | like.py rollback 누락 | 미해결 | 미해결 |
+| #9 | 🟡 | DB 커넥션 풀 미사용 | 미해결 | 미해결 |
+| #10 | 🟢 | secure: false 하드코딩 | 미해결 | **✅ 완료** |
+| #11 | 🟢 | Rate limiting 없음 | 미해결 | 미해결 |
+| #12 | 🟡 | 세션 인증 코드 반복 | ✅ | ✅ |
+
+---
+
+### 8. 권장 다음 커밋 단위
+
+1. **#5 페이지네이션** — `GET /feed?limit=20&offset=0` 형태로 LIMIT/OFFSET 추가 (1커밋)
+2. **#5 N+1 쿼리 제거** — FastAPI 에서 LEFT JOIN 으로 image/like 한 번에 조회 (1커밋)
+3. **#11 Rate limiting** — `express-rate-limit` 으로 `/login`·`/signup`·`/check-duplicate` 보호 (1커밋)
+4. **#8 like.py rollback** — `IntegrityError` 시 동일 커넥션에서 `rollback()` 후 DELETE 재시도 (1커밋)
+5. **#9 DB 커넥션 풀** — `sqlalchemy + QueuePool` 또는 `aiomysql.Pool` 도입 (별도 PR 단위)
+
+---
+
+## 🔧 2026-05-01 작업 내역
+
+### 1. 이번 세션 개요
+
+루틴/완료 기록을 삭제해도 연결된 인증 피드(이미지·댓글·좋아요 포함)가 함께 사라지는 기존 동작을 개선. **Soft Delete 패턴**(`deleted_at` 컬럼)을 도입하여 사용자 화면에서는 삭제된 것처럼 보이되 DB 레코드와 연관 데이터는 그대로 보존.
+
+| 변경 영역 | 처리 방식 | 영향 파일 |
+|---|---|---|
+| DB 스키마 | `deleted_at DATETIME NULL` 컬럼 + 복합 인덱스 추가 | AWS RDS 직접 ALTER (`users`, `routines`, `routine_completions`) |
+| 루틴 라우터 | DELETE → UPDATE deleted_at, 모든 SELECT 에 `deleted_at IS NULL` | `src/python_api/routers/routine.py` |
+| 완료 라우터 | DELETE → UPDATE deleted_at, history JOIN 정책 변경 | `src/python_api/routers/completion.py` |
+| 피드 라우터 | INNER JOIN → LEFT JOIN + `COALESCE` fallback | `src/python_api/routers/feed.py` |
+| 유저 라우터 | 조회/세션/중복체크에 `deleted_at IS NULL` 필터 | `src/python_api/routers/user.py` |
+
+---
+
+### 2. 변경 배경
+
+기존 정책에서는 `routines` 테이블에 `ON DELETE CASCADE` 가 걸려 있어, 사용자가 루틴을 삭제하는 순간 다음이 모두 사라졌음:
+
+```
+routines 1건 삭제
+  → routine_completions (CASCADE)
+    → feeds (CASCADE)
+      → feed_images (CASCADE)
+      → feed_likes (CASCADE)
+      → feed_comments (CASCADE)
+```
+
+문제점:
+- 사용자가 과거에 인증한 게시물(피드 + 사진 + 댓글 + 좋아요)이 한 번에 삭제됨 → 본인 게시물만이 아니라 **다른 사용자가 작성한 댓글/좋아요까지** 사라져 SNS 일관성 깨짐
+- 인스타그램/트위터 등 SNS 표준 동작과 어긋남
+
+해결 방향: **루틴/완료 기록은 Soft Delete 로 전환**하여 CASCADE 가 트리거되지 않도록 하고, 사용자 화면에서는 필터링으로 숨김.
+
+---
+
+### 3. DB 스키마 변경 (AWS RDS 직접 적용)
+
+#### 적용한 SQL
+
+```sql
+-- ① users
+ALTER TABLE users
+  ADD COLUMN deleted_at DATETIME NULL DEFAULT NULL
+  COMMENT '회원 탈퇴 시각 (NULL=활성, NOT NULL=탈퇴)';
+
+-- ② routines
+ALTER TABLE routines
+  ADD COLUMN deleted_at DATETIME NULL DEFAULT NULL
+  COMMENT '루틴 삭제 시각 (NULL=활성, NOT NULL=삭제됨)';
+
+-- ③ routine_completions
+ALTER TABLE routine_completions
+  ADD COLUMN deleted_at DATETIME NULL DEFAULT NULL
+  COMMENT '완료 기록 삭제 시각 (NULL=활성, NOT NULL=취소됨)';
+
+-- ④ 활성 데이터 조회 최적화 인덱스
+CREATE INDEX idx_routines_user_active     ON routines(user_id, deleted_at);
+CREATE INDEX idx_completions_user_active  ON routine_completions(user_id, deleted_at);
+```
+
+#### 적용 결과 (검증 쿼리)
+
+| 테이블 | total | active (deleted_at IS NULL) | deleted |
+|---|---:|---:|---:|
+| users | 11 | 11 | 0 |
+| routines | 17 | 17 | 0 |
+| routine_completions | 2 | 2 | 0 |
+
+→ MySQL 8.0 의 INSTANT ADD COLUMN 으로 락 없이 즉시 반영. 기존 데이터는 모두 NULL = 활성 상태 유지.
+
+#### 인덱스
+
+```
+idx_routines_user_active     : (user_id, deleted_at)  — BTREE
+idx_completions_user_active  : (user_id, deleted_at)  — BTREE
+```
+
+---
+
+### 4. 라우터별 변경 사항
+
+#### 4-1. `routers/routine.py`
+
+| 엔드포인트 | 변경 | 비고 |
+|---|---|---|
+| `GET /routine/{user_id}` | `WHERE user_id = %s AND deleted_at IS NULL` | 삭제된 루틴은 화면에서 숨김 |
+| `DELETE /routine/{routine_id}` | `DELETE FROM ...` → `UPDATE ... SET deleted_at = NOW()` | CASCADE 미발동, 연결 데이터 보존 |
+| `POST /routine/` | 변경 없음 | INSERT 는 그대로 |
+
+`DELETE` 의 `WHERE` 절에 `AND deleted_at IS NULL` 을 추가하여 이미 삭제된 행은 다시 갱신되지 않도록 멱등성 확보.
+
+#### 4-2. `routers/completion.py`
+
+| 엔드포인트 | 변경 | 비고 |
+|---|---|---|
+| `GET /completion/today/{user_id}` | `AND deleted_at IS NULL` 추가 | 취소된 완료는 숨김 |
+| `GET /completion/history/{user_id}` | `INNER JOIN` → `LEFT JOIN` + `COALESCE(r.title, '(삭제된 루틴)')` + `AND rc.deleted_at IS NULL` | 사용자 결정사항 2(a): 삭제된 루틴의 완료 기록도 표시 |
+| `DELETE /completion/{id}` | `DELETE` → `UPDATE deleted_at = NOW()` | CASCADE 미발동 |
+
+핵심 결정: `history` 에서 **completion 자체는 활성, routine 은 삭제 여부 무관** 으로 필터링하여, 과거 인증 활동이 사라지지 않도록.
+
+#### 4-3. `routers/feed.py`
+
+| 엔드포인트 | 변경 | 비고 |
+|---|---|---|
+| `GET /feed/` | `users / routines INNER JOIN` → `LEFT JOIN`, `COALESCE` 로 닉네임/루틴 제목 fallback | 사용자 결정사항 1(a): 피드는 그대로 표시 |
+| `GET /feed/{feed_id}` | 동일 (상세 조회 + 댓글 JOIN 도 LEFT JOIN) | 상세 화면도 일관 처리 |
+
+표시 fallback:
+- 삭제된 루틴 → `(삭제된 루틴)`
+- 탈퇴한 사용자 → `(탈퇴한 사용자)` (회원 탈퇴 기능 도입 시 자동 적용되도록 미리 처리)
+
+#### 4-4. `routers/user.py`
+
+| 엔드포인트 | 변경 | 비고 |
+|---|---|---|
+| `GET /user/{login_id}` | `AND deleted_at IS NULL` | 탈퇴 사용자 로그인 차단 |
+| `GET /user/session/{session_id}` | `AND u.deleted_at IS NULL` (JOIN 한 user) | 탈퇴 직후 자동 로그아웃 효과 |
+| `GET /user/check/login_id/{login_id}` | `AND deleted_at IS NULL` | 탈퇴 ID 재사용 가능 |
+| `GET /user/check/nickname/{nickname}` | `AND deleted_at IS NULL` | 탈퇴 닉네임 재사용 가능 |
+| 회원 탈퇴 엔드포인트 자체 | **추가하지 않음** | 별도 정책 결정 필요 (UNIQUE 제약 충돌 등) |
+
+---
+
+### 5. 정책 결정 사항 (사용자 확정)
+
+| # | 항목 | 결정 |
+|---|---|---|
+| 1 | 피드 페이지에서 "삭제된 루틴" 의 인증 글 | **(a) 그대로 표시** + `(삭제된 루틴)` fallback |
+| 2 | 마이페이지 "최근 활동" 의 삭제 루틴 완료 기록 | **(a) 표시** (취소된 completion 만 숨김) |
+| 3 | `users` 테이블에도 `deleted_at` 추가 여부 | **추가** (탈퇴 엔드포인트는 미구현) |
+| 4 | `feeds`/`feed_likes`/`feed_comments`/`feed_images`/`sessions` | Soft Delete 미적용 (Hard Delete 유지) |
+
+`feeds` 자체는 사용자가 의도적으로 본인 게시물 삭제하면 사라지는 SNS 표준 동작 유지. `feed_likes`/`feed_comments` 도 토글/삭제 의미가 명확한 행동이므로 Hard Delete 유지.
+
+---
+
+### 6. CASCADE 정책의 현재 상태
+
+기존 외래키의 `ON DELETE CASCADE` 는 그대로 유지. 다만 본 라우터들이 더 이상 `DELETE` 를 실행하지 않으므로 **CASCADE 자체가 트리거되지 않음**. 안전망으로 두고, 향후 진짜 hard delete 가 필요한 경우(예: 30일 후 영구 삭제 배치) 그때 정책 재검토 예정.
+
+---
+
+### 7. 검증 결과
+
+- 수정한 모든 Python 파일: `ast.parse()` 문법 검증 통과
+- AWS RDS 에서 ALTER + CREATE INDEX 직접 적용 후 검증 쿼리로 컬럼/인덱스 정상 반영 확인
+- 모든 추가/수정 라인에 `[수정 2026-05-01]` / `[추가 2026-05-01]` 주석으로 변경 사유 명시
+
+---
+
+### 8. 향후 검토 항목
+
+- **회원 탈퇴 엔드포인트**: 추가 시 `users.login_id` UNIQUE 제약 정책 변경 필요 (예: `UNIQUE (login_id, deleted_at)` 또는 탈퇴 시 login_id 무효화)
+- **영구 삭제 배치**: 30일 경과한 `deleted_at NOT NULL` 행을 실제 DELETE 하는 배치 (현재는 미적용)
+- **GDPR/개인정보 삭제 요청 대응**: Soft Delete 와 별도로 hard delete 경로 필요
+
+---
+
+## 🔧 2026-05-02 작업 내역
+
+### 1. 이번 세션 개요
+
+코드 변경 없이 **성능/안정성 부채 항목 재점검 + 신규 발견** 세션. 4월 18일자 12개 부채 표를 기준으로 잔여 항목(#5, #8, #9, #11)을 다시 짚고, 코드 리뷰로 새로 발견한 4개 항목(이미지 압축, 세션 캐시, 로깅, 에러 모니터링)을 추가 식별. 다음 작업 우선순위 결정 근거를 마련하기 위한 분석.
+
+| 결과물 | 내용 |
+|---|---|
+| 잔여 부채 분석 | #9·#10·#11·#12·#13·#14·#15 (총 7건) 항목별 기존 방식 → 수정 후 방식 → 기대 효과 → 문제점 4단 분석 |
+| README 매핑 | 신규 #9-#15 ↔ 4월 18일자 #1-#12 표 매핑 정리 |
+| 작업 순서 권장 | #8 → #9 → #11 → #10 → #12 → #13 → #14 → #15 (보안 #11 후순위) |
+
+> ⚠️ 본 섹션의 신규 #번호(9~15)는 4월 18일자 #1~#12 와 별개 체계임. 혼동 방지 위해 본 섹션은 **"신규 #9~#15"** 로 표기하고, 4/18 체계는 **"README #1~#12"** 로 표기함.
+
+---
+
+### 2. 4월 18일자 12개 부채 진행 현황
+
+| # | 등급 | 항목 | 4/18 발견 | 4/22 | 4/29 | 5/2 |
+|---|---|---|---|---|---|---|
+| #1 | 🔴 | Express try/catch 누락 | 발견 | ✅ | ✅ | ✅ |
+| #2 | 🔴 | database.js 에러 처리 없음 | 발견 | ✅ | ✅ | ✅ |
+| #3 | 🔴 | 글로벌 에러 핸들러 없음 | 발견 | ✅ | ✅ | ✅ |
+| #4 | 🟠 | 피드 파일 미정리 | 발견 | 미해결 | ✅ | ✅ |
+| **#5** | 🟠 | **GET /feed N+1 + 페이지네이션** | 발견 | 미해결 | 미해결 | **❌ 미해결** |
+| #6 | 🟠 | 타임존 (CURDATE vs KST) | 발견 | 미해결 | ✅ | ✅ |
+| #7 | 🟡 | 평문 비밀번호 폴백 | 발견 | 미해결 | ✅(Lazy) | ✅ |
+| **#8** | 🟡 | **like.py rollback 누락** | 발견 | 미해결 | 미해결 | **❌ 미해결** |
+| **#9** | 🟡 | **DB 커넥션 풀 미사용** | 발견 | 미해결 | 미해결 | **❌ 미해결** |
+| #10 | 🟢 | secure: false 하드코딩 | 발견 | 미해결 | ✅ | ✅ |
+| **#11** | 🟢 | **Rate limiting 없음** | 발견 | 미해결 | 미해결 | **❌ 미해결** |
+| #12 | 🟡 | 세션 인증 코드 반복 | 발견 | ✅ | ✅ | ✅ |
+
+**진행률**: 8/12 해결 (≈67%) · 잔여 4건(#5, #8, #9, #11)이 3차례 세션 동안 후순위로 밀려옴 → 이번이 잔여 처리 타이밍.
+
+---
+
+### 3. 신규 #9~#15 항목별 4단 분석
+
+#### 신규 #9. DB 커넥션 매 요청 생성 (`python_api/database.py:23`) — README #9 와 동일
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `get_connection()` 호출 시마다 `pymysql.connect()` 신규 생성, 라우터마다 `try/finally + conn.close()` 반복, 매 호출에 TCP+TLS 핸드셰이크 발생 |
+| 수정 후 방식 | `aiomysql.create_pool(minsize=2, maxsize=10)` 또는 SQLAlchemy + `QueuePool` 도입, FastAPI `lifespan` 이벤트에서 풀 생성/해제 |
+| 기대 효과 | 핸드셰이크 비용 제거 → 응답 시간 30~80ms 단축, RDS `max_connections`(t3.micro=66) 초과로 인한 502 차단, 처리량 2~5배 향상 가능 |
+| 문제점 | pymysql(동기) → aiomysql(비동기) 전환 시 모든 라우터를 `async def + await` 로 마이그레이션 필요. 트랜잭션이 길면 풀 고갈로 latency 증가 → `pool_timeout` 튜닝 필요. stale connection 대비 `pool_pre_ping` 추가 필요 |
+
+#### 신규 #10. N+1 쿼리 — 피드 목록 (`routes/feed.js:188`) — README #5 의 절반
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `getFeeds()` 1회 + 각 피드마다 `getFeedDetail()` + `checkLike()` → 피드 100개 시 Express↔FastAPI HTTP 호출 201회, FastAPI↔MySQL 쿼리는 그 이상 |
+| 수정 후 방식 | FastAPI 에 `GET /feed/?user_id=xxx` 신설 — 한 쿼리로 피드+이미지+좋아요 상태 일괄 반환. `LEFT JOIN feed_likes fl ON fl.feed_id=f.feed_id AND fl.user_id=:uid` 로 좋아요 상태 결합 |
+| 기대 효과 | HTTP 호출 201 → 1회로 축소, 첫 화면 로딩 수 초 → 수백 ms |
+| 문제점 | `GROUP_CONCAT` 은 기본 1024바이트 제한 → 이미지 많은 피드는 잘림 (별도 쿼리 권장). `JSON_ARRAYAGG` 사용 시 MySQL 5.7.22+ 필요. 댓글까지 한꺼번에 가져오면 페이로드 폭증 → 댓글은 모달 열릴 때 별도 호출 유지 권장 |
+
+#### 신규 #11. 페이지네이션 부재 (`routes/feed.js:188`) — README #5 의 절반
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `GET /feed` 가 전체 피드를 한 번에 반환 — 피드 1,000개면 1,000개 + 이미지 URL 모두 포함 |
+| 수정 후 방식 | 커서 기반: `GET /feed?cursor=<created_at>_<feed_id>&limit=20`, FastAPI `WHERE (f.created_at, f.feed_id) < (:cursor_ts, :cursor_id) ORDER BY ... DESC LIMIT 20`, 프론트는 `IntersectionObserver` 무한 스크롤 |
+| 기대 효과 | 첫 응답 페이로드 ~95% 감소, 모바일 OOM 방지, 데이터 사용량 절감, DB 부하 일정 |
+| 문제점 | offset 방식보다 클라이언트 상태관리 복잡(cursor 직렬화). `created_at` 동률 시 tie-breaker(`feed_id`) 누락하면 페이지 경계 누락/중복. 신규 피드가 상단 추가될 때 "새 피드 보기" UX 별도 구현 필요 |
+
+#### 신규 #12. 이미지 압축/썸네일 없음 (`python_api/routers/feed.py:88`, `routes/feed.js:103`) — README 미등록 신규
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | multer 가 50MB 까지 원본 그대로 디스크 저장, 클라이언트에 동일한 원본 URL 서빙 → 모바일에서 4MB 사진 100장 = 400MB 다운로드 |
+| 수정 후 방식 | multer → Sharp/Pillow 파이프라인: 원본을 WebP 80% 품질로 재인코딩 + 썸네일 320px/800px 생성, DB `feed_images` 에 `thumb_url`/`original_url` 분리 저장, 리스트는 thumb 사용 |
+| 기대 효과 | 평균 파일 크기 60~80% 감소, 피드 리스트 데이터 사용량 ~10배 절감, 디스크 사용량 동시 감소 |
+| 문제점 | 변환 시 CPU/메모리 사용 — Express 단일 프로세스라면 업로드 시 블로킹 위험 → worker_thread 또는 Sharp native async. 영상은 변환 비용이 높아 별도 처리 또는 원본만 유지 결정 필요. 기존 업로드 파일 마이그레이션 배치 필요. 장기적으로는 S3+CloudFront 가 정답 |
+
+#### 신규 #13. 세션 검증 캐시 없음 (`backend/middleware/requireAuth.js`) — README 미등록 신규
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | 모든 보호 라우트마다 `findSession()` → FastAPI HTTP → MySQL `SELECT * FROM sessions` 1회. 한 화면에 routine + feed + completion 호출 시 매번 세션 쿼리 누적 |
+| 수정 후 방식 | `lru-cache` 패키지로 메모리 캐시: `key=sessionId`, `value=session`, TTL=60초. 캐시 히트 시 FastAPI 호출 생략, `POST /logout` 에서 `cache.delete(sessionId)` 즉시 무효화 |
+| 기대 효과 | 세션 검증 latency 30~50ms → 0ms, FastAPI/RDS 부하 절반 이상 감소(보호 라우트가 절대다수) |
+| 문제점 | 60초 윈도우 동안 세션 만료/강제 로그아웃 즉시 반영 안 됨(보안 트레이드오프). Express 인스턴스 여러 개일 때 캐시 일관성 깨짐 → Redis 이전 또는 짧은 TTL 유지. 세션 정보 변경(닉네임 등) 시 캐시 무효화 누락하면 stale data 노출 |
+
+#### 신규 #14. 로깅 인프라 부재 (전체) — README 미등록 신규
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `console.log` / `console.error` / `print("🔴 오류:", e)` 산발 사용. 운영 시 파일에 남지 않거나 형식 제각각 → 검색/필터 불가. 요청 추적 불가 |
+| 수정 후 방식 | Express: `pino` + `pino-http` (JSON 라인). FastAPI: `structlog` 또는 `python-json-logger`. 미들웨어에서 `traceId`(uuid) 발급 → `X-Trace-Id` 헤더로 Express↔FastAPI 전파. 로컬 stdout, 운영 파일/CloudWatch |
+| 기대 효과 | traceId 1개로 Express → FastAPI → DB 전 흐름 추적, 로그 레벨/JSON 파싱으로 대시보드화 용이, 민감 정보 마스킹(redact) 일괄 적용 가능 |
+| 문제점 | 기존 console.log 전부 변환 작업 필요(수십 군데). JSON 로그는 사람이 읽기 어려움 → 로컬 개발은 `pino-pretty` 별도 적용. 로그 양 폭증 시 디스크/비용 부담 → 로테이션/보존 정책 필요 |
+
+#### 신규 #15. 에러 모니터링 부재 (전체) — README 미등록 신규
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | 운영 중 발생한 예외는 stdout 만 들여다봐야 발견. React 클라이언트 에러는 사용자가 신고하지 않으면 영원히 모름. 발생 빈도/영향 범위/스택 트레이스 집계 불가 |
+| 수정 후 방식 | Sentry SDK 도입: Express(`@sentry/node`), React(`@sentry/react` + `ErrorBoundary`), FastAPI(`sentry-sdk[fastapi]`). 신규 #14 traceId 와 연동 → Sentry 이슈에서 로그로 점프 |
+| 기대 효과 | 실시간 알림(Slack/Email), 발생 빈도/영향 사용자 수 자동 집계 → 우선순위 판단, release 단위 그룹화로 회귀 추적 |
+| 문제점 | 무료 플랜 5,000건/월 — 노이즈 필터링(`beforeSend`) 필요. PII(이메일/세션ID) 스택 노출 → 스크럽 규칙 필수. DSN 키 노출 시 가짜 이벤트 주입 가능 → CSP/도메인 화이트리스트 필요. Sentry 장애 시 fire-and-forget 설정 확인 |
+
+---
+
+### 4. 신규 #9-#15 ↔ 4월 18일자 README #1-#12 매핑
+
+| 신규 # | 항목 | README 대응 | 비고 |
+|---|---|---|---|
+| 신규 #9 | DB 커넥션 풀 | **README #9** | 동일 항목 — README 잔여 |
+| 신규 #10 | N+1 쿼리 | **README #5 의 절반** | 동일 항목 — README 잔여 |
+| 신규 #11 | 페이지네이션 부재 | **README #5 의 절반** | 동일 항목 — README 잔여 |
+| 신규 #12 | 이미지 압축/썸네일 없음 | ❌ 없음 | **신규 발견** — 페이로드 크기는 N+1과 별개 축 |
+| 신규 #13 | 세션 검증 캐시 | ❌ 없음 | **신규 발견** — 4/22 #12(미들웨어화) 후속 최적화 |
+| 신규 #14 | 로깅 인프라 부재 | ❌ 없음 | **신규 발견** — `console.log`/`print` 산재 |
+| 신규 #15 | 에러 모니터링 부재 | ❌ 없음 | **신규 발견** — 운영 단계 진입 전 필수 |
+
+**누락 검토 (이전 분석에서 빠진 README 잔여 항목)**:
+- **README #8 `like.py` rollback 누락**: 안정성 영역인데 이번 분석에 누락. 단일 함수 수정이라 30분 작업, 위험도 낮음. **신규 #9(커넥션 풀) 도입 전에 먼저 정리하면 풀 마이그레이션이 깔끔해짐**.
+- **README #11 Rate limiting**: 사용자가 보안은 후순위라고 명시했으므로 의도적 후순위. 단 `/login`·`/signup` 무차별 대입 방어는 운영 직전 필수.
+
+---
+
+### 5. 권장 처리 순서 (README + 신규 분석 통합)
+
+| 순서 | 항목 | 출처 | 사유 |
+|---|---|---|---|
+| 1 | **README #8 `like.py` rollback** | README 잔여 | 단일 함수, 30분, 풀 도입 전 사전 정리 |
+| 2 | **신규 #9 / README #9 DB 커넥션 풀** | 양쪽 일치 | 핵심 인프라 변경, async 마이그레이션 동반 |
+| 3 | **신규 #11 / README #5(절반) 페이지네이션** | 양쪽 일치 | LIMIT/OFFSET 먼저, 커서는 후속 |
+| 4 | **신규 #10 / README #5(절반) N+1 쿼리** | 양쪽 일치 | FastAPI JOIN 신설 |
+| 5 | **신규 #12 이미지 압축** | 신규 | 페이로드 절감 |
+| 6 | **신규 #13 세션 캐시** | 신규 | 신규 #9 풀과 함께 고려하면 효과 극대 |
+| 7 | **신규 #14 로깅 → 신규 #15 모니터링** | 신규 | 운영 진입 직전 |
+| 8 | **README #11 Rate limiting** | README 잔여 | 보안 후순위 (사용자 결정) |
+
+---
+
+### 6. 검증 결과
+
+- 코드 변경 없음 — 분석/문서화 세션
+- README 본 섹션 추가만 수행
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
@@ -1342,14 +1822,21 @@ FastAPI가 HTML 500 응답
 - [x] ~~`database.js` 함수 에러 처리 없음 (#2)~~ ✅ 2026-04-22 완료
 - [x] ~~글로벌 에러 핸들러 없음 (#3)~~ ✅ 2026-04-22 완료
 - [x] ~~세션 인증 코드 반복 (#12)~~ ✅ 2026-04-22 완료
-- [ ] 타임존 이슈 (CURDATE vs KST) — #6
-- [ ] 피드 업로드/삭제 시 파일 미정리 — #4
-- [ ] GET /feed N+1 쿼리 + 페이지네이션 없음 — #5
-- [ ] 평문 비밀번호 폴백 로직 제거 — #7
+- [x] ~~타임존 이슈 (CURDATE vs KST) — #6~~ ✅ 2026-04-29 완료
+- [x] ~~피드 업로드/삭제 시 파일 미정리 — #4~~ ✅ 2026-04-29 완료
+- [x] ~~평문 비밀번호 폴백 로직 제거 — #7~~ ✅ 2026-04-29 완료 (Lazy Migration)
+- [x] ~~`secure: false` 환경변수화 — #10~~ ✅ 2026-04-29 완료
+- [x] ~~루틴 삭제 시 인증 피드/댓글/좋아요 함께 사라지는 문제~~ ✅ 2026-05-01 완료 (Soft Delete)
+- [ ] GET /feed N+1 쿼리 + 페이지네이션 없음 — #5 (2026-05-02 분석: 신규 #10·#11)
 - [ ] `like.py` rollback 누락 — #8
-- [ ] DB 커넥션 풀 도입 — #9
-- [ ] `secure: false` 환경변수화 — #10
+- [ ] DB 커넥션 풀 도입 — #9 (2026-05-02 분석: 신규 #9)
 - [ ] Rate limiting 추가 — #11
+- [ ] 피드 이미지 압축/썸네일 생성 — 2026-05-02 신규 #12
+- [ ] 세션 검증 LRU 캐시 도입 — 2026-05-02 신규 #13
+- [ ] 로깅 인프라 (pino + traceId) — 2026-05-02 신규 #14
+- [ ] 에러 모니터링 (Sentry) — 2026-05-02 신규 #15
+- [ ] 회원 탈퇴 엔드포인트 (Soft Delete 컬럼은 준비됨, login_id UNIQUE 정책 결정 필요)
+- [ ] Soft Delete 영구 삭제 배치 (예: 30일 경과 시 실제 DELETE)
 - [ ] 마이페이지 → 이번 주 달성률, 인증 게시글 수 백엔드 연결
 - [ ] 현재 루틴을 추가하면 인증한 루틴 표시가 사라지는 버그 확인 필요
 - [ ] 피드 이미지 → 현재 로컬 디스크 저장 방식, 추후 S3 등 클라우드 스토리지 전환 고려

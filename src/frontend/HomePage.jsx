@@ -136,8 +136,8 @@ function HomePage({
      * Object URL: 메모리에 임시 저장된 파일의 URL (blob:http://...)
      * 페이지 새로고침 시 소멸, 탭 닫을 때 자동 해제됨
      *
-     * TODO: URL.revokeObjectURL(file.url) 호출로 메모리 누수 방지 필요
-     *       (현재 생성만 하고 해제하지 않음 → 파일을 많이 선택하면 메모리 증가)
+     * 메모리 누수 방지: 재선택 시점(아래 분기)과 언마운트 시점(useEffect cleanup)
+     * 두 곳에서 URL.revokeObjectURL() 을 호출하여 누적되지 않도록 처리.
      *
      * @param {string}   id       - 루틴 UUID
      * @param {FileList} fileList - input[type=file]의 files 속성
@@ -217,7 +217,8 @@ function HomePage({
      * handleCancelComplete - 루틴 완료 취소 핸들러
      *
      * confirm 다이얼로그로 확인 후 App.jsx의 onCancelComplete 호출
-     * onCancelComplete: 루틴 완료 상태 초기화 + 관련 피드 게시물 삭제
+     * onCancelComplete: 완료 기록을 Soft Delete (deleted_at) 처리하여
+     * 홈 화면에서만 미완료 상태로 되돌리며, 연관 피드 게시물은 그대로 보존된다.
      *
      * @param {string} id - 루틴 UUID
      */

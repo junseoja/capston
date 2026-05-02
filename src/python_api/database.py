@@ -27,7 +27,7 @@ def get_connection():
         pymysql.Connection: 열린 DB 커넥션 객체
             - 사용 후 반드시 conn.close() 호출 (try/finally 패턴 권장)
             - DictCursor 사용으로 결과가 dict 형태로 반환됨
-              예: {"user_id": "uuid...", "login_id": "hong123"}
+            예: {"user_id": "uuid...", "login_id": "hong123"}
 
     사용 예시:
         conn = get_connection()
@@ -39,6 +39,30 @@ def get_connection():
         finally:
             conn.close()  # 항상 커넥션 반환
     """
+    # ────────────────────────────────────────────────────────────────────
+    # [수정 2026-04-29] 타임존 KST(+09:00) 강제 설정
+    # ────────────────────────────────────────────────────────────────────
+    # 배경:
+    #   AWS RDS MySQL은 기본적으로 UTC 타임존으로 동작하므로, KST와 9시간 차이 발생.
+    #   이로 인해 completion.py 의 `DATE(completed_at) = CURDATE()` 비교 시
+    #   KST 기준 자정~오전 09:00 사이에 완료한 루틴이 "어제 기록"으로 분류되는
+    #   타임존 버그가 발생하고 있었음.
+    #
+    # 예시:
+    #   - KST 2026-04-30 02:00 완료  →  UTC 2026-04-29 17:00 저장
+    #     → CURDATE() (UTC) = 2026-04-29  → 새로고침 시 오늘 목록에서 사라짐
+    #
+    # 해결책 (옵션 A — 가장 깔끔):
+    #   커넥션을 열 때마다 init_command 로 세션 타임존을 +09:00 으로 설정하면
+    #   해당 커넥션에서 실행되는 모든 NOW() / CURDATE() / CURRENT_TIMESTAMP /
+    #   DATE(컬럼) 계산이 KST 기준으로 동작.
+    #
+    # 주의:
+    #   - 글로벌 타임존을 바꾸는 것이 아니라 "현재 세션 타임존"만 바꿈
+    #   - 따라서 RDS 인스턴스 설정 변경 권한이 없어도 적용 가능
+    #   - DB에 저장되는 DATETIME 값(UTC 원본) 자체는 바뀌지 않으며, 비교/표시
+    #     시점에서만 KST로 해석됨 → 기존 데이터 마이그레이션 불필요
+    # ────────────────────────────────────────────────────────────────────
     return pymysql.connect(
         host=os.getenv("DB_HOST"),              # AWS RDS 엔드포인트 (예: xxx.rds.amazonaws.com)
         user=os.getenv("DB_USER"),              # DB 사용자명 (예: admin)
@@ -46,5 +70,7 @@ def get_connection():
         database=os.getenv("DB_NAME"),          # 데이터베이스명 (예: capston)
         port=int(os.getenv("DB_PORT", 3306)),   # 포트 (기본값: MySQL 표준 포트 3306)
         charset="utf8mb4",                      # 한글 + 이모지까지 지원하는 인코딩
-        cursorclass=pymysql.cursors.DictCursor  # SELECT 결과를 dict 형태로 반환
+        cursorclass=pymysql.cursors.DictCursor, # SELECT 결과를 dict 형태로 반환
+        # [추가 2026-04-29] 세션 타임존을 KST(+09:00)로 고정 — 위 주석 참조
+        init_command="SET time_zone = '+09:00'",
     )

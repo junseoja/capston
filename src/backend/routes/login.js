@@ -19,6 +19,8 @@ const bcrypt = require("bcryptjs"); // 비밀번호 단방향 해싱 라이브�
 const {
     findUser,
     createUser,
+    // [추가 2026-04-29] 평문→bcrypt Lazy Migration 용
+    updateUserPassword,
     createSession,
     deleteSession,
 } = require("../database");
@@ -133,13 +135,64 @@ router.post("/login", async (req, res, next) => {
             return res.status(401).json({ success: false, message: "존재하지 않는 아이디입니다." });
         }
 
+        // ─────────────────────────────────────────────────────────────────
         // 비밀번호 비교:
-        //   - DB에 bcrypt 해시($2b$로 시작)가 저장된 경우 → bcrypt.compare()로 안전하게 비교
-        //   - 이전 방식으로 평문이 저장된 계정 → 직접 문자열 비교 (하위 호환)
+        //   - DB에 bcrypt 해시($2b$ / $2a$ 로 시작)가 저장된 경우
+        //     → bcrypt.compare() 로 안전하게 비교
+        //   - 이전 방식으로 평문이 저장된 계정
+        //     → 우선 직접 문자열 비교(하위 호환)
+        //
+        // [수정 2026-04-29] 평문 → bcrypt Lazy Migration 추가
+        //   기존에는 평문 폴백이 영구적으로 남아 있어 DB 유출 시 즉시 탈취되는
+        //   심각한 보안 위험이 있었음. 이를 해결하기 위해
+        //   "로그인 성공 시점에 자동으로 bcrypt 해시로 업그레이드" 하는 패턴을
+        //   도입하여, 사용자가 한 번이라도 정상 로그인하면 그 즉시
+        //   해당 계정 비밀번호가 bcrypt 해시로 영구 교체되도록 한다.
+        //
+        //   흐름:
+        //     1) 평문 일치 확인
+        //     2) bcrypt.hash(password, 10) 로 해시 생성
+        //     3) FastAPI PATCH /user/password/{user_id} 호출하여 DB 교체
+        //     4) 다음 로그인부터는 bcrypt.compare 분기로만 동작
+        //
+        //   업그레이드 실패 정책:
+        //     - 로그인 자체는 평문 매치가 성공했으면 통과시킨다(UX 우선).
+        //     - 업그레이드 실패는 console.error 로 로그만 남기고 다음 기회를 노림.
+        //       (마이그레이션은 N번 시도되어도 멱등 — 항상 같은 평문이면 같은 결과)
+        //
+        //   향후 정리:
+        //     SELECT user_id FROM users WHERE password NOT LIKE '$2%'; 가
+        //     0건이 되면 아래 평문 폴백 분기를 완전히 제거할 수 있다.
+        // ─────────────────────────────────────────────────────────────────
         const isBcryptHash = user.password.startsWith("$2b$") || user.password.startsWith("$2a$");
-        const isMatch = isBcryptHash
-            ? await bcrypt.compare(password, user.password)
-            : password === user.password;
+        let isMatch;
+
+        if (isBcryptHash) {
+            // 안전 경로: 이미 해시된 비밀번호와 비교
+            isMatch = await bcrypt.compare(password, user.password);
+        } else {
+            // 레거시 평문 경로: 평문 일치 시 즉시 해시로 업그레이드
+            isMatch = password === user.password;
+
+            if (isMatch) {
+                try {
+                    // [추가 2026-04-29] saltRounds=10 으로 bcrypt 해시 생성 후 DB 교체
+                    const newHash = await bcrypt.hash(password, 10);
+                    await updateUserPassword(user.user_id, newHash);
+                    console.log(
+                        `[lazy-migration 2026-04-29] user_id=${user.user_id} 평문→bcrypt 변환 완료`
+                    );
+                } catch (migrationError) {
+                    // 업그레이드 실패해도 로그인 자체는 통과시킴 — 다음 로그인 때 재시도됨.
+                    // 단, 운영 모니터링을 위해 에러 로그는 반드시 남긴다.
+                    console.error(
+                        `[lazy-migration 2026-04-29] 비밀번호 해시 업그레이드 실패 — user_id=${user.user_id}:`,
+                        migrationError?.message || migrationError
+                    );
+                }
+            }
+        }
+
         if (!isMatch) {
             return res.status(401).json({ success: false, message: "비밀번호가 틀렸습니다." });
         }
@@ -149,7 +202,10 @@ router.post("/login", async (req, res, next) => {
 
         res.cookie("sessionId", sessionId, {
             httpOnly: true,              // JS 접근 불가 → XSS 방어
-            secure: false,               // 개발 환경: HTTP 허용 (프로덕션 시 true로 변경)
+            // [수정 2026-04-29] 프로덕션(NODE_ENV=production) 에서는 HTTPS 필수,
+            // 개발 환경(HTTP) 에서는 false 로 동작하도록 환경에 따라 자동 결정.
+            // 기존에는 항상 false 라 프로덕션 배포 시 쿠키 탈취 위험이 있었음.
+            secure: process.env.NODE_ENV === "production",
             sameSite: "lax",             // CSRF 일부 방어
             maxAge: 1000 * 60 * 60 * 24, // 1일
         });
@@ -211,7 +267,13 @@ router.post("/logout", async (req, res, next) => {
         const { sessionId } = req.cookies;
         if (sessionId) await deleteSession(sessionId);
 
-        res.clearCookie("sessionId", { httpOnly: true, secure: false, sameSite: "lax" });
+        // [수정 2026-04-29] clearCookie 옵션도 발급 시와 동일하게 맞춰야 일부 브라우저에서
+        // 쿠키가 제거되지 않는 문제를 예방. secure 도 환경에 따라 자동 결정.
+        res.clearCookie("sessionId", {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+        });
         return res.json({ success: true, message: "로그아웃 완료" });
     } catch (error) {
         return next(error);

@@ -140,24 +140,51 @@ def get_feeds():
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # ────────────────────────────────────────────────────────────────
+            # [수정 2026-05-01] Soft Delete 도입에 따른 JOIN 정책 변경
+            # ────────────────────────────────────────────────────────────────
+            # 변경 1) routines INNER JOIN → LEFT JOIN
+            #   루틴이 soft delete 됐을 때(routines.deleted_at NOT NULL) 또는
+            #   극히 드물게 hard delete 된 잔존 데이터가 있을 때도
+            #   피드 자체는 사용자 결정사항 1(a) 에 따라 그대로 노출되어야 함.
+            #   INNER JOIN 으로 두면 삭제 루틴의 피드가 결과에서 사라져버려 모순.
+            #
+            # 변경 2) COALESCE(r.title, '(삭제된 루틴)')
+            #   삭제 루틴의 경우 r.title 이 살아있더라도, 사용자 입장에선
+            #   "이미 사라진 루틴" 이므로 일관되게 라벨 처리.
+            #   → routines.deleted_at IS NOT NULL 이면 "(삭제된 루틴)" 으로 표시.
+            #   → r 행 자체가 사라진(드문) 경우에도 NULL → "(삭제된 루틴)" 으로 표시.
+            #
+            # 변경 3) users LEFT JOIN
+            #   회원 탈퇴(soft delete) 시에도 피드는 살아남는 정책이므로
+            #   닉네임 fallback 도 유사하게 처리.
+            #   "(탈퇴한 사용자)" 는 사용자 결정사항에 명시되지 않았으나,
+            #   향후 회원 탈퇴 기능이 추가될 것을 대비한 방어 코드.
+            #
+            # 변경 4) 게시자가 탈퇴하지 않은 경우만 표시되도록 추가 필터를 둘지 여부:
+            #   - 현재 정책상 회원 탈퇴 자체가 구현돼 있지 않으므로
+            #     u.deleted_at 필터는 추가하지 않음.
+            #   - 추후 회원 탈퇴 기능 도입 시 본 라우터에서 정책 결정 필요.
+            # ────────────────────────────────────────────────────────────────
             cursor.execute(
                 """SELECT
                     f.feed_id,
                     f.content,
                     f.created_at,
-                    u.nickname,
+                    COALESCE(u.nickname, '(탈퇴한 사용자)') AS nickname,
                     u.profile_img,
-                    r.title AS routine_title,       -- 피드 카드에 루틴 제목 표시용
+                    -- [수정 2026-05-01] 삭제된 루틴이거나 r 행이 없으면 라벨 처리
+                    COALESCE(r.title, '(삭제된 루틴)') AS routine_title,
                     r.category,
                     COUNT(DISTINCT fl.like_id) AS like_count,       -- 좋아요 수 집계
                     COUNT(DISTINCT fc.comment_id) AS comment_count  -- 댓글 수 집계
                 FROM feeds f
-                JOIN users u ON f.user_id = u.user_id              -- 게시자 정보
-                JOIN routines r ON f.routine_id = r.routine_id      -- 루틴 정보
-                LEFT JOIN feed_likes fl ON f.feed_id = fl.feed_id   -- 없어도 feed 표시 (LEFT)
-                LEFT JOIN feed_comments fc ON f.feed_id = fc.feed_id
-                GROUP BY f.feed_id                                  -- 집계를 위해 feed_id로 그룹화
-                ORDER BY f.created_at DESC"""                       # 최신 피드가 먼저
+                LEFT JOIN users u ON f.user_id = u.user_id           -- [수정 2026-05-01] LEFT JOIN
+                LEFT JOIN routines r ON f.routine_id = r.routine_id  -- [수정 2026-05-01] LEFT JOIN
+                LEFT JOIN feed_likes fl ON f.feed_id = fl.feed_id    -- 좋아요 0개여도 표시 (LEFT)
+                LEFT JOIN feed_comments fc ON f.feed_id = fc.feed_id -- 댓글 0개여도 표시 (LEFT)
+                GROUP BY f.feed_id                                   -- 집계를 위해 feed_id로 그룹화
+                ORDER BY f.created_at DESC"""                        # 최신 피드가 먼저
             )
             feeds = cursor.fetchall()
         return feeds
@@ -195,12 +222,20 @@ def get_feed_detail(feed_id: str):
     try:
         with conn.cursor() as cursor:
             # ── 피드 기본 정보 조회 ──
+            # [수정 2026-05-01] Soft Delete 적용:
+            #   - users / routines INNER JOIN → LEFT JOIN
+            #     루틴이 삭제됐어도(피드 보존 정책), 게시자가 탈퇴했어도 피드 상세는 열려야 함.
+            #   - COALESCE 로 닉네임/루틴 제목 fallback
+            #   - f.* 가 모든 feeds 컬럼을 그대로 가져오므로, 추가로 routine_title/category 만 명시.
             cursor.execute(
-                """SELECT f.*, u.nickname, u.profile_img,
-                        r.title AS routine_title, r.category
+                """SELECT f.*,
+                        COALESCE(u.nickname, '(탈퇴한 사용자)') AS nickname,
+                        u.profile_img,
+                        COALESCE(r.title, '(삭제된 루틴)') AS routine_title,
+                        r.category
                 FROM feeds f
-                JOIN users u ON f.user_id = u.user_id
-                JOIN routines r ON f.routine_id = r.routine_id
+                LEFT JOIN users u ON f.user_id = u.user_id
+                LEFT JOIN routines r ON f.routine_id = r.routine_id
                 WHERE f.feed_id = %s""",
                 (feed_id,)
             )
@@ -218,10 +253,14 @@ def get_feed_detail(feed_id: str):
             images = cursor.fetchall()
 
             # ── 댓글 목록 조회 (작성 순서대로) ──
+            # [수정 2026-05-01] users LEFT JOIN + 닉네임 fallback
+            #   탈퇴한 사용자의 댓글이라도 표시되도록 LEFT JOIN.
+            #   nickname 은 COALESCE 로 "(탈퇴한 사용자)" fallback 처리.
             cursor.execute(
-                """SELECT fc.*, u.nickname
+                """SELECT fc.*,
+                          COALESCE(u.nickname, '(탈퇴한 사용자)') AS nickname
                 FROM feed_comments fc
-                JOIN users u ON fc.user_id = u.user_id
+                LEFT JOIN users u ON fc.user_id = u.user_id
                 WHERE fc.feed_id = %s
                 ORDER BY fc.created_at ASC""",  # 댓글은 오래된 순으로 표시
                 (feed_id,)

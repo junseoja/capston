@@ -374,8 +374,9 @@ function App() {
      * cancelRoutineCompletion - 루틴 완료 취소
      *
      * 완료된 루틴을 미완료 상태로 되돌림
-     * DELETE /completion/:completion_id API를 호출하여 DB에서 완료 기록 삭제
-     * 연관 피드 게시물은 DB의 ON DELETE CASCADE로 자동 삭제됨
+     * DELETE /completion/:completion_id API를 호출하여 완료 기록을 Soft Delete
+     * (UPDATE deleted_at = NOW()). 연관 피드 게시물은 그대로 보존되며,
+     * 피드 화면에서는 "(삭제된 루틴)" 라벨로 계속 노출된다.
      * [백엔드 주의] 완료 취소는 FastAPI를 직접 호출하지 말고,
      * 반드시 Express DELETE /completion/:completion_id 경유로 호출해야 함.
      * 이유:
@@ -424,7 +425,8 @@ function App() {
                 )
             );
 
-            // 연관 피드 게시물은 DB의 ON DELETE CASCADE로 자동 삭제됨
+            // [수정 2026-05-01] Soft Delete 전환 이후, 연관 피드 게시물은
+            // 함께 삭제되지 않고 그대로 보존된다 (FeedPage 에서 "(삭제된 루틴)" 라벨 표시).
         } catch (error) {
             console.error("루틴 완료 취소 실패:", error);
             alert("서버 오류가 발생했습니다.");

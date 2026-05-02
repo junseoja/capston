@@ -216,14 +216,22 @@ erDiagram
 
 | Table | Meaning |
 |---|---|
-| `users` | 계정 정보 |
+| `users` | 계정 정보 (`deleted_at` Soft Delete 컬럼 보유) |
 | `sessions` | 로그인 세션 |
-| `routines` | 유저가 만든 루틴 |
-| `routine_completions` | 특정 날짜/시점의 루틴 완료 기록 |
+| `routines` | 유저가 만든 루틴 (`deleted_at` Soft Delete 컬럼 보유) |
+| `routine_completions` | 특정 날짜/시점의 루틴 완료 기록 (`deleted_at` Soft Delete 컬럼 보유) |
 | `feeds` | 상세 인증 루틴에서 생성된 게시물 |
 | `feed_images` | 게시물 첨부 파일 메타데이터 |
 | `feed_likes` | 좋아요 |
 | `feed_comments` | 댓글 |
+
+> **Soft Delete 정책 (2026-05-01 도입)**
+> `users` / `routines` / `routine_completions` 세 테이블은 행을 실제 삭제하지 않고
+> `deleted_at` 컬럼을 갱신하여 논리 삭제한다. 사용자 화면(루틴 목록, 오늘 완료 목록 등)에서는
+> `WHERE deleted_at IS NULL` 필터로 자동으로 숨겨지지만, 피드/마이페이지 최근활동 등
+> SNS 성격의 인증 기록은 `LEFT JOIN + COALESCE` 로 `(삭제된 루틴)` / `(탈퇴한 사용자)` 라벨을
+> 표시하며 그대로 노출된다. 이를 통해 "내 루틴/계정을 삭제했다고 과거 인증글이 사라지는" 부자연스러운
+> 동작을 막는다. 단, `feeds` 자체는 여전히 Hard Delete + ON DELETE CASCADE 정책을 유지한다.
 
 ## 8. Feature Flows
 
@@ -384,26 +392,30 @@ flowchart TD
 
 현재 코드 기준으로 팀이 알고 있어야 하는 주요 남은 이슈:
 
-1. **타임존 이슈**
-   - `completion.py`의 오늘 완료 조회가 `CURDATE()` 기반
-   - DB 서버 타임존이 KST가 아니면 자정 근처 완료 기록이 틀어질 수 있음
-
-2. **피드 업로드 파일 정리 미흡**
-   - 업로드 후 DB 실패 시 저장된 파일 정리 로직 부족
-   - 피드 삭제 시 파일 시스템 정리 없음
-
-3. **피드 조회 N+1**
+1. **피드 조회 N+1**
    - `GET /feed` 이후 피드별 상세/좋아요 여부 재조회
    - 게시물 수가 늘면 병목이 커질 구조
 
-4. **평문 비밀번호 폴백**
-   - 기존 계정 호환을 위한 분기 로직이 로그인에 남아 있음
-
-5. **DB 커넥션 풀 없음**
+2. **DB 커넥션 풀 없음**
    - FastAPI는 요청마다 새 MySQL 연결 생성
 
-6. **프론트 일부 로컬 상태 의존**
+3. **프론트 일부 로컬 상태 의존**
    - 상세 인증 완료 후 보여주는 `proofFiles`는 재fetch 시 복원되지 않음
+
+### 10-1. Resolved (2026-04-29 / 2026-05-01)
+
+- **타임존 이슈 (해결 2026-04-29)**
+  - `database.py` 의 `init_command="SET time_zone = '+09:00'"` 로 세션 타임존 KST 강제
+  - 이로써 `CURDATE()` / `NOW()` / `DATE(completed_at)` 가 모두 KST 기준으로 동작
+- **피드 업로드 파일 정리 미흡 (해결 2026-04-29)**
+  - 업로드 후 검증/FastAPI 실패 시 `Promise.allSettled` 기반 `cleanupFiles()` 로 일괄 unlink
+  - 피드 삭제 시 `getFeedDetail()` 선조회 → `path.basename()` + `UPLOAD_DIR` join 으로 디스크 파일도 함께 정리
+- **평문 비밀번호 폴백 (해결 2026-04-29)**
+  - 로그인 성공 시점에 bcrypt 해시로 자동 업그레이드 (Lazy Migration)
+  - `PATCH /user/password/{user_id}` 신설, `updateUserPassword()` 헬퍼 추가
+- **루틴/완료/유저 Soft Delete (도입 2026-05-01)**
+  - 루틴/완료 기록을 삭제해도 연관 피드 게시물이 보존되도록 `deleted_at` 컬럼 + Soft Delete 정책 도입
+  - 피드 화면은 `LEFT JOIN + COALESCE` 로 "(삭제된 루틴) / (탈퇴한 사용자)" 라벨 표시
 
 ## 11. Team Presentation Script
 
