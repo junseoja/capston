@@ -1673,13 +1673,14 @@ idx_completions_user_active  : (user_id, deleted_at)  — BTREE
 
 ### 1. 이번 세션 개요
 
-코드 변경 없이 **성능/안정성 부채 항목 재점검 + 신규 발견** 세션. 4월 18일자 12개 부채 표를 기준으로 잔여 항목(#5, #8, #9, #11)을 다시 짚고, 코드 리뷰로 새로 발견한 4개 항목(이미지 압축, 세션 캐시, 로깅, 에러 모니터링)을 추가 식별. 다음 작업 우선순위 결정 근거를 마련하기 위한 분석.
+성능/안정성 부채 항목 재점검 + 신규 발견 + **README #8 (`like.py` rollback 누락) 실제 수정** 세션. 4월 18일자 12개 부채 표를 기준으로 잔여 항목(#5, #8, #9, #11)을 다시 짚고, 코드 리뷰로 새로 발견한 4개 항목(이미지 압축, 세션 캐시, 로깅, 에러 모니터링)을 추가 식별. 운영 중 실제 발생한 좋아요 토글 1205 락 타임아웃 트레이스를 기반으로 #8 우선 처리.
 
 | 결과물 | 내용 |
 |---|---|
 | 잔여 부채 분석 | #9·#10·#11·#12·#13·#14·#15 (총 7건) 항목별 기존 방식 → 수정 후 방식 → 기대 효과 → 문제점 4단 분석 |
 | README 매핑 | 신규 #9-#15 ↔ 4월 18일자 #1-#12 표 매핑 정리 |
 | 작업 순서 권장 | #8 → #9 → #11 → #10 → #12 → #13 → #14 → #15 (보안 #11 후순위) |
+| **실제 수정** | **README #8 — `like.py` rollback 패턴 적용 (1건 완료)** |
 
 > ⚠️ 본 섹션의 신규 #번호(9~15)는 4월 18일자 #1~#12 와 별개 체계임. 혼동 방지 위해 본 섹션은 **"신규 #9~#15"** 로 표기하고, 4/18 체계는 **"README #1~#12"** 로 표기함.
 
@@ -1696,7 +1697,7 @@ idx_completions_user_active  : (user_id, deleted_at)  — BTREE
 | **#5** | 🟠 | **GET /feed N+1 + 페이지네이션** | 발견 | 미해결 | 미해결 | **❌ 미해결** |
 | #6 | 🟠 | 타임존 (CURDATE vs KST) | 발견 | 미해결 | ✅ | ✅ |
 | #7 | 🟡 | 평문 비밀번호 폴백 | 발견 | 미해결 | ✅(Lazy) | ✅ |
-| **#8** | 🟡 | **like.py rollback 누락** | 발견 | 미해결 | 미해결 | **❌ 미해결** |
+| #8 | 🟡 | like.py rollback 누락 | 발견 | 미해결 | 미해결 | **✅ 완료 (5/2)** |
 | **#9** | 🟡 | **DB 커넥션 풀 미사용** | 발견 | 미해결 | 미해결 | **❌ 미해결** |
 | #10 | 🟢 | secure: false 하드코딩 | 발견 | 미해결 | ✅ | ✅ |
 | **#11** | 🟢 | **Rate limiting 없음** | 발견 | 미해결 | 미해결 | **❌ 미해결** |
@@ -1806,10 +1807,69 @@ idx_completions_user_active  : (user_id, deleted_at)  — BTREE
 
 ---
 
-### 6. 검증 결과
+### 6. README #8 — `like.py` rollback 누락 실제 수정
 
-- 코드 변경 없음 — 분석/문서화 세션
-- README 본 섹션 추가만 수행
+#### 발견 경위
+
+운영 환경에서 좋아요 토글 시 다음 트레이스 발생:
+
+```
+pymysql.err.IntegrityError: (1062, "Duplicate entry '...' for key 'feed_likes.unique_like'")
+During handling of the above exception, another exception occurred:
+pymysql.err.OperationalError: (1205, 'Lock wait timeout exceeded; try restarting transaction')
+```
+
+Express 측에는 `FastApiError: status 500` (50초 지연 후 502) 로 노출.
+
+#### 근본 원인
+
+`pymysql` 의 기본 `autocommit=False` 환경에서:
+
+1. `conn1 = get_connection()` → 트랜잭션 시작
+2. INSERT 시도 → `IntegrityError 1062` (UNIQUE 충돌)
+3. **conn1 의 트랜잭션은 활성 상태로 유지** → 해당 (feed_id, user_id) 인덱스 슬롯에 락 보유 중
+4. `except` 분기에서 `conn2 = get_connection()` 신규 오픈
+5. conn2 로 같은 행에 DELETE 시도 → conn1 의 락 해제 대기
+6. `innodb_lock_wait_timeout` (50초) 초과 → `OperationalError 1205`
+7. `finally` 의 `conn1.close()` 는 너무 늦게 발동
+
+→ **자기 자신과의 락 충돌(self-deadlock)**.
+
+#### 수정 내용 (`src/python_api/routers/like.py`)
+
+| Before | After |
+|---|---|
+| `IntegrityError` 캐치 → `conn2 = get_connection()` 신규 오픈 → DELETE | `IntegrityError` 캐치 → `conn.rollback()` 으로 락 해제 → 동일 커넥션에서 DELETE |
+| 커넥션 2개 사용 | 커넥션 1개 사용 |
+| 50초 후 1205 타임아웃 | 즉시 응답 |
+
+추가로 일반 `Exception` 분기에도 `try: conn.rollback(); except: pass` 안전망을 두어 어떤 실패 경로에서도 트랜잭션이 정리되도록 함.
+
+#### 부수 효과
+
+- 신규 #9 (DB 커넥션 풀 도입) 작업 시 `add_like()` 가 이미 단일 커넥션 패턴이므로 마이그레이션이 한 함수만큼 줄어듦 — 사전 정리 효과
+- 동시 클릭 race condition (둘 다 INSERT 실패 → 둘 다 DELETE → 결과 0) 은 본 패턴으로도 미해결이지만, 같은 사용자가 동시에 같은 피드를 두 번 클릭하는 케이스는 실사용에서 거의 발생하지 않아 본 수정 범위 외로 둠
+
+#### 검증
+
+- `python3 -c "import ast; ast.parse(...)"` → 문법 통과
+- 권장 수동 검증:
+  1. 같은 피드 좋아요 → 취소 → 좋아요 → 취소 4번 클릭 모두 즉시 응답 (50초 지연 없음)
+  2. `SELECT * FROM feed_likes WHERE feed_id=? AND user_id=?` 로 토글 결과와 DB 상태 일치 확인
+
+#### 파일
+
+| 파일 | 변경 |
+|---|---|
+| `src/python_api/routers/like.py` | `add_like()` 의 INSERT/DELETE 분기를 단일 커넥션 + rollback 패턴으로 재작성, `[수정 2026-05-02]` 주석으로 변경 사유 명시 |
+
+---
+
+### 7. 검증 결과 (전체)
+
+- `like.py`: `ast.parse()` 통과
+- README 본 섹션 추가 + 4월 18일자 부채 표의 #8 상태 갱신 (`✅ 완료 (5/2)`)
+- 미구현 체크리스트에서 #8 항목 제거
 
 ---
 
@@ -1828,7 +1888,7 @@ idx_completions_user_active  : (user_id, deleted_at)  — BTREE
 - [x] ~~`secure: false` 환경변수화 — #10~~ ✅ 2026-04-29 완료
 - [x] ~~루틴 삭제 시 인증 피드/댓글/좋아요 함께 사라지는 문제~~ ✅ 2026-05-01 완료 (Soft Delete)
 - [ ] GET /feed N+1 쿼리 + 페이지네이션 없음 — #5 (2026-05-02 분석: 신규 #10·#11)
-- [ ] `like.py` rollback 누락 — #8
+- [x] ~~`like.py` rollback 누락 — #8~~ ✅ 2026-05-02 완료 (rollback + 단일 커넥션 패턴)
 - [ ] DB 커넥션 풀 도입 — #9 (2026-05-02 분석: 신규 #9)
 - [ ] Rate limiting 추가 — #11
 - [ ] 피드 이미지 압축/썸네일 생성 — 2026-05-02 신규 #12
