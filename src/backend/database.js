@@ -309,11 +309,25 @@ async function addFeedImage(imageData) {
 }
 
 /**
- * 전체 피드 목록 조회 (FastAPI GET /feed/, 최신순)
- * 좋아요 수, 댓글 수가 포함된 피드 목록 반환.
+ * 전체 피드 목록 조회 (FastAPI GET /feed/, 최신순, 커서 기반 페이지네이션)
+ *
+ * [수정 2026-05-03]
+ *   기존: 전체 피드 일괄 반환 → 호출자가 각 피드별로 이미지/좋아요 N+1 조회.
+ *   신규: user_id / cursor / limit 전달 → FastAPI 가 한 번에
+ *         피드 + 좋아요 상태 + 이미지 + 카운트 를 묶어 반환.
+ *
+ * @param {object} opts
+ * @param {string} [opts.user_id] - 현재 로그인 사용자. liked 상태 결정용.
+ * @param {string} [opts.cursor]  - 다음 페이지 커서 (이전 응답의 next_cursor).
+ * @param {number} [opts.limit=20] - 페이지 크기 (1~100).
+ * @returns {Promise<{feeds: Array, next_cursor: string|null}>}
  */
-async function getFeeds() {
-    return await fetchJson(`${PYTHON_API}/feed/`);
+async function getFeeds({ user_id, cursor, limit = 20 } = {}) {
+    const params = new URLSearchParams();
+    if (user_id) params.set("user_id", user_id);
+    if (cursor) params.set("cursor", cursor);
+    params.set("limit", String(limit));
+    return await fetchJson(`${PYTHON_API}/feed/?${params.toString()}`);
 }
 
 /**

@@ -24,7 +24,6 @@ const {
     getFeeds,
     getFeedDetail,
     deleteFeed,
-    checkLike,
 } = require("../database");
 // [리팩터링 #12] 세션 인증 4줄 복붙을 미들웨어 한 줄로 대체
 const requireAuth = require("../middleware/requireAuth");
@@ -172,42 +171,33 @@ router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, ne
 
 // ── 전체 피드 목록 조회 (GET /feed) ──────────────────────────────────────────
 
-/**
- * GET /feed
- *
- * 전체 피드를 최신순으로 조회하며, 각 피드의 이미지 목록과
- * 현재 로그인 유저의 좋아요 상태도 함께 반환.
- *
- * 처리 흐름:
- *   1. FastAPI GET /feed/ → 피드 목록 (like_count, comment_count 포함)
- *   2. 각 피드에 대해 병렬로:
- *      - FastAPI GET /feed/{feed_id} → 이미지 목록
- *      - FastAPI GET /like/{feed_id}/{user_id} → 현재 유저 좋아요 여부
- *   3. 합쳐서 반환
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// [수정 2026-05-03] N+1 제거 + 커서 기반 페이지네이션
+// ─────────────────────────────────────────────────────────────────────────────
+// 배경 (README 기술부채 #10, #11):
+//   기존 구현은 피드 1건마다 getFeedDetail + checkLike 두 번씩 호출 →
+//   N개 피드면 1 + 2N 회의 HTTP/DB 라운드트립 발생 (N+1 안티패턴).
+//   또한 LIMIT 없이 전 행을 반환해 피드 수 누적 시 응답 폭증.
+//
+// 변경:
+//   - FastAPI GET /feed/ 가 user_id / cursor / limit 쿼리를 받아
+//     단일 SQL JOIN 으로 이미지·좋아요 상태·페이지네이션을 모두 처리.
+//   - Express 는 인증 정보와 쿼리 파라미터만 전달하는 얇은 패스스루로 정리.
+//   - 댓글은 list 응답에서 제거 — 모달 진입 시 별도 엔드포인트로 페치.
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/feed", requireAuth, async (req, res, next) => {
     try {
-        // 1. 전체 피드 목록 (최신순, 좋아요/댓글 수 포함)
-        const feeds = await getFeeds();
-
-        // 2. 각 피드별 이미지 + 좋아요 상태를 병렬로 조회
-        const enrichedFeeds = await Promise.all(
-            feeds.map(async (feed) => {
-                const [detail, likeStatus] = await Promise.all([
-                    getFeedDetail(feed.feed_id),
-                    checkLike(feed.feed_id, req.user.user_id),
-                ]);
-
-                return {
-                    ...feed,
-                    images: detail.images || [],
-                    comments: detail.comments || [],
-                    liked: likeStatus.liked || false,
-                };
-            })
-        );
-
-        return res.json({ success: true, feeds: enrichedFeeds });
+        const limit = parseInt(req.query.limit, 10) || 20;
+        const result = await getFeeds({
+            user_id: req.user.user_id,
+            cursor: req.query.cursor,
+            limit,
+        });
+        return res.json({
+            success: true,
+            feeds: result.feeds || [],
+            next_cursor: result.next_cursor || null,
+        });
     } catch (error) {
         return next(error);
     }

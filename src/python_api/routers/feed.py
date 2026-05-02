@@ -121,73 +121,182 @@ def add_feed_image(body: ImageCreate):
 
 # ── 전체 피드 목록 조회 (GET /feed/) ─────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# [수정 2026-05-03] 신규 #10 + 신규 #11 동시 해결
+# ─────────────────────────────────────────────────────────────────────────────
+# 기존 문제:
+#   1) Express GET /feed 가 본 엔드포인트로 피드 목록을 받은 뒤,
+#      각 피드마다 GET /feed/{feed_id} (이미지+댓글) 와 GET /like/{feed_id}/{uid}
+#      를 추가 호출하여 N+1 쿼리 발생 — 피드 100개 시 HTTP 호출 201회.
+#   2) LIMIT 절 없이 전체 피드를 한 번에 반환 — 피드 1000개 시 페이로드 폭증.
+#
+# 해결:
+#   본 엔드포인트에 user_id / cursor / limit 쿼리 파라미터를 추가하여
+#   - 피드 + 현재 사용자 좋아요 상태(LEFT JOIN feed_likes) + 카운트 = 단일 쿼리
+#   - 이미지는 페이지 단위 피드 ID 목록으로 한 번의 IN 쿼리
+#   - 댓글은 응답에서 제외 (모달 열 때 GET /comment/{feed_id} 별도 호출)
+#   - cursor "<created_at_iso>_<feed_id>" 형태로 안정적인 페이지네이션
+#
+# 하위 호환:
+#   모든 신규 파라미터는 optional + 기본값 보유.
+#   user_id 미전달 시 liked 는 항상 false 로 채움.
+#   cursor 미전달 시 첫 페이지부터 limit 만큼 반환.
+#
+# 응답 형식 변경 (구버전: list, 신버전: dict):
+#   기존: 피드 배열만 반환
+#   신규: { feeds: [...], next_cursor: "<...>" | null }
+#   → Express getFeeds() 와 routes/feed.js 가 동시에 갱신되므로 호환 OK.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 헬퍼: cursor 직렬화/역직렬화 ──
+# cursor 문자열은 "<created_at_iso>_<feed_id>" 형태.
+# created_at 은 KST 기준 ISO 8601 문자열, feed_id 는 UUID v7.
+# UUID 와 ISO 시간에는 '_' 가 포함되지 않아 안전하게 1회 split 가능.
+
+def _parse_cursor(cursor: Optional[str]):
+    """cursor 문자열을 (created_at_iso, feed_id) 튜플로 분해.
+
+    유효하지 않은 형식이면 None 을 반환하여 "첫 페이지" 로 간주.
+    """
+    if not cursor:
+        return None
+    parts = cursor.split("_", 1)
+    if len(parts) != 2:
+        return None
+    return (parts[0], parts[1])
+
+
+def _build_cursor(created_at, feed_id: str) -> str:
+    """다음 cursor 문자열 생성. created_at 이 datetime 이면 isoformat() 적용."""
+    ts = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+    return f"{ts}_{feed_id}"
+
+
 @router.get("/")
-def get_feeds():
-    """전체 피드 목록 조회 (최신순, 좋아요/댓글 수 포함)
+def get_feeds(
+    user_id: Optional[str] = Query(
+        None,
+        description="현재 로그인한 사용자 UUID v7 — 각 피드의 좋아요 상태(liked) 결정용. 미전달 시 liked=False",
+    ),
+    cursor: Optional[str] = Query(
+        None,
+        description="페이지 커서 '<created_at_iso>_<feed_id>'. 첫 페이지면 미전달",
+    ),
+    limit: int = Query(20, ge=1, le=100, description="페이지 크기 (1~100)"),
+):
+    """전체 피드 목록 조회 (최신순, 좋아요/댓글 수 + 이미지 포함, 커서 기반 페이지네이션)
 
     FeedPage에서 피드 목록을 불러올 때 Express feed.js를 통해 호출됨.
-    users, routines 테이블과 JOIN하여 닉네임, 루틴 제목, 카테고리도 함께 반환.
+    users, routines 테이블과 JOIN하여 닉네임, 루틴 제목, 카테고리 함께 반환.
     feed_likes, feed_comments와 LEFT JOIN + COUNT로 좋아요/댓글 수도 포함.
 
+    [수정 2026-05-03]
+        - user_id / cursor / limit 쿼리 파라미터 추가 (모두 optional)
+        - 좋아요 상태(liked)를 단일 쿼리에 결합 → N+1 제거
+        - 이미지를 페이지 단위 IN 쿼리 1회로 일괄 조회
+        - 응답을 { feeds, next_cursor } dict 로 변경
+
     Returns:
-        list[dict]: 피드 목록 (최신순)
-                    각 항목: feed_id, content, created_at, nickname, profile_img,
-                            routine_title, category, like_count, comment_count
+        dict: {
+            "feeds": [
+                {
+                    feed_id, content, created_at, nickname, profile_img,
+                    routine_title, category, like_count, comment_count,
+                    liked,           # bool — user_id 의 좋아요 상태
+                    images: [...],  # 첨부 이미지 목록 (file_url, file_type 등)
+                },
+                ...
+            ],
+            "next_cursor": "<...>" | None,  # 다음 페이지 cursor, 더 없으면 None
+        }
 
     Raises:
         HTTPException 500: DB 조회 오류
     """
+    parsed_cursor = _parse_cursor(cursor)
+
     conn = get_connection()
     try:
-        with conn.cursor() as cursor:
-            # ────────────────────────────────────────────────────────────────
-            # [수정 2026-05-01] Soft Delete 도입에 따른 JOIN 정책 변경
-            # ────────────────────────────────────────────────────────────────
-            # 변경 1) routines INNER JOIN → LEFT JOIN
-            #   루틴이 soft delete 됐을 때(routines.deleted_at NOT NULL) 또는
-            #   극히 드물게 hard delete 된 잔존 데이터가 있을 때도
-            #   피드 자체는 사용자 결정사항 1(a) 에 따라 그대로 노출되어야 함.
-            #   INNER JOIN 으로 두면 삭제 루틴의 피드가 결과에서 사라져버려 모순.
-            #
-            # 변경 2) COALESCE(r.title, '(삭제된 루틴)')
-            #   삭제 루틴의 경우 r.title 이 살아있더라도, 사용자 입장에선
-            #   "이미 사라진 루틴" 이므로 일관되게 라벨 처리.
-            #   → routines.deleted_at IS NOT NULL 이면 "(삭제된 루틴)" 으로 표시.
-            #   → r 행 자체가 사라진(드문) 경우에도 NULL → "(삭제된 루틴)" 으로 표시.
-            #
-            # 변경 3) users LEFT JOIN
-            #   회원 탈퇴(soft delete) 시에도 피드는 살아남는 정책이므로
-            #   닉네임 fallback 도 유사하게 처리.
-            #   "(탈퇴한 사용자)" 는 사용자 결정사항에 명시되지 않았으나,
-            #   향후 회원 탈퇴 기능이 추가될 것을 대비한 방어 코드.
-            #
-            # 변경 4) 게시자가 탈퇴하지 않은 경우만 표시되도록 추가 필터를 둘지 여부:
-            #   - 현재 정책상 회원 탈퇴 자체가 구현돼 있지 않으므로
-            #     u.deleted_at 필터는 추가하지 않음.
-            #   - 추후 회원 탈퇴 기능 도입 시 본 라우터에서 정책 결정 필요.
-            # ────────────────────────────────────────────────────────────────
-            cursor.execute(
-                """SELECT
+        # ────────────────────────────────────────────────────────────────
+        # [수정 2026-05-01] Soft Delete: routines/users LEFT JOIN + COALESCE fallback
+        # [수정 2026-05-03] N+1 제거를 위해 좋아요 상태(liked) 를 동일 쿼리에 결합
+        #                   + 커서 기반 페이지네이션 적용
+        # ────────────────────────────────────────────────────────────────
+        # 좋아요 상태 결합 방식:
+        #   LEFT JOIN feed_likes fl_me ON fl_me.feed_id=f.feed_id
+        #                              AND fl_me.user_id=:user_id
+        #   → fl_me.like_id IS NOT NULL AS liked
+        #   user_id 가 None 이면 조건이 NULL=NULL 이므로 항상 매칭 실패 → liked=false
+        #
+        # 커서 페이지네이션:
+        #   ORDER BY f.created_at DESC, f.feed_id DESC
+        #   WHERE (f.created_at, f.feed_id) < (:cursor_ts, :cursor_id)
+        #   tie-breaker(feed_id) 필수 — 같은 created_at 다중 행 시 페이지 경계 누락 방지
+        # ────────────────────────────────────────────────────────────────
+        with conn.cursor() as cur:
+            # 1단계: 페이지 단위 피드 메타 + liked + 카운트 (단일 쿼리)
+            base_sql = """SELECT
                     f.feed_id,
                     f.content,
                     f.created_at,
+                    f.user_id,
                     COALESCE(u.nickname, '(탈퇴한 사용자)') AS nickname,
                     u.profile_img,
-                    -- [수정 2026-05-01] 삭제된 루틴이거나 r 행이 없으면 라벨 처리
                     COALESCE(r.title, '(삭제된 루틴)') AS routine_title,
                     r.category,
-                    COUNT(DISTINCT fl.like_id) AS like_count,       -- 좋아요 수 집계
-                    COUNT(DISTINCT fc.comment_id) AS comment_count  -- 댓글 수 집계
+                    COUNT(DISTINCT fl.like_id) AS like_count,
+                    COUNT(DISTINCT fc.comment_id) AS comment_count,
+                    -- 현재 사용자의 좋아요 여부 (user_id 미전달 시 항상 0)
+                    MAX(CASE WHEN fl_me.like_id IS NOT NULL THEN 1 ELSE 0 END) AS liked
                 FROM feeds f
-                LEFT JOIN users u ON f.user_id = u.user_id           -- [수정 2026-05-01] LEFT JOIN
-                LEFT JOIN routines r ON f.routine_id = r.routine_id  -- [수정 2026-05-01] LEFT JOIN
-                LEFT JOIN feed_likes fl ON f.feed_id = fl.feed_id    -- 좋아요 0개여도 표시 (LEFT)
-                LEFT JOIN feed_comments fc ON f.feed_id = fc.feed_id -- 댓글 0개여도 표시 (LEFT)
-                GROUP BY f.feed_id                                   -- 집계를 위해 feed_id로 그룹화
-                ORDER BY f.created_at DESC"""                        # 최신 피드가 먼저
-            )
-            feeds = cursor.fetchall()
-        return feeds
+                LEFT JOIN users u ON f.user_id = u.user_id
+                LEFT JOIN routines r ON f.routine_id = r.routine_id
+                LEFT JOIN feed_likes fl ON f.feed_id = fl.feed_id
+                LEFT JOIN feed_comments fc ON f.feed_id = fc.feed_id
+                LEFT JOIN feed_likes fl_me
+                    ON fl_me.feed_id = f.feed_id AND fl_me.user_id = %s
+            """
+            params = [user_id]
+
+            if parsed_cursor:
+                base_sql += " WHERE (f.created_at, f.feed_id) < (%s, %s)"
+                params.extend([parsed_cursor[0], parsed_cursor[1]])
+
+            base_sql += """
+                GROUP BY f.feed_id
+                ORDER BY f.created_at DESC, f.feed_id DESC
+                LIMIT %s
+            """
+            params.append(limit)
+
+            cur.execute(base_sql, tuple(params))
+            feeds = cur.fetchall()
+
+            # 2단계: 위 페이지에 속한 feed_id 들의 이미지 일괄 조회 (IN 쿼리 1회)
+            images_by_feed = {}
+            if feeds:
+                feed_ids = [f["feed_id"] for f in feeds]
+                placeholders = ",".join(["%s"] * len(feed_ids))
+                cur.execute(
+                    f"SELECT image_id, feed_id, file_url, file_type "
+                    f"FROM feed_images WHERE feed_id IN ({placeholders})",
+                    tuple(feed_ids),
+                )
+                for img in cur.fetchall():
+                    images_by_feed.setdefault(img["feed_id"], []).append(img)
+
+            # 3단계: 피드에 이미지/liked bool 결합
+            for f in feeds:
+                f["images"] = images_by_feed.get(f["feed_id"], [])
+                f["liked"] = bool(f["liked"])
+
+        # 다음 페이지 cursor 계산 — 페이지 크기만큼 채워졌을 때만 다음이 있다고 간주
+        next_cursor = None
+        if feeds and len(feeds) == limit:
+            last = feeds[-1]
+            next_cursor = _build_cursor(last["created_at"], last["feed_id"])
+
+        return {"feeds": feeds, "next_cursor": next_cursor}
     except Exception as e:
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))

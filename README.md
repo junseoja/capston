@@ -1986,6 +1986,125 @@ Express 측에는 `FastApiError: status 500` (50초 지연 후 502) 로 노출.
 
 ---
 
+## 🔧 2026-05-03 작업 내역
+
+### 1. 배경: 피드 목록 조회 N+1 + 페이지네이션 부재 (신규 #10 + #11 동시 처리)
+
+5/2 분석에서 도출된 두 항목을 동시에 묶어 처리. 두 문제는 같은 엔드포인트(GET /feed)에서 발생하며, 별도 커밋으로 나누면 응답 스키마가 두 번 바뀌게 되어 프론트와 두 번 동기화해야 한다. 한 번에 처리하는 편이 합리적.
+
+**기존 흐름 (병목):**
+```
+FeedPage (mount)
+  └─ GET /feed                     ← 전체 피드 1회 (LIMIT 없음)
+        └─ Express getFeeds()      ← FastAPI GET /feed/ 1회
+        └─ Promise.all(feeds.map):
+              └─ getFeedDetail()   ← 피드 상세(이미지/댓글) 1회씩
+              └─ checkLike()       ← 좋아요 여부 1회씩
+```
+피드 N개 시 **HTTP 호출 1 + 2N**, DB 쿼리도 거의 비례. 100개 → 201회.
+
+**변경 흐름:**
+```
+FeedPage (mount/scroll-end)
+  └─ GET /feed?cursor=...&limit=20  ← 페이지 단위 (cursor 기반)
+        └─ FastAPI: 단일 SQL JOIN
+              feeds + users + routines + feed_likes(count) + feed_comments(count)
+              + LEFT JOIN feed_likes(user_id 조건) → liked 결합
+        └─ feed_id IN (...) 1회로 이미지 일괄 조회
+  └─ openCommentModal()
+        └─ GET /comment/{feed_id}   ← 모달 열 때만 댓글 페치
+```
+페이지당 HTTP 1회 + DB 쿼리 2회 (피드+이미지). 댓글은 모달 진입 시 lazy fetch.
+
+### 2. 구현 변경
+
+#### A. FastAPI `GET /feed/` 시그니처 확장
+
+`src/python_api/routers/feed.py`:
+- `Query` 파라미터 3개 추가 — `user_id` (Optional), `cursor` (Optional), `limit` (1~100, 기본 20)
+- 단일 쿼리로 좋아요 카운트/댓글 카운트 + 현재 사용자 좋아요 상태(`MAX(CASE WHEN fl_me.like_id IS NOT NULL THEN 1 ELSE 0 END) AS liked`) 결합
+- 커서 페이지네이션: `WHERE (f.created_at, f.feed_id) < (%s, %s)` + `ORDER BY ... DESC LIMIT %s`
+  - tie-breaker로 `feed_id` 포함 — 같은 created_at이 여러 행 있어도 페이지 경계가 누락되지 않음
+- 이미지는 페이지에 포함된 feed_id 목록을 모아 `IN (...)` 1회 쿼리로 조회
+- 응답 형식: `{ feeds: [...], next_cursor: "<created_at>_<feed_id>" | null }` (구버전: bare list)
+
+#### B. Express `getFeeds()` / `GET /feed` 라우트 정리
+
+- `database.js` `getFeeds()` 시그니처: `({ user_id, cursor, limit = 20 } = {})` — `URLSearchParams`로 쿼리 빌드
+- `routes/feed.js`:
+  - `Promise.all` + `getFeedDetail`/`checkLike` N+1 루프 완전 제거
+  - 인증된 `user_id`와 `req.query.cursor`/`req.query.limit`만 그대로 FastAPI로 패스스루
+  - `checkLike` import 제거 (라우트에서 더 이상 사용 안 함; database.js의 함수 자체는 다른 라우트에서 쓰일 가능성 대비 유지)
+
+#### C. FeedPage.jsx 무한 스크롤 + lazy 댓글 페치
+
+- 상태 추가: `nextCursor`, `loadingMore`, `hasMore`
+- `fetchFeeds(cursor, reset)` — `reset=true`면 첫 페이지로 초기화, 아니면 누적
+- `IntersectionObserver` + sentinel `<div ref={sentinelRef}>` — 뷰포트에 진입하면 다음 페이지 로드 (rootMargin: 200px로 약간 미리 트리거)
+- `openCommentModal(feed_id)` — 모달 진입 시 `GET /comment/:feed_id`로 댓글 페치 후 해당 post의 `comments` 필드를 갱신
+- "더 불러오는 중..." / "마지막 게시물까지 모두 봤어요." 안내 문구 추가
+
+### 3. 핵심 SQL (단일 JOIN으로 N+1 제거)
+
+```sql
+SELECT
+    f.feed_id, f.content, f.created_at, f.user_id,
+    COALESCE(u.nickname, '(탈퇴한 사용자)') AS nickname, u.profile_img,
+    COALESCE(r.title, '(삭제된 루틴)') AS routine_title, r.category,
+    COUNT(DISTINCT fl.like_id) AS like_count,
+    COUNT(DISTINCT fc.comment_id) AS comment_count,
+    MAX(CASE WHEN fl_me.like_id IS NOT NULL THEN 1 ELSE 0 END) AS liked
+FROM feeds f
+LEFT JOIN users u ON f.user_id = u.user_id
+LEFT JOIN routines r ON f.routine_id = r.routine_id
+LEFT JOIN feed_likes fl ON f.feed_id = fl.feed_id
+LEFT JOIN feed_comments fc ON f.feed_id = fc.feed_id
+LEFT JOIN feed_likes fl_me
+    ON fl_me.feed_id = f.feed_id AND fl_me.user_id = %s
+WHERE (f.created_at, f.feed_id) < (%s, %s)   -- cursor 없으면 생략
+GROUP BY f.feed_id
+ORDER BY f.created_at DESC, f.feed_id DESC
+LIMIT %s
+```
+
+`COUNT(DISTINCT ...)`로 `fl`/`fc` 두 LEFT JOIN의 카티시안 곱이 카운트를 부풀리는 문제를 차단.
+`fl_me`는 `user_id` 매칭 행이 0개 또는 1개이므로 `MAX(CASE ...)`로 0/1을 결합.
+
+### 4. 기대 효과
+
+- 피드 100개 페이지 응답: HTTP 1회 + DB 쿼리 2회 (기존 201회 → **99% 감소**)
+- 페이로드 크기: 페이지 크기로 상한 (20개 × 평균 카드 = 수십 KB), 댓글은 모달에서만 로드
+- DB 부하: GROUP BY + LEFT JOIN 1쿼리 + IN 쿼리 1회로 일정 (피드 N에 대해 O(1) 라운드트립)
+
+### 5. 잠재 문제 / 향후 보완
+
+- **`MAX(CASE...)` + GROUP BY 조합** — `fl_me`가 user_id로 0/1행 보장이지만 누군가 동일 (feed_id, user_id)에 like를 두 번 INSERT하면 (UNIQUE 제약 깨졌을 때) MAX는 여전히 1을 반환하므로 데이터는 정상. 단, `like_count`/`comment_count`의 정확성은 UNIQUE 제약에 의존.
+- **cursor 안정성** — soft-deleted 피드(미래 도입 시) 또는 새로 추가된 피드가 cursor 사이에 끼어들 가능성. 현재는 created_at DESC 정렬이라 신규는 무조건 위에 오므로 문제 없으나, "리프레시 버튼"으로 첫 페이지를 다시 받는 UX는 별도 구현 필요.
+- **댓글 lazy fetch의 race** — 모달을 빠르게 여러 번 열고 닫을 때 이전 요청 응답이 늦게 도착할 수 있음. 현재 구현은 feed_id 매칭으로 갱신해서 큰 문제는 없지만, 엄밀하게는 AbortController로 직전 요청을 취소하는 편이 안전.
+- **frontend hot path 두 번 변경** — 5/3에 응답 스키마 + 댓글 페치 위치가 동시에 바뀌었으므로, 캐시된 클라이언트가 구버전 코드로 새 응답을 받으면 `data.feeds.map(...)` 등에서 깨질 수 있음. 배포 시 강제 리로드 권장.
+
+### 6. 검증
+
+- `node --check src/backend/routes/feed.js` 및 `database.js` → 통과
+- `python3 -c "import ast; ast.parse(...)"` (feed.py) → 통과
+- `npx vite build` → 성공 (283.14 kB)
+- 권장 수동 검증:
+  1. 피드 21개 이상 등록 후 스크롤 — 20개씩 추가 로드되고 마지막에 "마지막 게시물..." 표시
+  2. 댓글 모달 열기 — `/comment/{feed_id}` 호출 후 댓글 표시
+  3. 좋아요 토글 — `liked` 상태가 새로고침 후에도 유지
+  4. 네트워크 탭에서 DB 쿼리 수 확인 (예: 슬로우 쿼리 로그)
+
+### 7. 파일
+
+| 파일 | 변경 |
+|---|---|
+| `src/python_api/routers/feed.py` | `GET /feed/` 에 user_id/cursor/limit 쿼리 추가, 단일 JOIN + IN 쿼리로 N+1 제거, 응답을 `{feeds, next_cursor}` dict 로 변경 |
+| `src/backend/database.js` | `getFeeds()` 시그니처를 `{user_id, cursor, limit}` 옵션 객체로 변경, URLSearchParams 로 쿼리 빌드 |
+| `src/backend/routes/feed.js` | `Promise.all` N+1 루프 제거, FastAPI 응답 그대로 패스스루, `checkLike` import 제거 |
+| `src/frontend/FeedPage.jsx` | 커서 + IntersectionObserver 무한 스크롤, 모달 진입 시 댓글 별도 페치, sentinel/안내 문구 추가 |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
@@ -2000,7 +2119,7 @@ Express 측에는 `FastApiError: status 500` (50초 지연 후 502) 로 노출.
 - [x] ~~평문 비밀번호 폴백 로직 제거 — #7~~ ✅ 2026-04-29 완료 (Lazy Migration)
 - [x] ~~`secure: false` 환경변수화 — #10~~ ✅ 2026-04-29 완료
 - [x] ~~루틴 삭제 시 인증 피드/댓글/좋아요 함께 사라지는 문제~~ ✅ 2026-05-01 완료 (Soft Delete)
-- [ ] GET /feed N+1 쿼리 + 페이지네이션 없음 — #5 (2026-05-02 분석: 신규 #10·#11)
+- [x] ~~GET /feed N+1 쿼리 + 페이지네이션 없음 — #5 (2026-05-02 분석: 신규 #10·#11)~~ ✅ 2026-05-03 완료 (단일 JOIN + cursor 페이지네이션 + 무한 스크롤)
 - [x] ~~`like.py` rollback 누락 — #8~~ ✅ 2026-05-02 완료 (rollback + 단일 커넥션 패턴)
 - [ ] DB 커넥션 풀 도입 — #9 (2026-05-02 분석: 신규 #9)
 - [ ] Rate limiting 추가 — #11

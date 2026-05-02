@@ -12,15 +12,23 @@
 //   currentUser - 현재 로그인한 유저 정보 ({ user_id, nickname, ... })
 // ============================================================
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { EXPRESS_URL } from "./config";
 
+// [수정 2026-05-03] 한 번에 가져올 페이지 크기 — FastAPI Query(limit) 와 동일한 의미
+const PAGE_SIZE = 20;
+
 function FeedPage({ currentUser }) {
-    // 피드 목록 (DB에서 조회, 최신순)
+    // 피드 목록 (DB에서 조회, 최신순) — 페이지가 로드될 때마다 누적
     const [feedPosts, setFeedPosts] = useState([]);
 
-    // 데이터 로딩 상태
+    // 첫 로딩 상태 (초기 화면용)
     const [loading, setLoading] = useState(true);
+
+    // [수정 2026-05-03] 무한 스크롤용 — 다음 페이지 cursor / 추가 로딩 여부 / 더 이상 없음 플래그
+    const [nextCursor, setNextCursor] = useState(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
 
     // 댓글 모달: 선택된 피드 ID
     const [selectedPostId, setSelectedPostId] = useState(null);
@@ -34,30 +42,69 @@ function FeedPage({ currentUser }) {
     // ── 피드 목록 조회 ────────────────────────────────────────────────────────
 
     /**
-     * fetchFeeds - Express GET /feed에서 전체 피드를 최신순으로 조회
-     * 각 피드에 이미지 목록, 좋아요 상태, 댓글 목록이 포함되어 반환됨
+     * fetchFeeds - Express GET /feed에서 한 페이지(PAGE_SIZE)만큼의 피드를 조회.
+     *
+     * [수정 2026-05-03]
+     *   기존: 전체 피드를 한 번에 조회 + 각 피드별로 상세/좋아요 추가 호출 (N+1)
+     *   현재: cursor 기반 페이지네이션 — Express 가 FastAPI 의 단일 JOIN 결과를 그대로 전달
+     *
+     * @param {string|null} cursor - 다음 페이지 cursor (null 이면 첫 페이지)
+     * @param {boolean} reset      - true 면 기존 목록을 비우고 새로 시작
      */
-    const fetchFeeds = useCallback(async () => {
+    const fetchFeeds = useCallback(async (cursor = null, reset = false) => {
+        if (reset) {
+            setLoading(true);
+        } else {
+            setLoadingMore(true);
+        }
+
         try {
-            const res = await fetch(`${EXPRESS_URL}/feed`, {
+            const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+            if (cursor) params.set("cursor", cursor);
+
+            const res = await fetch(`${EXPRESS_URL}/feed?${params.toString()}`, {
                 credentials: "include",
             });
             const data = await res.json();
 
             if (data.success) {
-                setFeedPosts(data.feeds);
+                const incoming = data.feeds || [];
+                setFeedPosts((prev) => (reset ? incoming : [...prev, ...incoming]));
+                setNextCursor(data.next_cursor || null);
+                setHasMore(Boolean(data.next_cursor));
             }
         } catch (error) {
             console.error("피드 목록 조회 실패:", error);
         } finally {
             setLoading(false);
+            setLoadingMore(false);
         }
     }, []);
 
-    // 컴포넌트 마운트 시 피드 로드
+    // 컴포넌트 마운트 시 첫 페이지 로드
     useEffect(() => {
-        fetchFeeds();
+        fetchFeeds(null, true);
     }, [fetchFeeds]);
+
+    // ── 무한 스크롤: IntersectionObserver 로 sentinel 이 보이면 다음 페이지 요청 ──
+    // [수정 2026-05-03] sentinel 엘리먼트가 뷰포트에 진입하면 fetchFeeds(nextCursor) 호출.
+    // useRef + callback ref 패턴으로 sentinel 을 매 렌더마다 새로 관찰하지 않도록 처리.
+    const observerRef = useRef(null);
+    const sentinelRef = useCallback(
+        (node) => {
+            if (loadingMore) return;
+            if (observerRef.current) observerRef.current.disconnect();
+            if (!node || !hasMore) return;
+
+            observerRef.current = new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting && hasMore && !loadingMore && nextCursor) {
+                    fetchFeeds(nextCursor, false);
+                }
+            }, { rootMargin: "200px" });
+            observerRef.current.observe(node);
+        },
+        [fetchFeeds, hasMore, loadingMore, nextCursor]
+    );
 
     // 모달 열릴 때 배경 스크롤 방지
     useEffect(() => {
@@ -116,12 +163,33 @@ function FeedPage({ currentUser }) {
 
     /**
      * openCommentModal - 댓글 모달 열기
-     * 선택된 피드 ID를 설정하고 댓글 입력 초기화
+     * 선택된 피드 ID를 설정하고 댓글 입력 초기화.
+     *
+     * [수정 2026-05-03] 피드 목록 응답에서 comments 가 제거되었기 때문에
+     * 모달이 열리는 시점에 GET /comment/{feed_id} 로 댓글을 별도 페치한다.
+     * 이미 페치된 피드라면 다시 받아 최신 상태로 갱신.
+     *
      * @param {string} feed_id - 댓글을 볼 피드의 UUID v7
      */
-    const openCommentModal = (feed_id) => {
+    const openCommentModal = async (feed_id) => {
         setSelectedPostId(feed_id);
         setCommentInput("");
+
+        try {
+            const res = await fetch(`${EXPRESS_URL}/comment/${feed_id}`, {
+                credentials: "include",
+            });
+            const data = await res.json();
+            if (!data.success) return;
+
+            setFeedPosts((prev) =>
+                prev.map((post) =>
+                    post.feed_id === feed_id ? { ...post, comments: data.comments || [] } : post
+                )
+            );
+        } catch (error) {
+            console.error("댓글 조회 실패:", error);
+        }
     };
 
     /** closeCommentModal - 댓글 모달 닫기, 선택 상태 및 입력값 초기화 */
@@ -373,6 +441,27 @@ function FeedPage({ currentUser }) {
                             </div>
                         </article>
                     ))}
+
+                    {/* [수정 2026-05-03] 무한 스크롤 sentinel — 보이면 다음 페이지 로드 */}
+                    {hasMore && (
+                        <div
+                            ref={sentinelRef}
+                            style={{ height: 1 }}
+                            aria-hidden="true"
+                        />
+                    )}
+
+                    {loadingMore && (
+                        <p style={{ textAlign: "center", color: "#6b7280", padding: "12px" }}>
+                            더 불러오는 중...
+                        </p>
+                    )}
+
+                    {!hasMore && feedPosts.length > 0 && (
+                        <p style={{ textAlign: "center", color: "#9ca3af", padding: "12px" }}>
+                            마지막 게시물까지 모두 봤어요.
+                        </p>
+                    )}
                 </div>
             </div>
 
