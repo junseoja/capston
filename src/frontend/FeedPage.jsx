@@ -258,7 +258,7 @@ function FeedPage({ currentUser }) {
 
     if (loading) {
         return (
-            <div className="feed-page insta-feed-page">
+            <div className="feed-page instagram-feed-page">
                 <div className="feed-header">
                     <h1 className="feed-title">피드</h1>
                 </div>
@@ -269,7 +269,7 @@ function FeedPage({ currentUser }) {
 
     if (!feedPosts || feedPosts.length === 0) {
         return (
-            <div className="feed-page insta-feed-page">
+            <div className="feed-page instagram-feed-page">
                 <div className="feed-header">
                     <h1 className="feed-title">피드</h1>
                     <p className="feed-subtitle">
@@ -289,52 +289,49 @@ function FeedPage({ currentUser }) {
 
     return (
         <>
-            <div className="feed-page insta-feed-page">
+            <div className="feed-page instagram-feed-page">
                 <div className="feed-header">
                     <h1 className="feed-title">피드</h1>
                     <p className="feed-subtitle">루틴 인증이 인스타그램처럼 쌓이는 공간이에요.</p>
                 </div>
 
-                <div className="insta-feed-list">
+                <div className="instagram-feed-list">
                     {feedPosts.map((post) => (
-                        <article key={post.feed_id} className="insta-feed-card">
+                        <article key={post.feed_id} className="instagram-feed-card">
                             {/* 상단: 닉네임 + 루틴 제목 + 카테고리 */}
-                            <div className="insta-feed-topline">
-                                <div className="insta-feed-mainline">
-                                    <span className="insta-feed-nickname">{post.nickname}</span>
-                                    <span className="insta-feed-divider">•</span>
-                                    <span className="insta-feed-routine-title">{post.routine_title}</span>
+                            <div className="instagram-feed-top">
+                                <div className="instagram-feed-info-row">
+                                    <span className="instagram-feed-author">{post.nickname}</span>
+                                    <span className="instagram-feed-divider">•</span>
+                                    <span className="instagram-feed-routine-title">{post.routine_title}</span>
+                                    {post.category && (
+                                        <span className="instagram-feed-info-badge">{post.category}</span>
+                                    )}
                                 </div>
-                                <span className="insta-feed-category">{post.category}</span>
                             </div>
-
-                            {/* 인증 글 */}
-                            <p className="insta-feed-proof-text">
-                                {post.content || "오늘 루틴 인증 완료!"}
-                            </p>
 
                             {/* 이미지/영상 (DB에서 가져온 images 배열) */}
                             {post.images?.length > 0 && (
                                 <div
                                     className={
                                         post.images.length === 1
-                                            ? "insta-feed-media-single"
-                                            : "insta-feed-media-grid"
+                                            ? "instagram-feed-media-box"
+                                            : "instagram-feed-media-grid"
                                     }
                                 >
                                     {post.images.map((image) => (
-                                        <div key={image.image_id} className="insta-feed-media-item">
+                                        <div key={image.image_id} className="instagram-feed-media-item">
                                             {image.file_type?.startsWith("image/") ? (
                                                 <img
                                                     src={getImageUrl(image.file_url)}
                                                     alt="루틴 인증 이미지"
-                                                    className="insta-feed-media"
+                                                    className="instagram-feed-media"
                                                 />
                                             ) : (
                                                 <video
                                                     src={getImageUrl(image.file_url)}
                                                     controls
-                                                    className="insta-feed-media"
+                                                    className="instagram-feed-media"
                                                 />
                                             )}
                                         </div>
@@ -342,31 +339,38 @@ function FeedPage({ currentUser }) {
                                 </div>
                             )}
 
-                            {/* 좋아요 / 댓글 버튼 */}
-                            <div className="insta-feed-action-row">
-                                <button
-                                    type="button"
-                                    className={`insta-feed-action-btn insta-like-btn ${post.liked ? "liked" : ""}`}
-                                    onClick={() => handleToggleLike(post.feed_id)}
-                                >
-                                    <span className="insta-feed-icon">{post.liked ? "♥" : "♡"}</span>
-                                    <span>{post.like_count || 0}</span>
-                                </button>
+                            <div className="instagram-feed-body">
+                                {/* 인증 글 */}
+                                <p className="instagram-feed-caption">
+                                    {post.content || "오늘 루틴 인증 완료!"}
+                                </p>
 
-                                <button
-                                    type="button"
-                                    className="insta-feed-action-btn insta-comment-btn"
-                                    onClick={() => openCommentModal(post.feed_id)}
-                                >
-                                    <span className="insta-feed-icon">💬</span>
-                                    <span>{post.comment_count || 0}</span>
-                                </button>
+                                {/* 좋아요 / 댓글 버튼 */}
+                                <div className="instagram-feed-action-row">
+                                    <button
+                                        type="button"
+                                        className={`instagram-feed-action-btn instagram-feed-like-btn ${post.liked ? "liked" : ""}`}
+                                        onClick={() => handleToggleLike(post.feed_id)}
+                                    >
+                                        <span className="instagram-feed-icon">{post.liked ? "♥" : "♡"}</span>
+                                        <span>{post.like_count || 0}</span>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        className="instagram-feed-action-btn instagram-feed-comment-btn"
+                                        onClick={() => openCommentModal(post.feed_id)}
+                                    >
+                                        <span className="instagram-feed-icon">💬</span>
+                                        <span>{post.comment_count || 0}</span>
+                                    </button>
+                                </div>
+
+                                {/* 작성 시간 */}
+                                <p className="instagram-feed-info-time">
+                                    {formatDateTime(post.created_at)}
+                                </p>
                             </div>
-
-                            {/* 작성 시간 */}
-                            <p className="insta-feed-time" style={{ fontSize: "12px", color: "#9ca3af", padding: "0 16px 12px" }}>
-                                {formatDateTime(post.created_at)}
-                            </p>
                         </article>
                     ))}
                 </div>
@@ -468,10 +472,10 @@ function FeedPage({ currentUser }) {
                             <div className="feed-modal-bottom">
                                 <button
                                     type="button"
-                                    className={`insta-feed-action-btn insta-like-btn ${selectedPost.liked ? "liked" : ""}`}
+                                    className={`instagram-feed-action-btn instagram-feed-like-btn ${selectedPost.liked ? "liked" : ""}`}
                                     onClick={() => handleToggleLike(selectedPost.feed_id)}
                                 >
-                                    <span className="insta-feed-icon">
+                                    <span className="instagram-feed-icon">
                                         {selectedPost.liked ? "♥" : "♡"}
                                     </span>
                                     <span>{selectedPost.like_count || 0}</span>

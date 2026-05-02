@@ -33,6 +33,7 @@ import RoutinePage from "./RoutinePage";
 import FeedPage from "./FeedPage";
 import MyPage from "./MyPage";
 import SignupPage from "./SignupPage";
+import StatsPage from "./StatsPage";
 
 function App() {
     // useNavigate: URL 이동을 프로그래밍적으로 처리 (예: 로그인 후 "/" 로 이동)
@@ -501,7 +502,7 @@ function App() {
                                 ? <LoginPage
                                     onLogin={handleLogin}           // 로그인 성공 콜백
                                     onGoSignup={() => navigate("/signup")} // 회원가입 페이지 이동
-                                  />
+                                />
                                 : <Navigate to="/" />              // 이미 로그인 → 홈으로
                         }
                     />
@@ -527,7 +528,7 @@ function App() {
                                     onCompleteCheck={completeCheckRoutine}    // 체크 루틴 완료 핸들러
                                     onCompleteDetail={completeDetailRoutine}  // 상세 루틴 완료 핸들러
                                     onCancelComplete={cancelRoutineCompletion} // 완료 취소 핸들러
-                                  />
+                                />
                                 : <Navigate to="/login" />
                         }
                     />
@@ -557,6 +558,12 @@ function App() {
                     <Route
                         path="/mypage"
                         element={isLoggedIn ? <MyPage /> : <Navigate to="/login" />}
+                    />
+
+                    {/* 상세 분석 페이지: 마이페이지에서 "상세 분석" 버튼으로 진입 */}
+                    <Route
+                        path="/stats"
+                        element={isLoggedIn ? <StatsPage /> : <Navigate to="/login" />}
                     />
 
                     {/* 정의되지 않은 URL 접근 시 상태에 따라 홈 또는 로그인으로 리다이렉트 */}

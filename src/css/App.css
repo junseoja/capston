@@ -1,184 +1,395 @@
+/* =========================================================
+  Routine Mate - Modern UI App.css
+  최신 frontend 코드 기준 / JSX 수정 없이 App.css만 교체
+   ========================================================= */
+
+/* ===============================
+  1. 디자인 시스템
+================================ */
+:root {
+  --primary: #7c3aed;
+  --primary-2: #6366f1;
+  --primary-3: #8b5cf6;
+  --primary-light: #f3efff;
+  --primary-soft: #eef2ff;
+
+  --success: #10b981;
+  --success-light: #ecfdf5;
+  --danger: #ef4444;
+  --danger-light: #fef2f2;
+  --warning: #f59e0b;
+  --warning-light: #fffbeb;
+
+  --bg: #f6f7fb;
+  --bg-2: #eef2ff;
+  --card: rgba(255, 255, 255, 0.92);
+  --white: #ffffff;
+
+  --text-main: #111827;
+  --text-sub: #6b7280;
+  --text-light: #9ca3af;
+
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+
+  --shadow-sm: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 14px 35px rgba(15, 23, 42, 0.09);
+  --shadow-lg: 0 24px 70px rgba(79, 70, 229, 0.20);
+
+  --gradient-main: linear-gradient(135deg, #6366f1 0%, #7c3aed 48%, #ec4899 100%);
+  --gradient-soft: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(236, 72, 153, 0.10));
+  --gradient-card: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.86));
+
+  --transition: 0.2s ease;
+}
+
+/* ===============================
+  2. 기본 초기화
+================================ */
 * {
   box-sizing: border-box;
 }
 
-/*프론트엔드 브런치 생성 재테스트*/
-/*css 색 이상함*/
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
-  font-family: Arial, sans-serif;
-  background-color: #f5f7fb;
-  color: #1f2937;
+  min-height: 100vh;
+  font-family: "Pretendard", "Noto Sans KR", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(124, 58, 237, 0.16), transparent 28%),
+    radial-gradient(circle at 88% 0%, rgba(236, 72, 153, 0.13), transparent 30%),
+    linear-gradient(180deg, #fbfbff 0%, #f6f7fb 42%, #eef2ff 100%);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 button {
-  font-family: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
 }
 
 .app {
   min-height: 100vh;
 }
 
+/* ===============================
+  3. 상단바 / 전체 레이아웃
+================================ */
 .topbar {
-  width: 100%;
-  background-color: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 18px 40px;
+  width: min(1180px, calc(100% - 32px));
+  margin: 16px auto 0;
+  padding: 14px 18px 14px 22px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   position: sticky;
-  top: 0;
+  top: 14px;
   z-index: 1000;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(229, 231, 235, 0.82);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
 }
 
 .logo {
-  font-size: 24px;
-  font-weight: bold;
-  color: #4f46e5;
+  font-size: 23px;
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  background: var(--gradient-main);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .nav {
   display: flex;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .nav button {
   border: none;
-  background-color: #eef2ff;
-  color: #4338ca;
-  padding: 10px 16px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
+  background: transparent;
+  color: #4b5563;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  transition: var(--transition);
 }
 
 .nav button:hover {
-  background-color: #dbe4ff;
+  color: var(--primary);
+  background: var(--primary-light);
+  transform: translateY(-1px);
 }
 
 .page-container {
-  max-width: 1100px;
-  margin: 40px auto;
-  padding: 0 20px;
+  width: min(1120px, calc(100% - 32px));
+  margin: 34px auto 70px;
 }
 
-/*여기부터 홈페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
-/* 홈 페이지 전체를 세로로 배치하고 각 영역 사이 간격을 주는 부분 */
+/* ===============================
+  4. 공통 타이포 / 폼 / 버튼
+================================ */
+h1,
+h2,
+h3,
+p {
+  letter-spacing: -0.035em;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text-main);
+  border-radius: 16px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition),
+    background var(--transition);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(124, 58, 237, 0.62);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.12);
+  background: white;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #a1a1aa;
+}
+
+.home-action-btn,
+.routine-check-btn,
+.proof-save-btn,
+.routine-add-btn,
+.routine-save-btn,
+.login-form button {
+  border: none;
+  background: var(--gradient-main);
+  color: white;
+  font-weight: 900;
+  border-radius: 16px;
+  box-shadow: 0 12px 22px rgba(99, 102, 241, 0.22);
+  transition: transform var(--transition), box-shadow var(--transition),
+    opacity var(--transition);
+}
+
+.home-action-btn:hover,
+.routine-check-btn:hover,
+.proof-save-btn:hover,
+.routine-add-btn:hover,
+.routine-save-btn:hover,
+.login-form button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 32px rgba(99, 102, 241, 0.28);
+}
+
+.home-action-btn:disabled,
+.proof-save-btn:disabled,
+.routine-check-btn:disabled {
+  background: #d1d5db;
+  color: #6b7280;
+  box-shadow: none;
+  transform: none;
+}
+
+/* ===============================
+  5. 홈 페이지
+================================ */
 .home {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 24px;
 }
 
-/* 요일 */
 .week {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 12px;
   margin-bottom: 0;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(229, 231, 235, 0.78);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(14px);
 }
 
-/* 요일 하나하나의 기본 박스 */
 .day {
+  width: auto;
+  min-height: 72px;
+  padding: 10px 8px;
   text-align: center;
-  padding: 10px;
-  border-radius: 10px;
-  width: 50px;
-}
-
-/* 오늘 날짜에 해당하는 요일 박스의 활성화 상태 */
-.day.active {
-  background-color: #4f46e5;
-  color: white;
-}
-
-.home-action-btn {
-  width: 100%;
-  min-width: 180px;
-}
-
-/* 아침, 점심, 저녁 시간 탭 전체 영역 */
-.time-tabs {
+  border-radius: 18px;
+  color: var(--text-sub);
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  transition: var(--transition);
+}
+
+.day p {
+  margin: 0;
+  font-weight: 800;
+}
+
+.day p:first-child {
+  font-size: 13px;
+}
+
+.day p:last-child {
+  font-size: 18px;
+}
+
+.day.active {
+  color: white;
+  background: var(--gradient-main);
+  box-shadow: 0 14px 24px rgba(124, 58, 237, 0.26);
+}
+
+.time-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
   margin-bottom: 0;
+  padding: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(229, 231, 235, 0.78);
+  box-shadow: var(--shadow-sm);
 }
 
-/* 시간 탭 버튼의 기본 스타일 */
 .time-tabs button {
-  flex: 1;
-  padding: 12px;
+  padding: 14px 16px;
   border: none;
-  border-radius: 10px;
-  background-color: #eef2ff;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-sub);
+  font-weight: 900;
   cursor: pointer;
-  font-weight: bold;
-  color: #4338ca;
 }
 
-/* 시간 탭 버튼에 마우스를 올렸을 때 스타일 */
 .time-tabs button:hover {
-  background-color: #dbe4ff;
+  color: var(--primary);
+  background: var(--primary-light);
 }
 
-/* 현재 선택된 시간 탭 버튼의 활성화 스타일 */
 .active-time-tab {
-  background-color: #4f46e5 !important;
+  background: var(--gradient-main) !important;
   color: white !important;
+  box-shadow: 0 12px 22px rgba(99, 102, 241, 0.25);
 }
 
-/* 루틴 내용 전체를 감싸는 흰색 박스 */
 .routine-content {
-  background-color: white;
-  padding: 24px;
-  border-radius: 16px;
+  position: relative;
+  overflow: hidden;
+  background: var(--gradient-card);
+  padding: 28px;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: var(--shadow-md);
 }
 
-/* 아침 루틴, 점심 루틴, 저녁 루틴 제목 스타일 */
+.routine-content::before {
+  content: "";
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  right: -100px;
+  top: -130px;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.16), transparent 65%);
+  pointer-events: none;
+}
+
 .home-section-title {
-  margin: 0 0 18px;
-  font-size: 24px;
+  position: relative;
+  margin: 0 0 22px;
+  font-size: 26px;
   text-align: left;
-  color: #111827;
+  color: var(--text-main);
+  font-weight: 950;
 }
 
 .home-section-time {
-  font-size: 16px;
-  font-weight: 500;
-  color: #6b7280;
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 900;
+  vertical-align: middle;
 }
 
-/* 해당 시간대에 루틴이 없을 때 보여주는 안내 문구 */
 .empty-routine-text {
   margin: 0;
-  color: #6b7280;
+  color: var(--text-sub);
   text-align: left;
+  padding: 34px;
+  background: #f9fafb;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
 }
 
-/* 홈 화면에서 루틴 카드들을 2열로 배치하는 영역 */
 .home-routine-list {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
-/* 홈 화면의 루틴 카드 하나의 기본 스타일 */
 .home-routine-card {
   display: flex;
   justify-content: space-between;
   align-items: stretch;
   gap: 24px;
-  background-color: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  padding: 22px 24px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(229, 231, 235, 0.78);
+  border-radius: 24px;
+  padding: 22px;
   text-align: left;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition), box-shadow var(--transition),
+    border-color var(--transition);
 }
 
-/* 완료된 루틴 카드의 배경색과 테두리를 바꾸는 스타일 */
+.home-routine-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: rgba(124, 58, 237, 0.25);
+}
+
 .home-routine-card-completed {
-  border: 1px solid #c7d2fe;
-  background-color: #eef2ff;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
 }
 
 .home-routine-card-left {
@@ -187,57 +398,67 @@ button {
 }
 
 .home-routine-card-right {
-  width: 280px;
+  width: 290px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   flex-shrink: 0;
 }
 
-/* 루틴 카드 상단에서 제목과 카테고리를 양쪽으로 배치하는 부분 */
 .home-routine-card-top {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
-/* 루틴 카드 제목 글씨 스타일 */
 .home-routine-card h3 {
   margin: 0;
-  font-size: 24px;
-  color: #111827;
-  word-break: keep-all;
+  max-width: 100%;
+  font-size: 20px;
+  font-weight: 950;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 
-/* 루틴 카테고리 뱃지 스타일 */
-.home-routine-badge {
-  background-color: #eef2ff;
-  color: #4338ca;
-  padding: 6px 10px;
+.home-routine-card h3:hover {
+  color: var(--primary);
+}
+
+.home-routine-badge,
+.home-routine-meta span,
+.instagram-feed-info-badge {
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 7px 11px;
   border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 900;
   white-space: nowrap;
 }
 
-/* 체크 루틴, 상세 루틴 종류를 보여주는 글씨 스타일 */
 .home-routine-type {
-  margin: 0 0 8px;
-  color: #4f46e5;
-  font-size: 14px;
-  font-weight: 600;
+  display: inline-flex;
+  margin: 0 0 10px;
+  color: var(--primary);
+  background: rgba(124, 58, 237, 0.08);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 900;
 }
 
-/* 루틴 설명 문장 스타일 */
 .home-routine-desc {
   margin: 0 0 14px;
-  color: #6b7280;
-  line-height: 1.5;
+  color: var(--text-sub);
+  line-height: 1.65;
+  font-size: 14px;
 }
 
-/* 목표, 반복 주기 같은 정보 태그들을 감싸는 영역 */
 .home-routine-meta {
   display: flex;
   gap: 8px;
@@ -245,205 +466,228 @@ button {
   margin-bottom: 0;
 }
 
-/* 목표, 반복 주기 같은 정보 태그 하나하나의 스타일 */
-.home-routine-meta span {
-  background-color: #eef2ff;
-  color: #4338ca;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 10px;
-  border-radius: 999px;
-}
-
 .home-detail-action {
   width: 100%;
+  display: flex;
+  justify-content: flex-end;
 }
 
-/* 루틴 완료 후 완료 시간과 인증 내용을 감싸는 박스 */
-.home-complete-box {
-  width: 100%;
-  padding: 14px;
-  border-radius: 12px;
-  background-color: #ffffff;
-  border: 1px solid #dbe4ff;
+.routine-check-btn,
+.home-action-btn {
+  min-width: 130px;
+  padding: 14px 18px;
+  font-size: 14px;
 }
 
 .home-complete-box {
   width: 100%;
-  padding: 14px;
-  border-radius: 12px;
-  background-color: #ffffff;
-  border: 1px solid #dbe4ff;
+  padding: 15px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ffffff, #ecfdf5);
+  border: 1px solid rgba(16, 185, 129, 0.25);
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease,
-    transform 0.2s ease;
+  transition: var(--transition);
 }
 
 .home-complete-box:hover {
-  background-color: #f8faff;
-  border-color: #c7d2fe;
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(16, 185, 129, 0.14);
 }
 
 .home-complete-box:active {
   transform: scale(0.99);
 }
 
-/* 완료 시간 텍스트 스타일 */
 .home-complete-text {
   margin: 0;
   font-size: 14px;
-  color: #3730a3;
-  font-weight: 700;
+  color: #047857;
+  font-weight: 950;
 }
 
-/* 상세 루틴 인증 내용 텍스트 스타일 */
 .home-proof-text {
   margin: 8px 0 0;
   font-size: 14px;
-  color: #4b5563;
-  line-height: 1.5;
+  color: #374151;
+  line-height: 1.55;
 }
 
-/* 완료된 버튼의 비활성화 느낌을 주는 스타일 */
 .completed-btn {
-  background-color: #a5b4fc;
+  background: #a5b4fc;
   cursor: default;
 }
 
-/* 상세 루틴 인증 입력창과 버튼을 세로로 묶는 영역 */
+/* ===============================
+   6. 상세 루틴 인증 / 파일 업로드
+================================ */
 .proof-box {
-  margin-top: 12px;
+  width: 100%;
+  margin-top: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-/* 상세 루틴 인증 글을 입력하는 textarea 스타일 */
 .proof-box textarea {
   width: 100%;
-  min-height: 100px;
+  min-height: 110px;
   padding: 14px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
+  border-radius: 18px;
   font-size: 14px;
   resize: vertical;
-  outline: none;
 }
 
-/* 상세 루틴 인증 textarea를 클릭했을 때 테두리 색 변경 */
-.proof-box textarea:focus {
-  border-color: #4f46e5;
-}
-
-/* ===== 상세 루틴 인증 (사진/영상 업로드 UI) ===== */
-
-/* 파일 업로드 버튼처럼 보이게 하는 라벨 */
 .proof-file-label {
   display: inline-flex;
-  /* 내부 텍스트 중앙 정렬 */
   align-items: center;
   justify-content: center;
-
   width: fit-content;
-  /* 내용 크기만큼만 */
   padding: 12px 16px;
-  /* 버튼 크기 */
-
-  background-color: #eef2ff;
-  /* 연보라 배경 */
-  color: #4338ca;
-  /* 보라 글씨 */
-
-  border-radius: 10px;
-  /* 둥근 버튼 */
+  background: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  border-radius: 14px;
   font-size: 14px;
-  font-weight: 600;
-
+  font-weight: 900;
   cursor: pointer;
-  /* 마우스 올리면 클릭 느낌 */
+  transition: var(--transition);
 }
 
-/* 실제 input[type="file"]는 숨김 (라벨 클릭으로 동작) */
+.proof-file-label:hover {
+  background: #ede9fe;
+  transform: translateY(-1px);
+}
+
 .proof-file-label input {
   display: none;
 }
 
-/* 업로드한 파일 미리보기 전체 영역 */
 .proof-preview-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
 }
 
-/* 미리보기 하나 (사진/영상 박스) */
 .proof-preview-item {
-  width: 120px;
-  height: 120px;
-
-  border-radius: 12px;
+  width: 116px;
+  height: 116px;
+  border-radius: 18px;
   overflow: hidden;
-
-  border: 1px solid #dbe4ff;
-  background-color: #f8fafc;
+  border: 1px solid rgba(229, 231, 235, 0.92);
+  background: #f8fafc;
+  box-shadow: var(--shadow-sm);
 }
 
-/* 이미지 / 영상 공통 스타일 */
 .proof-preview-media {
   width: 100%;
   height: 100%;
-
   object-fit: cover;
-  /* 비율 유지하면서 꽉 채우기 */
   display: block;
 }
 
-/* 완료된 후 보여지는 미리보기 (위쪽 여백 추가) */
 .completed-proof-preview-list {
   margin-top: 12px;
 }
 
-/* 이미지/영상이 아닌 파일일 경우 파일 이름 표시 */
 .proof-file-name {
   padding: 12px;
   font-size: 13px;
   color: #4b5563;
-
   word-break: break-all;
-  /* 긴 파일명 줄바꿈 */
 }
 
-/*ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+.proof-save-btn {
+  padding: 13px 16px;
+}
 
-/*여기부터 로그인 페이지 css----------------------------*/
-.login-page {
+/* ===============================
+  7. 로그인 / 회원가입
+================================ */
+.login-page,
+.signup-container {
+  min-height: calc(100vh - 40px);
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 70vh;
+  padding: 28px;
+  position: relative;
+  overflow: hidden;
+}
+
+.login-page::before,
+.signup-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 22% 20%, rgba(255, 255, 255, 0.36), transparent 26%),
+    radial-gradient(circle at 76% 15%, rgba(236, 72, 153, 0.22), transparent 28%),
+    var(--gradient-main);
+  z-index: -2;
+}
+
+.login-page::after,
+.signup-container::after {
+  content: "";
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  border-radius: 999px;
+  right: -170px;
+  bottom: -220px;
+  background: rgba(255, 255, 255, 0.18);
+  filter: blur(2px);
+  z-index: -1;
+}
+
+.login-card,
+.signup-box {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 32px;
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px);
 }
 
 .login-card {
-  width: 100%;
-  max-width: 420px;
-  background-color: #ffffff;
-  border-radius: 20px;
-  padding: 40px 32px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+  max-width: 450px;
+  padding: 44px 36px;
 }
 
-.login-title {
+.signup-box {
+  width: 680px;
+  max-width: 100%;
+  padding: 42px 38px;
+}
+
+.login-title,
+.signup-title {
   margin: 0 0 10px;
-  font-size: 32px;
-  color: #111827;
+  font-size: 36px;
+  font-weight: 950;
+  color: var(--text-main);
   text-align: center;
+}
+
+.login-title::after,
+.signup-title::after {
+  content: "";
+  display: block;
+  width: 54px;
+  height: 5px;
+  margin: 14px auto 0;
+  border-radius: 999px;
+  background: var(--gradient-main);
 }
 
 .login-subtitle {
-  margin: 0 0 30px;
+  margin: 0 0 32px;
   text-align: center;
-  color: #6b7280;
-  font-size: 16px;
+  color: var(--text-sub);
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .login-form {
@@ -452,87 +696,51 @@ button {
   gap: 14px;
 }
 
-.login-form input {
-  padding: 14px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
+.login-form input,
+.signup-form input,
+.signup-form select,
+.gender-select,
+.birth-row select {
+  padding: 15px 16px;
   font-size: 15px;
-  outline: none;
-  background-color: #ffffff;
-  color: #111827;
-}
-
-.login-form input:focus {
-  border-color: #4f46e5;
 }
 
 .login-form button {
-  background-color: #4f46e5;
-  color: white;
-  border: none;
-  padding: 14px 16px;
-  border-radius: 12px;
+  margin-top: 8px;
+  padding: 15px 16px;
   font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.login-form button:hover {
-  background-color: #4338ca;
 }
 
 .login-footer {
-  margin-top: 20px;
+  margin-top: 22px;
   text-align: center;
-  color: #6b7280;
+  color: var(--text-sub);
   font-size: 14px;
+  font-weight: 700;
 }
 
 .login-footer span {
-  color: #4f46e5;
-  font-weight: 600;
+  color: var(--primary);
+  font-weight: 950;
+  cursor: pointer;
 }
 
-/* 회원가입 페이지 css ----------------------------*/
-
-.signup-container {
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 24px;
+.login-footer span:hover {
+  text-decoration: underline;
 }
 
-/* 회원가입 제목 검은색 */
-.signup-title {
-  color: #111827;
-  text-align: center;
-}
-
-/* 회원가입 박스 */
-.signup-box {
-  width: 620px;
-  max-width: 100%;
-  background-color: #ffffff;
-  border-radius: 20px;
-  padding: 40px 32px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
-}
-
-/* 회원가입 폼 중앙 정렬 */
 .signup-form {
   align-items: center;
 }
 
-.signup-form>input,
-.signup-form>button,
-.signup-form>select,
-.signup-form>.input-with-button,
-.signup-form>.birth-row {
+.signup-form > input,
+.signup-form > button,
+.signup-form > select,
+.signup-form > .input-with-button,
+.signup-form > .birth-row {
   width: 100%;
 }
 
-/* input + 버튼 한 줄 */
 .input-with-button {
   display: flex;
   gap: 10px;
@@ -542,70 +750,26 @@ button {
   flex: 1;
 }
 
-/* 중복체크 버튼 */
 .check-btn {
   white-space: nowrap;
-  background-color: #eef2ff;
-  color: #4338ca;
-  border: 1px solid #c7d2fe;
-  padding: 0 14px;
-  border-radius: 12px;
+  background: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid rgba(124, 58, 237, 0.18);
+  padding: 0 16px;
+  border-radius: 16px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 900;
   cursor: pointer;
+  transition: var(--transition);
 }
 
 .check-btn:hover {
-  background-color: #e0e7ff;
+  background: #ede9fe;
 }
 
-/* 생년월일 한 줄 */
 .birth-row {
   display: flex;
   gap: 10px;
-}
-
-.birth-row select {
-  flex: 1;
-  padding: 14px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  font-size: 15px;
-  outline: none;
-  background-color: #ffffff;
-  color: #111827;
-}
-
-/* 성별 셀렉트 */
-.gender-select {
-  width: 100%;
-  padding: 14px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  font-size: 15px;
-  outline: none;
-  background-color: #ffffff;
-  color: #111827;
-}
-
-/* 기본 input 스타일 */
-.signup-form input {
-  width: 100%;
-}
-
-/* footer 중앙 정렬 */
-.login-footer {
-  text-align: center;
-}
-
-.login-footer span {
-  color: #4f46e5;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.login-footer span:hover {
-  text-decoration: underline;
 }
 
 .form-group {
@@ -616,17 +780,11 @@ button {
   display: block;
   margin-bottom: 8px;
   font-size: 14px;
-  font-weight: 600;
-  color: #111827;
+  font-weight: 900;
+  color: var(--text-main);
   text-align: left;
 }
 
-/* 각 입력 영역을 묶는 래퍼 */
-.form-group {
-  width: 100%;
-}
-
-/* 라벨과 에러/성공 문구를 한 줄에 정렬 */
 .signup-label-row {
   display: flex;
   justify-content: space-between;
@@ -634,128 +792,123 @@ button {
   gap: 12px;
 }
 
-/* 에러 문구 스타일 */
 .signup-error {
   font-size: 12px;
-  font-weight: 600;
-  color: #dc2626;
+  font-weight: 900;
+  color: var(--danger);
   text-align: right;
 }
 
-/* 성공 문구 스타일 */
 .signup-success {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 900;
   color: #059669;
   text-align: right;
 }
 
-/* 입력 안내 문구 스타일 */
 .signup-hint {
   margin: 8px 0 0;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-sub);
   text-align: left;
 }
 
-/* 에러가 있는 input/select 빨간 테두리 */
 .input-error {
-  border-color: #ef4444 !important;
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.10) !important;
 }
 
-/* 중복체크 성공 시 버튼 스타일 */
 .check-btn-success {
-  background-color: #ecfdf5;
+  background: var(--success-light);
   color: #047857;
   border-color: #a7f3d0;
 }
 
-.routine-card-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: flex-end;
-}
-
-/*루틴 삭제 버튼*/
-.routine-delete-btn {
-  border: none;
-  background-color: #fee2e2 !important;
-  color: #dc2626 !important;
-  padding: 12px 16px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.routine-delete-btn:hover {
-  background-color: #fecaca;
-}
-
-/*여기까지 로그인 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
-/*루틴 페이지 cssㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
+/* ===============================
+  8. 루틴 관리 페이지
+================================ */
 .routine-page {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 24px;
+}
+
+.routine-header,
+.feed-header,
+.mypage-profile,
+.mypage-history {
+  background: var(--gradient-card);
+  border: 1px solid rgba(255, 255, 255, 0.86);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
 }
 
 .routine-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #ffffff;
   padding: 30px;
-  border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  position: relative;
 }
 
-.routine-title {
+.routine-header::after,
+.feed-header::after {
+  content: "";
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  right: -110px;
+  top: -120px;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.16), transparent 65%);
+  pointer-events: none;
+}
+
+.routine-title,
+.feed-title {
   margin: 0 0 8px;
   font-size: 30px;
-  color: #111827;
+  font-weight: 950;
+  color: var(--text-main);
 }
 
-.routine-subtitle {
+.routine-subtitle,
+.feed-subtitle {
   margin: 0;
-  color: #6b7280;
-  font-size: 16px;
+  color: var(--text-sub);
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .routine-add-btn {
-  border: none;
-  background-color: #4f46e5;
-  color: white;
-  padding: 12px 18px;
-  border-radius: 12px;
+  padding: 13px 18px;
   font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
-.routine-add-btn:hover {
-  background-color: #4338ca;
-}
-
-/* 루틴 목록: 한 줄씩 세로 배치 */
 .routine-list {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
-
-/* 루틴 카드: 홈페이지처럼 가로형 */
 .routine-card {
   display: flex;
   justify-content: space-between;
   align-items: stretch;
   gap: 24px;
-  background-color: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  padding: 22px 24px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(229, 231, 235, 0.82);
+  border-radius: 24px;
+  padding: 22px;
   text-align: left;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+
+.routine-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: rgba(124, 58, 237, 0.22);
 }
 
 .routine-card-left {
@@ -771,109 +924,73 @@ button {
   flex-shrink: 0;
 }
 
-.routine-card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
 .routine-card h3 {
-  margin: 0;
-  font-size: 24px;
-  color: #111827;
-  word-break: keep-all;
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 950;
+  color: var(--text-main);
 }
 
 .routine-card p {
-  margin: 12px 0 0 0;
-  font-size: 15px;
-  color: #6b7280;
-  line-height: 1.5;
-}
-
-.routine-card button {
-  margin-top: 18px;
-  align-self: flex-start;
-  border: none;
-  background-color: #4f46e5;
-  color: white;
-  padding: 12px 18px;
-  border-radius: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.routine-badge {
-  background-color: #eef2ff;
-  color: #4338ca;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.routine-card-type {
-  margin: 0 0 8px;
-  color: #4f46e5;
+  margin: 0 0 10px;
+  color: var(--text-sub);
+  line-height: 1.55;
   font-size: 14px;
-  font-weight: 600;
 }
 
-.routine-card-desc {
-  margin: 0 0 14px;
-  color: #6b7280;
-  line-height: 1.5;
-}
-
-.routine-card-meta {
+.routine-card-tags,
+.routine-meta,
+.routine-card-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.routine-card-meta span {
-  background-color: #eef2ff;
-  color: #4338ca;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 10px;
+.routine-card-actions {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.routine-card-tags span,
+.routine-meta span {
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 7px 11px;
   border-radius: 999px;
 }
 
-
-.routine-check-btn,
-.routine-detail-btn,
-.proof-save-btn {
+.routine-delete-btn {
   border: none;
-  background-color: #4f46e5;
-  color: white;
+  background: var(--danger-light) !important;
+  color: #dc2626 !important;
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: 14px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 900;
+  transition: var(--transition);
 }
 
-
-.routine-check-btn:hover,
-.routine-detail-btn:hover,
-.proof-save-btn:hover {
-  background-color: #4338ca;
+.routine-delete-btn:hover {
+  background: #fee2e2 !important;
+  transform: translateY(-1px);
 }
 
+/* 루틴 추가 폼 */
 .routine-form-box {
-  background-color: #ffffff;
+  background: rgba(255, 255, 255, 0.94);
   padding: 28px;
-  border-radius: 20px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(229, 231, 235, 0.82);
+  box-shadow: var(--shadow-md);
 }
 
 .routine-form-box h2 {
-  margin: 0 0 20px;
+  margin: 0 0 18px;
   font-size: 24px;
-  color: #111827;
+  font-weight: 950;
+  color: var(--text-main);
 }
 
 .routine-form {
@@ -885,13 +1002,9 @@ button {
 .routine-form input,
 .routine-form select,
 .routine-form textarea {
-  width: 100%;
-  padding: 14px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
+  padding: 15px 16px;
+  border-radius: 16px;
   font-size: 15px;
-  font-family: inherit;
-  outline: none;
 }
 
 .routine-form textarea {
@@ -899,29 +1012,11 @@ button {
   resize: none;
 }
 
-.routine-form input:focus,
-.routine-form select:focus,
-.routine-form textarea:focus {
-  border-color: #4f46e5;
-}
-
-/*루틴 저장버튼*/
 .routine-save-btn {
-  border: none;
-  background-color: #4f46e5;
-  color: white;
-  padding: 14px 16px;
-  border-radius: 12px;
+  padding: 15px 16px;
   font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
-.routine-save-btn:hover {
-  background-color: #4338ca;
-}
-
-/*반복 주기 선택*/
 .repeat-select-box {
   width: 100%;
   text-align: left;
@@ -930,8 +1025,8 @@ button {
 .repeat-select-label {
   margin: 0 0 10px;
   font-size: 14px;
-  font-weight: 600;
-  color: #111827;
+  font-weight: 900;
+  color: var(--text-main);
 }
 
 .repeat-day-list {
@@ -942,281 +1037,246 @@ button {
 
 .repeat-day-btn {
   border: none;
-  background-color: #eef2ff;
-  color: #4338ca;
+  background: var(--primary-light);
+  color: var(--primary);
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: 14px;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 900;
+  transition: var(--transition);
 }
 
 .repeat-day-btn:hover {
-  background-color: #dbe4ff;
+  background: #ede9fe;
+  transform: translateY(-1px);
 }
 
 .active-repeat-day {
-  background-color: #4f46e5;
-  color: white;
+  background: var(--gradient-main) !important;
+  color: white !important;
+  box-shadow: 0 12px 22px rgba(99, 102, 241, 0.22);
 }
 
-/*반복 주기 선택 코드 위 여기까지*/
-
-/*여기까지 루틴 페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
-/*피드 페이지 css----------------------------*/
-/*피드 페이지 css----------------------------*/
-.insta-feed-page {
+/* ===============================
+  9. 피드 페이지
+================================ */
+.feed-page {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 24px;
 }
 
-
 .feed-header {
-  width: 100%;
-  max-width: 720px;
-  background-color: #ffffff;
+  position: relative;
+  overflow: hidden;
   padding: 30px;
-  border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
-}
-
-.feed-title {
-  margin: 0 0 8px;
-  font-size: 30px;
-  color: #111827;
-}
-
-.feed-subtitle {
-  margin: 0;
-  color: #6b7280;
-  font-size: 16px;
 }
 
 .feed-empty-card {
-  width: 100%;
-  max-width: 720px;
-  background-color: #ffffff;
-  border-radius: 20px;
-  padding: 40px 24px;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: var(--radius-xl);
+  padding: 54px 28px;
   text-align: center;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  border: 1px dashed rgba(124, 58, 237, 0.25);
+  box-shadow: var(--shadow-sm);
 }
 
 .feed-empty-title {
   margin: 0 0 10px;
-  font-size: 20px;
-  font-weight: 700;
-  color: #111827;
+  font-size: 22px;
+  font-weight: 950;
+  color: var(--text-main);
 }
 
 .feed-empty-text {
   margin: 0;
-  color: #6b7280;
+  color: var(--text-sub);
   line-height: 1.6;
+  font-weight: 700;
 }
 
-.insta-feed-list {
+.instagram-feed-page {
+  align-items: center;
+}
+
+.instagram-feed-page .feed-header {
   width: 100%;
-  max-width: 720px;
+}
+
+.instagram-feed-list {
+  width: min(560px, 100%);
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
 
-.insta-feed-card {
+.instagram-feed-card {
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 30px;
   overflow: hidden;
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 22px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(229, 231, 235, 0.82);
+  box-shadow: var(--shadow-md);
+  transition: var(--transition);
 }
 
-.insta-feed-topline {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 18px 20px 12px;
-  flex-wrap: wrap;
+.instagram-feed-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.12);
 }
 
-.insta-feed-mainline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex-wrap: wrap;
+.instagram-feed-top {
+  padding: 22px 22px 16px;
 }
 
-.insta-feed-nickname {
-  font-size: 15px;
+.instagram-feed-routine-title {
+  margin: 0 0 8px;
+  font-size: 21px;
+  font-weight: 950;
+  color: var(--text-main);
+}
+
+.instagram-feed-routine-description {
+  margin: 0 0 14px;
+  color: var(--text-sub);
+  line-height: 1.55;
+  font-size: 14px;
   font-weight: 700;
-  color: #111827;
 }
 
-.insta-feed-divider {
-  color: #9ca3af;
+.instagram-feed-info-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.insta-feed-routine-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #374151;
-}
-
-.insta-feed-category {
-  background-color: #eef2ff;
-  color: #4338ca;
-  padding: 6px 12px;
-  border-radius: 999px;
+.instagram-feed-info-time {
   font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
+  color: var(--text-light);
+  font-weight: 800;
 }
 
-.insta-feed-proof-text {
-  margin: 0;
-  padding: 0 20px 16px;
-  text-align: left;
-  color: #111827;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.insta-feed-media-single,
-.insta-feed-media-grid {
+.instagram-feed-media-box {
   width: 100%;
-  background-color: #000;
+  background: #111827;
 }
 
-.insta-feed-media-single {
-  display: block;
-}
-
-.insta-feed-media-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 2px;
-}
-
-.insta-feed-media-item {
-  background-color: #000;
-  min-height: 240px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.insta-feed-media {
+.instagram-feed-media {
   width: 100%;
-  height: 100%;
   max-height: 520px;
   object-fit: cover;
   display: block;
-  background-color: #000;
 }
 
-.insta-feed-action-row {
+.instagram-feed-body {
+  padding: 18px 22px 24px;
+}
+
+.instagram-feed-caption {
+  margin: 0;
+  color: #374151;
+  line-height: 1.65;
+  font-weight: 750;
+}
+
+.instagram-feed-author {
+  font-size: 15px;
+  font-weight: 900;
+  color: var(--text-main);
+}
+
+.instagram-feed-divider {
+  color: var(--text-light);
+  font-weight: 900;
+}
+
+.instagram-feed-media-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  background: #111827;
+}
+
+.instagram-feed-media-item {
+  min-height: 220px;
+  background: #111827;
+}
+
+.instagram-feed-action-row {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 16px 20px 18px;
+  gap: 16px;
+  margin-top: 16px;
 }
 
-.insta-feed-action-btn {
+.instagram-feed-action-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   border: none;
   background: transparent;
   color: #374151;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
+  font-size: 14px;
+  font-weight: 900;
   padding: 0;
 }
 
-.insta-feed-action-btn:disabled {
-  cursor: default;
-  opacity: 1;
+.instagram-feed-action-btn:hover {
+  color: var(--primary);
 }
 
-.insta-feed-icon {
-  font-size: 22px;
-  line-height: 1;
-}
-
-.insta-like-btn.liked {
+.instagram-feed-like-btn.liked {
   color: #ef4444;
 }
 
-.insta-comment-btn {
-  color: #374151;
-}
-
-@media (max-width: 768px) {
-
-  .feed-header,
-  .feed-empty-card,
-  .insta-feed-list {
-    max-width: 100%;
-  }
-
-  .insta-feed-media-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .insta-feed-media-item {
-    min-height: 200px;
-  }
+.instagram-feed-icon {
+  font-size: 20px;
+  line-height: 1;
 }
 
 .feed-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.58);
-  backdrop-filter: blur(10px);
+  z-index: 2000;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
   padding: 32px;
+  background: rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(10px);
 }
 
 .feed-modal {
   position: relative;
-  width: min(1200px, 100%);
+  width: min(1180px, 100%);
   height: min(86vh, 820px);
-  background: #ffffff;
-  border-radius: 24px;
-  overflow: hidden;
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: 1.1fr 0.9fr;
+  overflow: hidden;
+  background: #ffffff;
+  border-radius: 28px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
 }
 
 .feed-modal-close {
   position: absolute;
   top: 16px;
-  right: 18px;
-  z-index: 5;
-  border: none;
-  background: rgba(17, 24, 39, 0.7);
-  color: #ffffff;
+  right: 16px;
+  z-index: 2;
   width: 40px;
   height: 40px;
+  border: none;
   border-radius: 999px;
+  background: rgba(17, 24, 39, 0.7);
+  color: #ffffff;
   font-size: 24px;
-  cursor: pointer;
 }
 
 .feed-modal-left {
-  background: #0f172a;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #111827;
 }
 
 .feed-modal-media {
@@ -1229,23 +1289,21 @@ button {
 .feed-modal-empty-media {
   color: #ffffff;
   font-size: 15px;
+  font-weight: 700;
 }
 
 .feed-modal-right {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: 100%;
   min-height: 0;
   background: #ffffff;
-  overflow: hidden;
 }
 
 .feed-modal-post-info {
   flex-shrink: 0;
   padding: 28px 24px 20px;
   border-bottom: 1px solid #e5e7eb;
-  background: #ffffff;
 }
 
 .feed-modal-meta-row {
@@ -1257,26 +1315,26 @@ button {
 }
 
 .feed-modal-nickname {
-  font-weight: 700;
-  color: #111827;
+  font-weight: 900;
+  color: var(--text-main);
 }
 
 .feed-modal-divider {
-  color: #9ca3af;
+  color: var(--text-light);
 }
 
 .feed-modal-routine {
-  font-weight: 600;
+  font-weight: 800;
   color: #374151;
 }
 
 .feed-modal-category {
-  background-color: #eef2ff;
-  color: #4338ca;
+  background: var(--primary-light);
+  color: var(--primary);
   padding: 6px 12px;
   border-radius: 999px;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .feed-modal-proof-text {
@@ -1289,8 +1347,9 @@ button {
 
 .feed-modal-time {
   margin: 0;
-  color: #9ca3af;
-  font-size: 13px;
+  color: var(--text-light);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .feed-modal-comments {
@@ -1305,7 +1364,8 @@ button {
 
 .feed-modal-empty-comment {
   margin: 0;
-  color: #6b7280;
+  color: var(--text-sub);
+  font-weight: 700;
 }
 
 .feed-modal-comment-item {
@@ -1324,17 +1384,15 @@ button {
   margin: 0;
   flex: 1;
   min-width: 0;
-  line-height: 1.6;
   color: #374151;
-  text-align: left;
+  line-height: 1.6;
   word-break: break-word;
-  overflow-wrap: anywhere;
 }
 
 .feed-modal-comment-name {
   font-size: 14px;
-  font-weight: 700;
-  color: #111827;
+  font-weight: 900;
+  color: var(--text-main);
 }
 
 .feed-modal-comment-text {
@@ -1342,36 +1400,32 @@ button {
   color: #374151;
 }
 
-
-
 .feed-modal-comment-delete {
   border: none;
   background: transparent;
-  color: #9ca3af;
+  color: var(--text-light);
   font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
+  font-weight: 800;
   padding: 0;
-  flex-shrink: 0;
 }
 
 .feed-modal-comment-delete:hover {
-  color: #dc2626;
+  color: var(--danger);
 }
 
 .feed-modal-comment-time {
   margin: 6px 0 0;
+  color: var(--text-light);
   font-size: 12px;
-  color: #9ca3af;
 }
 
 .feed-modal-bottom {
   flex-shrink: 0;
-  border-top: 1px solid #e5e7eb;
-  padding: 16px 24px 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding: 16px 24px 20px;
+  border-top: 1px solid #e5e7eb;
   background: #ffffff;
 }
 
@@ -1382,32 +1436,255 @@ button {
 
 .feed-modal-comment-form input {
   flex: 1;
-  border: 1px solid #d1d5db;
-  border-radius: 999px;
   padding: 12px 16px;
-  font-size: 14px;
-  outline: none;
-}
-
-.feed-modal-comment-form input:focus {
-  border-color: #4f46e5;
+  border-radius: 999px;
 }
 
 .feed-modal-comment-form button {
   border: none;
-  background: #4f46e5;
-  color: #ffffff;
   border-radius: 999px;
   padding: 12px 18px;
-  font-weight: 700;
-  cursor: pointer;
+  background: var(--gradient-main);
+  color: #ffffff;
+  font-weight: 900;
 }
 
-.feed-modal-comment-form button:hover {
-  background: #4338ca;
+/* ===============================
+  10. 마이페이지
+  ※ MyPage.jsx에 inline style이 많아서 CSS가 일부만 적용됨
+================================ */
+.mypage {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
-@media (max-width: 1024px) {
+.mypage-profile {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 30px;
+}
+
+.profile-avatar {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: var(--gradient-main);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 950;
+  box-shadow: 0 14px 25px rgba(99, 102, 241, 0.22);
+}
+
+.profile-info h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  color: var(--text-main);
+  font-weight: 950;
+}
+
+.profile-info p {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.mypage-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.94);
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid rgba(229, 231, 235, 0.78);
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.stat-card h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: var(--text-sub);
+  font-weight: 900;
+}
+
+.stat-card p {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 950;
+  color: var(--text-main);
+}
+
+.mypage-history {
+  padding: 28px;
+}
+
+.mypage-history h2 {
+  margin: 0 0 20px;
+  font-size: 22px;
+  font-weight: 950;
+  color: var(--text-main);
+}
+
+/* ===============================
+  11. 통계 페이지 보정
+  ※ StatsPage.jsx도 inline style이 많아서 전역 느낌만 맞춤
+================================ */
+[style*="상세 분석 리포트"] {
+  letter-spacing: -0.035em;
+}
+
+/* ===============================
+  12. 반응형
+================================ */
+@media (max-width: 860px) {
+  .topbar {
+    width: calc(100% - 20px);
+    padding: 12px 14px;
+    border-radius: 24px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .nav {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .nav button {
+    text-align: center;
+    padding: 10px 8px;
+  }
+
+  .page-container {
+    width: calc(100% - 20px);
+    margin-top: 22px;
+  }
+
+  .week {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .day {
+    min-height: 58px;
+    padding: 8px 4px;
+    border-radius: 14px;
+  }
+
+  .routine-content,
+  .routine-header,
+  .feed-header,
+  .routine-form-box {
+    padding: 22px;
+    border-radius: 24px;
+  }
+
+  .home-routine-card,
+  .routine-card {
+    flex-direction: column;
+  }
+
+  .home-routine-card-right,
+  .routine-card-right {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .routine-check-btn,
+  .home-action-btn,
+  .home-complete-box {
+    width: 100%;
+  }
+
+  .routine-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 18px;
+  }
+
+  .routine-add-btn {
+    width: 100%;
+  }
+
+  .mypage-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .login-card,
+  .signup-box {
+    padding: 34px 24px;
+    border-radius: 26px;
+  }
+
+  .login-title,
+  .signup-title {
+    font-size: 30px;
+  }
+
+  .input-with-button,
+  .birth-row {
+    flex-direction: column;
+  }
+
+  .check-btn {
+    padding: 13px 16px;
+  }
+}
+
+@media (max-width: 520px) {
+  .nav {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .time-tabs {
+    border-radius: 22px;
+  }
+
+  .time-tabs button {
+    padding: 12px 8px;
+    font-size: 14px;
+  }
+
+  .home-section-title,
+  .routine-title,
+  .feed-title {
+    font-size: 24px;
+  }
+
+  .home-section-time {
+    display: flex;
+    width: fit-content;
+    margin: 8px 0 0;
+  }
+
+  .instagram-feed-list {
+    width: 100%;
+  }
+
+  .instagram-feed-card {
+    border-radius: 24px;
+  }
+
+  .instagram-feed-media-grid {
+    grid-template-columns: 1fr;
+  }
+
   .feed-modal {
     grid-template-columns: 1fr;
     height: auto;
@@ -1422,120 +1699,3 @@ button {
     max-height: 50vh;
   }
 }
-
-/*여기까지 피드 페이지----------------------------*/
-
-/*마이 페이지 cssㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
-.mypage {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.mypage-profile {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  background-color: #ffffff;
-  padding: 28px 30px;
-  border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
-}
-
-.profile-avatar {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background-color: #4f46e5;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.profile-info h1 {
-  margin: 0 0 8px;
-  font-size: 28px;
-  color: #111827;
-}
-
-.profile-info p {
-  margin: 0;
-  color: #6b7280;
-  font-size: 16px;
-}
-
-.mypage-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-
-.stat-card {
-  background-color: #ffffff;
-  padding: 24px;
-  border-radius: 18px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-}
-
-.stat-card h3 {
-  margin: 0 0 12px;
-  font-size: 17px;
-  color: #6b7280;
-}
-
-.stat-card p {
-  margin: 0;
-  font-size: 30px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.mypage-history {
-  background-color: #ffffff;
-  padding: 28px;
-  border-radius: 20px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-}
-
-.mypage-history h2 {
-  margin: 0 0 20px;
-  font-size: 24px;
-  color: #111827;
-}
-
-.history-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 20px;
-  padding: 18px 0;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.history-item:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.history-item h4 {
-  margin: 0 0 8px;
-  font-size: 18px;
-  color: #111827;
-}
-
-.history-item p {
-  margin: 0;
-  color: #6b7280;
-  line-height: 1.6;
-}
-
-.history-item span {
-  color: #9ca3af;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
-/*여기까지 마이페이지ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ*/
