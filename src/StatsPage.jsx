@@ -1,23 +1,15 @@
 import React, { useState } from "react";
 
 function StatsPage({ setPage }) {
-  const [viewMode, setViewMode] = useState("weekly"); // 주간 / 월간
+  const [viewMode, setViewMode] = useState("weekly"); 
   const [timeSlot, setTimeSlot] = useState("morning");
   const [showPicker, setShowPicker] = useState(false);
 
-  // --- 주간/월간 상태 분리 ---
-  const [weeklyRange, setWeeklyRange] = useState({
-    start: new Date(2026, 3, 27), 
-    end: new Date(2026, 4, 3),    
-  });
-  const [monthlyRange, setMonthlyRange] = useState({
-    start: new Date(2026, 4, 1),
-    end: new Date(2026, 4, 31),
-  });
-  
+  // --- 날짜 및 데이터 상태 (기존 동일) ---
+  const [weeklyRange, setWeeklyRange] = useState({ start: new Date(2026, 3, 27), end: new Date(2026, 4, 3) });
+  const [monthlyRange, setMonthlyRange] = useState({ start: new Date(2026, 4, 1), end: new Date(2026, 4, 31) });
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  // 데이터 샘플 (모드별 분리)
   const weeklyData = { total: 82, chart: [{ label: "월", rate: 75 }, { label: "화", rate: 80 }, { label: "수", rate: 60 }, { label: "목", rate: 90 }, { label: "금", rate: 95 }, { label: "토", rate: 70 }, { label: "일", rate: 85 }] };
   const monthlyData = { total: 74, chart: [{ label: "1주", rate: 85 }, { label: "2주", rate: 60 }, { label: "3주", rate: 92 }, { label: "4주", rate: 78 }, { label: "5주", rate: 55 }] };
 
@@ -33,7 +25,6 @@ function StatsPage({ setPage }) {
     { name: "식사", rate: 72, color: "#f87171" }
   ];
 
-  // --- 날짜 클릭 핸들러 (주간 7일 고정 로직) ---
   const handleDateClick = (date) => {
     if (viewMode === "weekly") {
       const endDate = new Date(date);
@@ -48,6 +39,12 @@ function StatsPage({ setPage }) {
     }
   };
 
+  // --- 공통 호버 효과 스타일 생성 함수 ---
+  const hoverEffect = {
+    transition: "all 0.2s ease",
+    cursor: "pointer"
+  };
+
   const getDayStyle = (date) => {
     const range = viewMode === "weekly" ? weeklyRange : monthlyRange;
     const isStart = range.start && date.getTime() === range.start.getTime();
@@ -55,9 +52,10 @@ function StatsPage({ setPage }) {
     const isInRange = range.start && range.end && date > range.start && date < range.end;
 
     return {
-      width: '14.28%', padding: '10px 0', textAlign: 'center', cursor: 'pointer', fontSize: '13px', borderRadius: '8px',
+      width: '14.28%', padding: '10px 0', textAlign: 'center', fontSize: '13px', borderRadius: '8px',
       backgroundColor: (isStart || isEnd) ? '#4f46e5' : isInRange ? '#eef2ff' : 'transparent',
-      color: (isStart || isEnd) ? '#fff' : '#374151'
+      color: (isStart || isEnd) ? '#fff' : '#374151',
+      ...hoverEffect // 달력 날짜에 포인터 추가
     };
   };
 
@@ -66,19 +64,25 @@ function StatsPage({ setPage }) {
       {/* 1. 상단 헤더 */}
       <div style={{ padding: "20px", background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #f3f4f6" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-          <button onClick={() => setPage("mypage")} style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer" }}>←</button>
+          <button 
+            onClick={() => setPage("mypage")} 
+            className="hover-btn"
+            style={{ background: "none", border: "none", fontSize: "20px", ...hoverEffect }}>←</button>
           <h1 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>상세 분석 리포트</h1>
         </div>
-        <button onClick={() => setShowPicker(!showPicker)} style={{ background: "#f3f4f6", border: "none", padding: "8px 12px", borderRadius: "10px", fontSize: "18px", cursor: "pointer" }}>📅</button>
+        <button 
+            onClick={() => setShowPicker(!showPicker)} 
+            className="hover-btn"
+            style={{ background: "#f3f4f6", border: "none", padding: "8px 12px", borderRadius: "10px", fontSize: "18px", ...hoverEffect }}>📅</button>
       </div>
 
       {/* 달력 팝업 */}
       {showPicker && (
         <div style={{ position: "absolute", top: "70px", right: "20px", width: "300px", background: "#fff", borderRadius: "20px", boxShadow: "0 10px 30px rgba(0,0,0,0.15)", zIndex: 100, padding: "20px", border: "1px solid #eee" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
-            <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} style={{border:'none', background:'none'}}>◀</button>
+            <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} style={{border:'none', background:'none', ...hoverEffect}}>◀</button>
             <span style={{ fontWeight: "bold" }}>{currentMonth.getFullYear()}년 {currentMonth.getMonth() + 1}월</span>
-            <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} style={{border:'none', background:'none'}}>▶</button>
+            <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} style={{border:'none', background:'none', ...hoverEffect}}>▶</button>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", marginBottom: "10px" }}>
             {['일','월','화','수','목','금','토'].map(d => <div key={d} style={{width:'14.28%', textAlign:'center', fontSize:'11px', color:'#9ca3af'}}>{d}</div>)}
@@ -86,28 +90,34 @@ function StatsPage({ setPage }) {
           <div style={{ display: "flex", flexWrap: "wrap" }}>
             {Array.from({ length: new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate() }).map((_, i) => {
               const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i + 1);
-              if (i === 0) {
-                const startDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
-                return (
-                  <React.Fragment key="first">
-                    {Array.from({ length: startDay }).map((_, j) => <div key={`e-${j}`} style={{ width: '14.28%' }}></div>)}
-                    <div onClick={() => handleDateClick(date)} style={getDayStyle(date)}>{i + 1}</div>
-                  </React.Fragment>
-                );
-              }
-              return <div key={i + 1} onClick={() => handleDateClick(date)} style={getDayStyle(date)}>{i + 1}</div>;
+              return <div key={i + 1} onClick={() => handleDateClick(date)} style={getDayStyle(date)} className="calendar-day">{i + 1}</div>;
             })}
           </div>
         </div>
       )}
 
-      {/* 2. 주간/월간 탭 */}
+      {/* 2. 주간/월간 탭 - 호버 시 배경색이 살짝 변하는 클래스 적용 */}
       <div style={{ display: "flex", background: "#fff", padding: "10px 20px", gap: "10px", borderBottom: "1px solid #f3f4f6" }}>
-        <button onClick={() => setViewMode("weekly")} style={{ flex: 1, padding: "12px", borderRadius: "12px", border: "none", background: viewMode === "weekly" ? "#4f46e5" : "#f3f4f6", color: viewMode === "weekly" ? "#fff" : "#9ca3af", fontWeight: "bold" }}>주간 통계</button>
-        <button onClick={() => setViewMode("monthly")} style={{ flex: 1, padding: "12px", borderRadius: "12px", border: "none", background: viewMode === "monthly" ? "#4f46e5" : "#f3f4f6", color: viewMode === "monthly" ? "#fff" : "#9ca3af", fontWeight: "bold" }}>월간 통계</button>
+        {["weekly", "monthly"].map((mode) => (
+          <button 
+            key={mode}
+            onClick={() => setViewMode(mode)} 
+            style={{ 
+              flex: 1, padding: "12px", borderRadius: "12px", border: "none", 
+              background: viewMode === mode ? "#4f46e5" : "#f3f4f6", 
+              color: viewMode === mode ? "#fff" : "#9ca3af", 
+              fontWeight: "bold",
+              ...hoverEffect // 호버 효과 추가
+            }}
+            onMouseOver={(e) => { if(viewMode !== mode) e.target.style.background = "#e5e7eb" }}
+            onMouseOut={(e) => { if(viewMode !== mode) e.target.style.background = "#f3f4f6" }}
+          >
+            {mode === "weekly" ? "주간 통계" : "월간 통계"}
+          </button>
+        ))}
       </div>
 
-      {/* 3. 통합 달성률 섹션 (명칭 반영) */}
+      {/* 3. 통합 달성률 섹션 (기존 동일) */}
       <div style={{ padding: "25px 20px", background: "#fff", marginBottom: "10px" }}>
         <h3 style={{ fontSize: "16px", color: "#4f46e5", marginBottom: "8px", fontWeight: "800" }}>
           {viewMode === "weekly" 
@@ -127,7 +137,7 @@ function StatsPage({ setPage }) {
         </div>
       </div>
 
-      {/* 4. 요일별/주차별 분석 그래프 */}
+      {/* 4. 요일별/주차별 분석 그래프 (기존 동일) */}
       <div style={{ padding: "25px 20px", background: "#fff", marginBottom: "10px" }}>
         <h3 style={{ fontSize: "15px", color: "#374151", marginBottom: "30px", fontWeight: "700" }}>{viewMode === "weekly" ? "요일별" : "주차별"} 목표 달성률</h3>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", height: "100px" }}>
@@ -140,12 +150,24 @@ function StatsPage({ setPage }) {
         </div>
       </div>
 
-      {/* 5. 시간대별 상세 성취도 */}
+      {/* 5. 시간대별 상세 성취도 - 아침/점심/저녁 호버 효과 추가 */}
       <div style={{ padding: "25px 20px", background: "#fff", marginBottom: "10px" }}>
         <h3 style={{ fontSize: "15px", color: "#374151", marginBottom: "20px", fontWeight: "700" }}>시간대별 상세 성취도</h3>
         <div style={{ display: "flex", background: "#f3f4f6", borderRadius: "10px", padding: "4px", marginBottom: "20px" }}>
           {["morning", "lunch", "dinner"].map((slot) => (
-            <button key={slot} onClick={() => setTimeSlot(slot)} style={{ flex: 1, padding: "10px", border: "none", borderRadius: "8px", background: timeSlot === slot ? "#4f46e5" : "transparent", color: timeSlot === slot ? "#fff" : "#9ca3af", fontSize: "13px", fontWeight: "bold" }}>
+            <button 
+              key={slot} 
+              onClick={() => setTimeSlot(slot)} 
+              style={{ 
+                flex: 1, padding: "10px", border: "none", borderRadius: "8px", 
+                background: timeSlot === slot ? "#4f46e5" : "transparent", 
+                color: timeSlot === slot ? "#fff" : "#9ca3af", 
+                fontSize: "13px", fontWeight: "bold",
+                ...hoverEffect // 호버 효과 추가
+              }}
+              onMouseOver={(e) => { if(timeSlot !== slot) e.target.style.background = "#e5e7eb" }}
+              onMouseOut={(e) => { if(timeSlot !== slot) e.target.style.background = "transparent" }}
+            >
               {slot === "morning" ? "아침" : slot === "lunch" ? "점심" : "저녁"}
             </button>
           ))}
@@ -158,7 +180,7 @@ function StatsPage({ setPage }) {
         ))}
       </div>
 
-      {/* 6. 카테고리별 분석 */}
+      {/* 6. 카테고리별 분석 및 7. 성과 요약 (기존 동일) */}
       <div style={{ padding: "25px 20px", background: "#fff", marginBottom: "10px" }}>
         <h3 style={{ fontSize: "15px", color: "#374151", marginBottom: "20px", fontWeight: "700" }}>카테고리별 분석</h3>
         {categoryStats.map((cat, i) => (
@@ -169,7 +191,6 @@ function StatsPage({ setPage }) {
         ))}
       </div>
 
-      {/* 7. 성과 요약 (연속 달성률) */}
       <div style={{ margin: "10px 20px", padding: "25px", background: "linear-gradient(135deg, #4f46e5, #818cf8)", borderRadius: "20px", color: "#fff", textAlign: "center" }}>
         <span style={{ fontSize: "14px", opacity: 0.9 }}>최다 연속 갓생 달성</span>
         <div style={{ fontSize: "32px", fontWeight: "900", marginTop: "5px" }}>12일 연속 🔥</div>
