@@ -2105,6 +2105,195 @@ LIMIT %s
 
 ---
 
+## 🔧 2026-05-05 작업 내역
+
+### 1. 이번 세션 개요
+
+피드 이미지를 **로컬 디스크(`src/backend/uploads/`) → AWS S3** 로 전환. 4월 18일자 미구현 체크리스트의 마지막 인프라 항목("피드 이미지 → S3 전환 고려") 해소. Docker 화 / 글로벌 배포 사전 작업.
+
+| 항목 | 처리 결과 | 영향 파일 |
+|---|---|---|
+| S3 직접 업로드 (multer-s3) | ✅ 완료 | `src/backend/routes/feed.js` |
+| S3 객체 삭제 (DeleteObjectCommand) | ✅ 완료 | `src/backend/routes/feed.js` |
+| `/uploads` 정적 서빙 제거 | ✅ 완료 | `src/backend/app.js` |
+| 환경변수 4개 추가 | ✅ 완료 | `src/backend/.env.example` |
+| 의존성 추가 | ✅ 완료 | `src/backend/package.json` |
+| 프론트엔드 변경 | 불필요 | `getImageUrl` 이 이미 `http*` URL 통과 처리 |
+
+### 2. 변경 배경
+
+기존 구조의 한계:
+
+```
+[Before]
+A의 PC: POST /feed → src/backend/uploads/abc.jpg 에 저장 + DB file_url=/uploads/abc.jpg
+        → A 화면에선 정상 표시 (Express 정적 서빙)
+B의 PC: GET /feed → DB 의 /uploads/abc.jpg URL 받음
+        → B 의 디스크에 abc.jpg 없음 → 이미지 깨짐 (404)
+```
+
+팀원이 RDS 를 공유해도 이미지 파일이 각자 PC 에만 있어 **피드 화면이 사용자별로 다르게 보이는 문제**가 있었음. Docker 컨테이너로 옮겨도 동일 (컨테이너 디스크에만 저장되므로 본질이 같음).
+
+```
+[After]
+A의 PC: POST /feed → multer-s3 → S3 PUT → file.location 으로 퍼블릭 URL 획득
+        → DB file_url=https://my-bucket.s3.ap-northeast-2.amazonaws.com/feed/171...jpg
+B의 PC: GET /feed → DB 에서 S3 퍼블릭 URL 받음 → <img src="..."> → 정상 표시
+```
+
+S3 는 객체 스토리지 전용 서비스로, 99.999999999% 내구성 + 글로벌 CDN 연동 + 프리티어 5GB 무료. EC2 디스크에 저장하는 것보다 **싸고 빠르고 안전**.
+
+### 3. 구체 변경 사항
+
+#### 3-1. 의존성 (`src/backend/package.json`)
+
+| 패키지 | 버전 | 용도 |
+|---|---|---|
+| `@aws-sdk/client-s3` | ^3.700.0 | S3Client, DeleteObjectCommand (객체 삭제) |
+| `multer-s3` | ^3.0.1 | multer storage engine — 디스크 거치지 않고 S3 로 직접 스트림 |
+
+`multer` 본체는 그대로 유지. `multerS3` 는 `multer.diskStorage` 자리만 대체.
+
+#### 3-2. 환경변수 (`src/backend/.env`)
+
+```bash
+AWS_REGION=ap-northeast-2
+AWS_S3_BUCKET=<bucket-name>
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+```
+
+→ `.gitignore` 에 의해 git 비추적. 팀원에겐 Slack DM 등 안전 채널로 별도 전달.
+
+#### 3-3. `routes/feed.js` — multer-s3 설정
+
+```javascript
+const s3 = new S3Client({
+    region: AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
+});
+
+const upload = multer({
+    storage: multerS3({
+        s3,
+        bucket: AWS_S3_BUCKET,
+        contentType: multerS3.AUTO_CONTENT_TYPE,
+        key: (req, file, cb) => {
+            const ext = path.extname(file.originalname);
+            cb(null, `feed/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+        },
+    }),
+    limits: { fileSize: 50 * 1024 * 1024 },
+    fileFilter: /* image/* 또는 video/* 만 허용 */,
+});
+```
+
+키 규칙: `feed/<timestamp>-<랜덤>.<확장자>` — `feed/` prefix 로 다른 용도(향후 프로필 사진 등) 객체와 분리.
+
+#### 3-4. `routes/feed.js` — 업로드 분기 (POST /feed)
+
+| 변경 전 | 변경 후 |
+|---|---|
+| 파일을 `req.files[i].path` 로 디스크 저장 | `req.files[i].location` (S3 URL), `req.files[i].key` 사용 |
+| `file_url = "/uploads/" + filename` | `file_url = file.location` (S3 퍼블릭 URL 그대로) |
+| 실패 시 `fs.unlink(file.path)` | 실패 시 `s3.send(new DeleteObjectCommand(...))` |
+| `cleanupFiles()` 헬퍼 | `cleanupS3Objects()` 헬퍼 |
+
+검증 실패 / FastAPI 실패 / throw 모든 분기에서 `cleanupS3Objects()` 호출 — 고아 객체(DB 레코드 없는 S3 파일) 누적 방지 정책은 4/29 와 동일.
+
+#### 3-5. `routes/feed.js` — 삭제 분기 (DELETE /feed/:feed_id)
+
+| 변경 전 | 변경 후 |
+|---|---|
+| `fileUrls` 에서 `path.basename()` 으로 파일명 추출 | `extractS3Key(url)` 로 S3 키 추출 |
+| `fs.unlink(path.join(UPLOAD_DIR, filename))` | `s3.send(new DeleteObjectCommand({ Bucket, Key }))` |
+
+`extractS3Key()` 는 호스트네임이 `*.amazonaws.com` 인지 검증 후 `pathname` 을 키로 변환. 비-S3 URL 이거나 형식이 맞지 않으면 `null` 반환 → 삭제 대상에서 제외 (보안).
+
+선조회 → DB 삭제 성공 시에만 S3 삭제 정책은 동일.
+
+#### 3-6. `app.js` — 정적 서빙 제거
+
+```diff
+- app.use("/uploads", express.static(path.join(__dirname, "uploads")));
++ // [제거 2026-05-05] /uploads 정적 서빙 — 피드 이미지를 S3 로 이전.
+```
+
+`path` import 도 더 이상 사용처 없어 제거.
+
+### 4. 프론트엔드 변경 불필요
+
+`src/frontend/FeedPage.jsx` 의 `getImageUrl()`:
+
+```javascript
+const getImageUrl = (fileUrl) => {
+    if (!fileUrl) return "";
+    if (fileUrl.startsWith("http")) return fileUrl;   // ← S3 URL 은 여기서 통과
+    return `${EXPRESS_URL}${fileUrl}`;                 // ← 옛날 /uploads/ 형태
+};
+```
+
+기존 코드가 이미 S3 퍼블릭 URL(절대 URL)을 그대로 통과시키므로 화면 코드 수정 불필요. 프론트는 DB 가 주는 URL 을 그냥 `<img src=>` 에 넣으면 된다.
+
+### 5. 기존 데이터 마이그레이션
+
+캡스톤 개발 단계 데이터라 **마이그레이션 미실시**:
+
+- 기존 `src/backend/uploads/` 의 파일들은 그대로 남아있지만 더 이상 서빙되지 않음
+- 기존 DB `feed_images.file_url` 의 `/uploads/...` 값은 화면에서 깨짐 (예상)
+- 깨끗한 시작 권장: 기존 피드를 모두 삭제 후 새로 업로드 테스트
+
+운영 환경 전환 시 필요한 마이그레이션 스크립트 (현재는 미작성):
+
+```sql
+-- 옛날 로컬 URL 만 가진 행 식별
+SELECT image_id, file_url FROM feed_images WHERE file_url LIKE '/uploads/%';
+```
+
+→ 이 행들의 파일을 `aws s3 cp src/backend/uploads/ s3://<bucket>/feed/ --recursive` 로 일괄 업로드 후 `UPDATE feed_images SET file_url = ...` 일괄 갱신.
+
+### 6. AWS 사전 셋업 (수동, 1회)
+
+1. **S3 버킷 생성** (서울 리전 `ap-northeast-2`, 퍼블릭 액세스 부분 차단 해제)
+2. **버킷 정책** — `s3:GetObject` 퍼블릭 허용 (이미지 공개 읽기)
+3. **CORS 설정** — `localhost:5173`, `localhost:3000` 허용
+4. **IAM 사용자** `routine-mate-s3-uploader` 생성, `s3:PutObject` + `s3:DeleteObject` 권한만 부여
+5. **액세스 키 발급** → `.env` 에 저장
+
+자세한 절차는 별도 셋업 가이드 참조 (대화 이력 또는 운영 위키).
+
+### 7. 검증
+
+- `node --check src/backend/routes/feed.js` 통과
+- `node --check src/backend/app.js` 통과
+- `npm run lint` (프로젝트 ESLint) 경고 0건
+- `npm install` (cd src/backend) — 208 packages added 정상 (사전 보안 경고 2건은 기존 path-to-regexp/uuid 로 본 작업과 무관)
+
+### 8. 트레이드오프 / 향후 과제
+
+| 항목 | 현재 | 향후 |
+|---|---|---|
+| 이미지 권한 | 퍼블릭 (인스타식, 누구나 URL 로 보기) | 비공개 + 프리사인 URL 도 가능하나 코드 추가 필요 |
+| CDN | 직접 S3 URL 서빙 | CloudFront 도입 시 글로벌 응답속도 ↓ + 비용 ↓ |
+| 비용 | 프리티어 5GB / 월 20K GET 무료 | 트래픽 증가 시 모니터링 필요 |
+| 압축/썸네일 | 원본 그대로 저장/서빙 (README 신규 #12 잔여 부채) | Sharp 로 WebP 80% + 320/800px 썸네일 |
+| 영상 | 원본 저장 (변환 비용 큼) | 별도 처리 또는 외부 서비스 위탁 |
+
+### 9. 변경 파일 목록 (5개)
+
+| 파일 | 변경 내용 |
+|---|---|
+| `src/backend/routes/feed.js` | multer-s3 도입, S3 키 추출 헬퍼, S3 객체 삭제로 전환 (전면 재작성에 가까운 수정) |
+| `src/backend/app.js` | `/uploads` 정적 서빙 제거, `path` import 제거 |
+| `src/backend/package.json` | `@aws-sdk/client-s3`, `multer-s3` 의존성 추가 |
+| `src/backend/.env.example` | AWS 환경변수 4개 추가 (REGION/BUCKET/KEY_ID/SECRET) |
+| `README.md` | 본 작업 섹션 추가 + 미구현 체크리스트 갱신 |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
@@ -2131,7 +2320,7 @@ LIMIT %s
 - [ ] Soft Delete 영구 삭제 배치 (예: 30일 경과 시 실제 DELETE)
 - [ ] 마이페이지 → 이번 주 달성률, 인증 게시글 수 백엔드 연결
 - [ ] 현재 루틴을 추가하면 인증한 루틴 표시가 사라지는 버그 확인 필요
-- [ ] 피드 이미지 → 현재 로컬 디스크 저장 방식, 추후 S3 등 클라우드 스토리지 전환 고려
+- [x] ~~피드 이미지 → 현재 로컬 디스크 저장 방식, 추후 S3 등 클라우드 스토리지 전환 고려~~ ✅ 2026-05-05 완료 (multer-s3 도입)
 ---
 
 ## 👥 팀원

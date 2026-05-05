@@ -27,7 +27,6 @@ require("dotenv").config(); // .env 파일을 process.env에 로드 (가장 먼�
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const path = require("path");
 
 const PORT = process.env.PORT || 3000;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -66,9 +65,11 @@ app.use(express.json());
 // 쿠키 파싱 미들웨어 → req.cookies.sessionId 처럼 쿠키 값에 접근 가능
 app.use(cookieParser());
 
-// 업로드된 파일을 정적으로 서빙 (피드 이미지/영상)
-// /uploads/파일명 으로 접근 가능
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// [제거 2026-05-05] /uploads 정적 서빙 — 피드 이미지를 S3 로 이전.
+// 기존: app.use("/uploads", express.static(...))  → 로컬 디스크의 업로드 파일 서빙
+// 변경: routes/feed.js 가 multer-s3 로 S3 에 직접 업로드, DB 의 file_url 은 S3 퍼블릭 URL.
+//       프론트(FeedPage.jsx getImageUrl) 는 http* 로 시작하는 URL 을 그대로 통과시키므로
+//       이미지 표시는 추가 코드 변경 없이 동작.
 
 // ── 라우터 등록 ──────────────────────────────────────────────────────────────
 
