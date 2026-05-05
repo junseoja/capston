@@ -6,18 +6,21 @@
 //   GET    /feed          : 전체 피드 목록 조회 (이미지 + 현재 유저 좋아요 상태 포함)
 //   DELETE /feed/:feed_id : 피드 삭제 (세션 인증 + 본인 소유 검증)
 //
-// 파일 업로드:
-//   multer로 multipart/form-data 처리
-//   이미지/영상 파일은 src/backend/uploads/ 에 저장
-//   저장된 파일 URL은 FastAPI /feed/image로 DB에 기록
+// 파일 업로드 (2026-05-05 변경):
+//   - 기존: multer.diskStorage → src/backend/uploads/ 로컬 저장
+//   - 현재: multer-s3 → AWS S3 직접 업로드 (퍼블릭 읽기 버킷)
+//   - 사유: 팀원 간 RDS 공유 시 "내 PC 이미지가 다른 PC에서 깨지는" 문제 해결.
+//           README 미구현 항목("피드 이미지 → S3 등 클라우드 스토리지 전환 고려") 해소.
+//   - DB 의 feed_images.file_url 에는 S3 퍼블릭 URL 전체 문자열을 저장
+//     (예: https://my-bucket.s3.ap-northeast-2.amazonaws.com/feed/171.../abc.jpg)
 // ============================================================
 
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
-// [추가 2026-04-29] 고아 파일 정리용 — fs/promises 의 unlink 로 비동기 삭제
-const fs = require("fs/promises");
+const multerS3 = require("multer-s3");
+const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const {
     createFeed,
     addFeedImage,
@@ -28,32 +31,46 @@ const {
 // [리팩터링 #12] 세션 인증 4줄 복붙을 미들웨어 한 줄로 대체
 const requireAuth = require("../middleware/requireAuth");
 
-// ── [추가 2026-04-29] 업로드 디렉터리 절대경로 상수화 ──────────────────────────
-// 피드 삭제 시 file_url("/uploads/xxx.jpg") 의 파일명만 떼어
-// 이 디렉터리에 join 하여 디스크에서 unlink 할 때 사용한다.
-// path.basename() 으로 파일명만 추출하므로 디렉터리 트래버설 공격(../../etc/passwd)
-// 같은 비정상 경로는 자동으로 차단된다.
-const UPLOAD_DIR = path.join(__dirname, "../uploads");
+// ── [추가 2026-05-05] S3 클라이언트 초기화 ───────────────────────────────────
+// 환경변수 4개(.env): AWS_REGION, AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+// 누락 시 서버 기동은 되지만 첫 업로드/삭제에서 실패 → 부팅 시 경고만 출력.
+const AWS_REGION = process.env.AWS_REGION || "ap-northeast-2";
+const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET;
 
-// ── multer 설정 (파일 업로드) ────────────────────────────────────────────────
+if (!AWS_S3_BUCKET || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+    console.warn(
+        "⚠️  [feed] AWS S3 환경변수 누락. .env 에 AWS_S3_BUCKET / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 설정 필요."
+    );
+}
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, path.join(__dirname, "../uploads"));
-    },
-    filename: (req, file, cb) => {
-        // 파일명 충돌 방지: timestamp + 랜덤 숫자 + 원본 확장자
-        const ext = path.extname(file.originalname);
-        const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-        cb(null, uniqueName);
+const s3 = new S3Client({
+    region: AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     },
 });
 
+// ── multer 설정 (S3 직접 업로드) ─────────────────────────────────────────────
+// 키(파일 경로) 규칙: feed/<timestamp>-<랜덤숫자>.<확장자>
+// - 파일명 충돌 방지
+// - "feed/" prefix 로 다른 용도 객체와 구분 (향후 프로필 사진 등 추가 시 분리 용이)
+
 const upload = multer({
-    storage,
+    storage: multerS3({
+        s3,
+        bucket: AWS_S3_BUCKET,
+        contentType: multerS3.AUTO_CONTENT_TYPE, // image/jpeg, video/mp4 등 자동 감지
+        // ACL 비활성화 버킷이므로 ACL 옵션은 지정하지 않음
+        // (퍼블릭 접근은 STEP 2 의 버킷 정책으로 일괄 허용)
+        key: (req, file, cb) => {
+            const ext = path.extname(file.originalname);
+            const uniqueName = `feed/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+            cb(null, uniqueName);
+        },
+    }),
     limits: { fileSize: 50 * 1024 * 1024 }, // 파일당 최대 50MB
     fileFilter: (req, file, cb) => {
-        // 이미지와 영상만 허용
         if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
             cb(null, true);
         } else {
@@ -62,73 +79,85 @@ const upload = multer({
     },
 });
 
+// ── 헬퍼: S3 객체 삭제 ────────────────────────────────────────────────────────
+/**
+ * S3 버킷에서 객체 1개 삭제. 멱등성 있음(이미 없는 객체에 대해서도 200 반환).
+ * 실패해도 throw 하지 않고 false 반환 — 호출 측에서 일괄 정리 시 일부 실패가
+ * 다른 정리를 막지 않도록 함.
+ */
+async function deleteS3Object(key) {
+    if (!key) return false;
+    try {
+        await s3.send(new DeleteObjectCommand({ Bucket: AWS_S3_BUCKET, Key: key }));
+        return true;
+    } catch (err) {
+        console.warn(`[S3 delete] key=${key} 실패:`, err?.message || err);
+        return false;
+    }
+}
+
+/**
+ * S3 퍼블릭 URL 에서 객체 키만 추출.
+ *   입력: https://my-bucket.s3.ap-northeast-2.amazonaws.com/feed/123-456.jpg
+ *   반환: feed/123-456.jpg
+ *
+ * 실패 시 null. 비-S3 URL 이거나 형식이 맞지 않으면 삭제 대상에서 제외.
+ */
+function extractS3Key(fileUrl) {
+    if (!fileUrl || typeof fileUrl !== "string") return null;
+    try {
+        const u = new URL(fileUrl);
+        // 호스트는 "<bucket>.s3.<region>.amazonaws.com" 또는 "s3.<region>.amazonaws.com/<bucket>/..."
+        // 이 코드는 Virtual-hosted-style (multer-s3 기본) 만 처리.
+        if (!u.hostname.endsWith(".amazonaws.com")) return null;
+        // pathname 은 "/feed/123-456.jpg" 형태 → 앞 슬래시 제거
+        return u.pathname.startsWith("/") ? u.pathname.slice(1) : u.pathname;
+    } catch {
+        return null;
+    }
+}
+
 // ── 피드 생성 (POST /feed) ───────────────────────────────────────────────────
 
 /**
  * POST /feed
  *
- * multipart/form-data로 텍스트 필드 + 파일을 함께 전송
- * 텍스트 필드: routine_id, completion_id, content
- * 파일 필드: files (최대 10개)
+ * multipart/form-data 로 텍스트 + 파일 업로드.
+ * multer-s3 가 파일을 받으면 즉시 S3 에 PutObject 후 req.files[i] 를 채움:
+ *   - location : 퍼블릭 URL (https://...amazonaws.com/feed/...)
+ *   - key      : S3 객체 키 (feed/...)
+ *   - bucket   : 버킷 이름
+ *   - mimetype : MIME 타입
  *
  * 처리 흐름:
- *   1. 세션 인증 → user_id 추출
- *   2. FastAPI POST /feed/ → feed_id 생성
- *   3. 업로드된 파일마다 FastAPI POST /feed/image → DB에 이미지 URL 저장
+ *   1. 세션 인증 → user_id (requireAuth 가 req.user 주입)
+ *   2. 검증 실패 / FastAPI 실패 시 cleanupS3Objects() 로 업로드된 S3 객체 정리
+ *      → "고아 객체"(DB 레코드 없는 S3 파일) 누적 방지
+ *   3. createFeed() 로 feeds 행 INSERT → feed_id 획득
+ *   4. 각 파일마다 addFeedImage() 로 feed_images 행 INSERT
+ *      file_url 에는 S3 퍼블릭 URL 전체 저장 (프론트는 URL 그대로 <img src=>)
  */
-// [리팩터링 #1+#3] 기존 catch는 무조건 500으로 뭉갰지만, next(err)로 넘기면
-// 글로벌 핸들러가 FastApiError의 실제 상태(예: 404, 409)를 보존해서 응답
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// [수정 2026-04-29] 고아 파일(orphan file) 정리 로직 추가
-// ─────────────────────────────────────────────────────────────────────────────
-// 배경:
-//   기존 구현은 multer 가 업로드 파일을 디스크에 먼저 저장한 뒤,
-//   FastAPI 의 createFeed() / addFeedImage() 호출이 실패해도
-//   이미 저장된 파일을 정리하지 않아 /uploads 디렉터리에 DB 레코드 없이
-//   영구 보관되는 "고아 파일" 이 누적되는 문제가 있었음.
-//
-//   문제 시나리오:
-//     1) multer 가 파일 N개 디스크 저장 (성공)
-//     2) FastAPI POST /feed/ → 500 에러 또는 success:false 반환
-//     3) catch 로 빠지지만 디스크 파일은 그대로 → 디스크 사용량 누적
-//
-// 해결:
-//   - cleanupFiles() 헬퍼로 req.files 의 파일을 일괄 unlink
-//   - Promise.allSettled 로 일부 실패해도 나머지를 계속 정리
-//   - 검증 실패 / FastAPI 실패 / throw 모든 분기에서 호출
-//   - 정상 흐름에서는 호출하지 않음 (DB 레코드와 일치 유지)
-// ─────────────────────────────────────────────────────────────────────────────
 router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, next) => {
     const { routine_id, completion_id, content } = req.body;
-    // [추가 2026-04-29] 업로드된 파일 목록 — 검증/예외 시 정리 대상
     const uploadedFiles = req.files || [];
 
     /**
-     * [추가 2026-04-29] 업로드된 multer 파일들을 디스크에서 일괄 삭제.
-     * - Promise.allSettled 사용: 일부 unlink 가 실패하더라도(이미 지워진 경우 등)
-     *   다른 파일 정리를 멈추지 않도록 함.
-     * - 실패 자체는 로그만 남기고 무시 (파일 시스템 일시 오류일 수 있음).
+     * S3 에 이미 업로드된 파일들을 일괄 삭제 (검증 실패 / FastAPI 실패 분기).
+     * Promise.allSettled 로 일부 실패해도 나머지는 계속 정리.
      */
-    const cleanupFiles = async () => {
+    const cleanupS3Objects = async () => {
         if (uploadedFiles.length === 0) return;
-        const results = await Promise.allSettled(
-            uploadedFiles.map((f) => fs.unlink(f.path))
+        await Promise.allSettled(
+            uploadedFiles.map((f) => deleteS3Object(f.key))
         );
-        results.forEach((r, idx) => {
-            if (r.status === "rejected") {
-                console.warn(
-                    `[feed POST cleanup] ${uploadedFiles[idx].path} 삭제 실패:`,
-                    r.reason?.message || r.reason
-                );
-            }
-        });
     };
 
     if (!routine_id || !completion_id) {
-        // [추가 2026-04-29] 필수값 누락 시에도 multer 가 이미 파일을 저장했으므로 정리 필요
-        await cleanupFiles();
-        return res.status(400).json({ success: false, message: "routine_id와 completion_id가 필요합니다." });
+        await cleanupS3Objects();
+        return res.status(400).json({
+            success: false,
+            message: "routine_id와 completion_id가 필요합니다.",
+        });
     }
 
     try {
@@ -141,30 +170,30 @@ router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, ne
         });
 
         if (!feedResult.success) {
-            // [추가 2026-04-29] FastAPI 가 success:false 로 응답한 경우에도 고아 파일 방지
-            await cleanupFiles();
-            return res.status(500).json({ success: false, message: "피드 생성에 실패했습니다." });
+            await cleanupS3Objects();
+            return res.status(500).json({
+                success: false,
+                message: "피드 생성에 실패했습니다.",
+            });
         }
 
         const feed_id = feedResult.feed_id;
 
-        // 2. 업로드된 파일들의 이미지 레코드 생성
+        // 2. 각 업로드 파일에 대해 feed_images 행 생성 (S3 URL 그대로 저장)
         for (const file of uploadedFiles) {
-            const fileUrl = `/uploads/${file.filename}`;
             await addFeedImage({
                 feed_id,
-                file_url: fileUrl,
+                file_url: file.location, // S3 퍼블릭 URL
                 file_type: file.mimetype,
             });
         }
 
         return res.json({ success: true, feed_id });
     } catch (error) {
-        // [추가 2026-04-29] FastApiError / 네트워크 오류 / addFeedImage 실패 모두 여기로 진입
-        // 이미 일부 addFeedImage 가 성공했더라도, 클라이언트 입장에선 "피드 생성 실패" 이므로
-        // 디스크 파일을 정리해 적어도 사용량 누적을 막는다.
-        // (DB 부분 성공 데이터는 추후 정합성 점검 배치로 보완 가능 — 현재 범위 외)
-        await cleanupFiles();
+        // FastApiError / 네트워크 오류 / addFeedImage 실패 모두 진입.
+        // DB 부분 성공 시 일부 image 행은 남을 수 있지만, 사용자에겐 "실패" 이므로
+        // S3 객체는 일괄 정리해 누적 차단. (정합성 점검 배치는 추후 과제)
+        await cleanupS3Objects();
         return next(error);
     }
 });
@@ -208,51 +237,29 @@ router.get("/feed", requireAuth, async (req, res, next) => {
 /**
  * DELETE /feed/:feed_id
  *
- * 피드 삭제 (세션 인증 + 본인 소유 검증)
+ * 피드 삭제 (세션 인증 + 본인 소유 검증).
  *
  * 처리 흐름:
- *   1. 세션 쿠키 확인 → 미로그인 시 401
- *   2. 세션에서 user_id 추출
- *   3. FastAPI DELETE /feed/{feed_id}?user_id={user_id}
- *      → FastAPI에서 WHERE feed_id=? AND user_id=? 조건으로 삭제
- *      → ON DELETE CASCADE로 feed_images, feed_likes, feed_comments도 자동 삭제
+ *   1. getFeedDetail() 로 첨부 이미지 file_url 목록을 미리 확보
+ *      (CASCADE 로 image 레코드도 사라지므로 "선조회" 가 핵심)
+ *   2. deleteFeed() 로 DB 행 삭제 (FastAPI 측 WHERE user_id 로 소유자 검증)
+ *   3. DB 삭제가 성공한 경우에만 S3 객체 삭제
+ *      (DB 삭제 실패 시 S3 객체를 지우면 화면엔 아직 남은 피드의 이미지가 깨짐)
+ *
+ * 보안:
+ *   - file_url 은 서버가 발급한 S3 URL 이지만 변조 가능성 대비
+ *     extractS3Key() 가 호스트네임을 검사하고, 비-S3 URL 이면 null 반환 → 무시.
  */
-// ─────────────────────────────────────────────────────────────────────────────
-// [수정 2026-04-29] 피드 삭제 시 디스크 첨부 파일도 함께 정리
-// ─────────────────────────────────────────────────────────────────────────────
-// 배경:
-//   기존 DELETE /feed/:feed_id 는 FastAPI 의 ON DELETE CASCADE 로
-//   feeds / feed_images / feed_likes / feed_comments 행만 삭제하고,
-//   /uploads 디렉터리의 실제 파일은 그대로 남겨 디스크 사용량이 누적되었음.
-//
-// 흐름:
-//   1) getFeedDetail() 로 첨부 이미지 file_url 목록을 미리 확보
-//      (CASCADE 삭제 직후엔 image 레코드가 사라져 조회 불가하므로 반드시 선조회)
-//   2) deleteFeed() 로 DB 행 삭제 (소유자 검증 포함)
-//   3) DB 삭제가 성공한 경우에만 디스크 파일을 unlink
-//      (DB 삭제 실패 시 파일을 지우면 화면엔 아직 남은 피드의 첨부가 사라짐)
-//
-// 보안:
-//   - file_url 은 클라이언트에서 직접 들어오는 값이 아니라
-//     POST /feed 에서 서버가 발급한 "/uploads/<random>.ext" 형태이지만,
-//     혹시라도 변조된 값이 들어올 가능성에 대비하여
-//     path.basename() 으로 파일명만 추출 → UPLOAD_DIR 과 join 한다.
-//     이로써 "../../etc/passwd" 같은 디렉터리 트래버설 공격을 차단한다.
-// ─────────────────────────────────────────────────────────────────────────────
 router.delete("/feed/:feed_id", requireAuth, async (req, res, next) => {
     try {
-        // 1. [추가 2026-04-29] 삭제 전에 첨부 이미지 URL 목록을 확보
-        //    CASCADE 로 이미지 레코드도 함께 사라지므로 "선조회" 가 핵심.
-        //    피드가 없거나 권한 없으면 detail 이 빈 값일 수 있어 기본값 처리.
+        // 1. 삭제 전에 첨부 이미지 URL 목록 확보
         let fileUrls = [];
         try {
             const detail = await getFeedDetail(req.params.feed_id);
             fileUrls = (detail?.images || []).map((img) => img.file_url).filter(Boolean);
         } catch (preFetchErr) {
-            // 상세 조회 실패해도 DB 삭제 자체는 시도해야 하므로 여기선 swallow.
-            // (예: 다른 사용자가 동시에 삭제한 경우 404 가 나올 수 있음)
             console.warn(
-                `[feed DELETE] getFeedDetail 실패 — 디스크 정리 생략:`,
+                `[feed DELETE] getFeedDetail 실패 — S3 정리 생략:`,
                 preFetchErr?.message || preFetchErr
             );
         }
@@ -260,25 +267,14 @@ router.delete("/feed/:feed_id", requireAuth, async (req, res, next) => {
         // 2. DB 삭제 (소유자 검증은 FastAPI 측 WHERE user_id=? 로 처리됨)
         const result = await deleteFeed(req.params.feed_id, req.user.user_id);
 
-        // 3. [추가 2026-04-29] DB 삭제가 실제로 성공한 경우에만 디스크 정리
-        //    (success:false 인 경우 = 권한 없음 / 존재하지 않음 → 파일 보존)
+        // 3. DB 삭제가 실제로 성공한 경우에만 S3 객체 삭제
         if (result?.success && fileUrls.length > 0) {
-            const cleanupResults = await Promise.allSettled(
+            await Promise.allSettled(
                 fileUrls.map((url) => {
-                    // 보안: path.basename() 으로 디렉터리 트래버설 차단
-                    const filename = path.basename(url);
-                    const fullPath = path.join(UPLOAD_DIR, filename);
-                    return fs.unlink(fullPath);
+                    const key = extractS3Key(url);
+                    return key ? deleteS3Object(key) : Promise.resolve(false);
                 })
             );
-            cleanupResults.forEach((r, idx) => {
-                if (r.status === "rejected") {
-                    console.warn(
-                        `[feed DELETE cleanup] ${fileUrls[idx]} 삭제 실패:`,
-                        r.reason?.message || r.reason
-                    );
-                }
-            });
         }
 
         return res.json(result);
