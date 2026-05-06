@@ -1,0 +1,33 @@
+# ============================================================
+# Routine Mate — Frontend (React + Vite) 컨테이너
+# ============================================================
+# 베이스 이미지: node:20-alpine (Node 20 + 경량 Alpine Linux)
+#   - alpine 은 일반 node 이미지보다 ~10배 작아 빌드/배포 속도 ↑
+#   - musl libc 기반이라 일부 native 모듈에서 문제될 수 있으나,
+#     Vite/React 는 순수 JS 라 영향 없음
+#
+# 컨테이너 안 동작:
+#   1. /app 으로 작업 디렉터리 설정
+#   2. package*.json 만 먼저 복사 → npm install (Docker 레이어 캐시 활용)
+#      코드만 바뀌고 의존성 그대로면 npm install 단계 캐시 재사용 → 빌드 빠름
+#   3. 나머지 소스는 docker-compose 의 volume 마운트로 호스트와 동기화
+#   4. Vite dev 서버 시작 (--host 0.0.0.0 으로 컨테이너 외부에서 접근 가능)
+# ============================================================
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# 의존성 정의 파일만 먼저 복사 (레이어 캐싱 최적화)
+COPY package.json package-lock.json ./
+
+# 의존성 설치 — npm ci 가 더 정확하지만 lock 파일 까다로워서 npm install 사용
+RUN npm install
+
+# 개발 서버 포트
+EXPOSE 5173
+
+# Vite dev 서버 시작
+# --host 0.0.0.0: 모든 네트워크 인터페이스에서 listen
+#   (컨테이너 안에서 127.0.0.1 만 listen 하면 외부 포트 매핑이 안 잡힘)
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

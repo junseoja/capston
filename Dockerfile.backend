@@ -1,0 +1,33 @@
+# ============================================================
+# Routine Mate — Backend (Express) 컨테이너
+# ============================================================
+# 베이스 이미지: node:20-alpine
+#
+# 컨테이너 안 동작:
+#   1. /app 작업 디렉터리
+#   2. package*.json 만 먼저 복사 → npm install (캐싱)
+#   3. 코드는 docker-compose volume 으로 호스트 동기화
+#   4. node --watch 모드로 시작 → 코드 변경 시 자동 재시작 (Node 20+ 내장 기능)
+#      - nodemon 추가 의존성 불필요
+#
+# 빌드 컨텍스트: ./src/backend
+#   - docker-compose.yml 에서 context: ./src/backend 로 지정
+#   - 따라서 COPY 경로는 src/backend 디렉터리 기준 (즉 package.json 직접 참조)
+# ============================================================
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# 의존성 파일만 먼저 복사
+COPY package.json package-lock.json ./
+
+# 의존성 설치 (@aws-sdk/client-s3, multer-s3 포함)
+RUN npm install
+
+# Express 서버 포트
+EXPOSE 3000
+
+# Express 서버 시작 — Node 20+ 의 --watch 플래그로 코드 변경 시 자동 재시작
+# (별도 nodemon 패키지 설치 불필요)
+CMD ["node", "--watch", "app.js"]

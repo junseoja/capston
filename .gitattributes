@@ -1,0 +1,50 @@
+# ============================================================
+# .gitattributes — 파일별 줄바꿈(EOL) 정책
+# ============================================================
+# 배경:
+#   Windows 는 CRLF, macOS/Linux 는 LF 를 기본 줄바꿈으로 사용.
+#   팀원이 Windows 면 git 이 자동으로 CRLF 로 변환할 수 있는데,
+#   이 경우 다음 문제가 발생:
+#     - shell 스크립트(.sh) 가 컨테이너(Linux) 안에서 안 돌아감
+#     - Dockerfile 빌드 실패
+#     - Python/Node 코드도 일부 환경에서 깨짐
+#
+# 해결:
+#   text 파일은 무조건 LF 로 통일 (Linux/Docker 호환).
+#   Windows 전용 스크립트(.bat, .ps1) 만 CRLF 유지.
+#
+# 적용:
+#   이 파일 추가 후 한 번:
+#     git add --renormalize .
+#     git commit -m "chore: line endings 정규화"
+# ============================================================
+
+# 모든 텍스트 파일은 LF (자동 감지 + LF 강제)
+* text=auto eol=lf
+
+# 명시적으로 LF (Docker 컨테이너 안에서 실행되는 스크립트)
+*.sh        text eol=lf
+*.bash      text eol=lf
+Dockerfile* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+
+# Windows 전용 — CRLF 유지
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# 바이너리 — 텍스트 변환 금지
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.gz        binary
+*.tar       binary
+*.woff      binary
+*.woff2     binary
+*.mp4       binary
+*.mov       binary

@@ -1,0 +1,61 @@
+# ============================================================
+# .dockerignore (프로젝트 루트, 프론트엔드 빌드 컨텍스트용)
+# ============================================================
+# docker build 시 호스트 → 이미지로 복사하지 않을 파일 목록.
+# 이미지 크기 + 빌드 시간 절감 + 비밀 유출 방지 효과.
+#
+# ⚠️ 주의: .dockerignore 는 docker build 단계에만 적용되고,
+#         docker-compose 의 volume 마운트에는 적용되지 않음.
+#         즉 빌드 시점엔 제외되지만 런타임엔 마운트로 들어올 수 있음.
+# ============================================================
+
+# 의존성 — 컨테이너 안에서 npm install 로 새로 설치
+node_modules
+
+# 빌드 산출물
+dist
+build
+build-output.txt
+
+# 환경변수 — 절대 이미지에 굽지 않음 (env_file 디렉티브로 런타임 주입)
+.env
+.env.*
+!.env.example
+src/backend/.env
+src/backend/.env.*
+!src/backend/.env.example
+src/python_api/.env
+src/python_api/.env.*
+!src/python_api/.env.example
+
+# 옛날 로컬 업로드 폴더 — S3 전환으로 더 이상 사용 안 함
+src/backend/uploads/*
+!src/backend/uploads/.gitkeep
+
+# Python venv (호스트 격리용)
+src/python_api/venv
+**/__pycache__
+**/*.pyc
+
+# IDE / OS 메타파일
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Docker 자체
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# 로그
+*.log
+npm-debug.log*
+
+# Claude / 워크트리 메타
+.claude

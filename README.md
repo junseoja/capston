@@ -298,6 +298,121 @@ python -m uvicorn app:app --reload --port 8000
 
 ---
 
+## 🐳 Docker 로 실행하기 (권장 — 2026-05-07 도입)
+
+### 왜 Docker 인가
+
+기존 방식은 팀원마다 Node 버전 / Python 버전 / OS 의존성이 달라 "내 PC 에선 됐는데" 류 디버깅에 시간이 자주 들어갔다. Docker 컨테이너는 실행 환경 자체를 코드와 함께 git 으로 공유해 이 문제를 차단한다.
+
+핵심 효과:
+
+- Node 20 / Python 3.12 / uvicorn / multer-s3 등 모든 의존성 버전이 컨테이너 안에 못박힘
+- 팀원은 Docker Desktop 한 가지만 깔면 끝 — 별도로 Node/Python/npm/pip 설치 불필요
+- 코드는 호스트 폴더에 그대로 → IDE / git 워크플로우는 평소대로
+- AWS RDS / S3 는 컨테이너 외부 그대로 사용
+
+### 사전 준비
+
+| 항목 | 비고 |
+|---|---|
+| Docker Desktop 설치 | https://docker.com/products/docker-desktop · Mac/Windows 자동 감지 |
+| Windows: WSL2 백엔드 | Docker Desktop 설치 시 자동 권장 — Hyper-V 보다 빠름 |
+| `.env` 파일 3개 | 루트 / `src/backend/` / `src/python_api/` — `.env.example` 복사 후 값 입력 |
+| AWS / RDS 자격증명 | 슬랙 DM 으로 별도 전달 (절대 git 에 안 올라감) |
+
+### 빠른 실행 (팀원용)
+
+```bash
+# 최초 1회
+git clone <repo>
+cd capston-main
+cp .env.example .env
+cp src/backend/.env.example src/backend/.env
+cp src/python_api/.env.example src/python_api/.env
+# 위 3개 파일에 슬랙 DM 받은 자격증명 입력
+
+# 매번 작업 시작 시
+./start-docker.sh           # 또는 docker compose up
+```
+
+브라우저: `http://localhost:5173`
+
+> 💡 Windows 팀원은 WSL2 터미널에서 `./start-docker.sh` 실행 권장. PowerShell/CMD 에선 `docker compose up` 직접 실행.
+
+### 매일 작업 흐름
+
+```bash
+# 아침 (백그라운드 실행)
+docker compose up -d
+
+# 작업 중 — 평소대로 IDE 로 코드 수정
+#   - 호스트의 ./src 가 컨테이너 /app/src 에 마운트되어 있어
+#     수정 즉시 Vite/Node --watch/uvicorn --reload 가 자동 반영
+#   - git add / commit / push 도 평소대로
+
+# 로그 보기 (필요 시)
+docker compose logs -f                   # 모든 서비스
+docker compose logs -f backend           # 특정 서비스만
+
+# 컨테이너 안 쉘 진입 (디버깅)
+docker compose exec backend sh
+docker compose exec python_api bash
+
+# 일과 종료
+docker compose down
+```
+
+### 의존성 변경 후 재빌드 (가끔 필요)
+
+새 npm/pip 패키지를 추가하거나 Dockerfile 을 수정한 경우:
+
+```bash
+git pull origin dev
+docker compose up --build               # 이미지 다시 만든 뒤 시작
+```
+
+코드만 수정한 경우엔 `--build` 불필요 (볼륨 마운트로 자동 반영).
+
+### 정리 명령
+
+```bash
+docker compose down                      # 컨테이너만 정리
+docker compose down -v                   # 컨테이너 + named volume 까지 (node_modules 재생성됨)
+docker compose down --rmi all -v         # 모든 이미지/볼륨 완전 삭제 (다음 실행 시 처음부터 빌드)
+```
+
+### 컨테이너 구성
+
+| 서비스 | 이미지 | 포트 | 역할 |
+|---|---|---|---|
+| `frontend` | node:20-alpine | 5173 | Vite dev 서버 (React) |
+| `backend` | node:20-alpine | 3000 | Express (인증/세션/S3 업로드) |
+| `python_api` | python:3.12-slim | 8000 | FastAPI (DB CRUD) |
+
+컨테이너 간 통신은 docker compose 내부 DNS 사용:
+
+- 브라우저 → frontend(5173), backend(3000) — 호스트 포트로 접근
+- backend → python_api — `http://python_api:8000` (서비스명)
+- python_api → AWS RDS, backend → AWS S3 — 인터넷 통해 외부 접속
+
+### 트러블슈팅
+
+| 증상 | 원인 | 해결 |
+|---|---|---|
+| `port 5173 already in use` | 다른 앱이 포트 점유 | 해당 앱 종료 또는 `docker-compose.yml` 의 `ports:` 변경 |
+| `AWS S3 환경변수 누락` 경고 | `src/backend/.env` 누락/오타 | `.env` 파일 확인, 4줄 정확히 입력 후 `docker compose restart backend` |
+| 코드 수정해도 반영 안 됨 | 볼륨 마운트 문제 (특히 Windows) | `docker compose down && up` 으로 재시작 |
+| `Cannot connect to Docker daemon` | Docker Desktop 미실행 | Docker Desktop 앱 실행 후 다시 시도 |
+| 첫 실행이 너무 오래 걸림 | 이미지 다운로드 + 의존성 설치 | 정상 — 1~3분 (이후 캐시) |
+| `permission denied` (sh 실행 시) | `start-docker.sh` 실행 권한 | `chmod +x start-docker.sh` |
+| Windows 줄바꿈으로 sh 깨짐 | CRLF 변환 | 본 저장소는 `.gitattributes` 로 LF 강제 — 보통 자동 해결 |
+
+### Docker 안 쓰고 싶은 팀원용 — 기존 방식
+
+`./start.sh` 또는 위의 "서버 실행 방법" 섹션의 개별 실행 그대로 사용 가능. Docker 와 병행 가능.
+
+---
+
 ## 🗄 데이터베이스 테이블
 
 ### 전체 테이블 관계도
@@ -2307,6 +2422,219 @@ SELECT image_id, file_url FROM feed_images WHERE file_url LIKE '/uploads/%';
 | `src/backend/package.json` | `@aws-sdk/client-s3`, `multer-s3` 의존성 추가 |
 | `src/backend/.env.example` | AWS 환경변수 4개 추가 (REGION/BUCKET/KEY_ID/SECRET) |
 | `README.md` | 본 작업 섹션 추가 + 미구현 체크리스트 갱신 |
+
+---
+
+## 🔧 2026-05-07 작업 내역
+
+### 1. 이번 세션 개요
+
+팀 배포 환경을 표준화하기 위해 **Docker / docker compose 기반 개발 환경**을 도입. 팀원이 모두 Windows 환경이고 각자 로컬에서 돌리는 구조라, 가상화 도구 한 가지로 Node 버전 / Python 버전 / OS 의존성 차이를 한꺼번에 격리하는 방식이 가장 효율적이라고 판단.
+
+| 항목 | 내용 |
+|---|---|
+| 도입 방식 | Dockerfile + docker-compose.yml 을 git 으로 공유 (registry 푸시 X, tar 배포 X) |
+| 배포 단위 | git push → 팀원 git pull + `docker compose up --build` |
+| 코드 동기화 | 호스트 ./src ↔ 컨테이너 /app/src 볼륨 마운트 (핫 리로드) |
+| AWS RDS / S3 | 컨테이너 외부, 인터넷 통해 직접 접속 (이미지에 박지 않음) |
+| 비밀 (env) | `.env` 3개 + `env_file` 디렉티브로 런타임 주입, `.gitignore` 비추적 유지 |
+
+### 2. 도입 배경
+
+**문제 — "내 PC 에선 됐는데"**
+
+| 상황 | 결과 |
+|---|---|
+| 팀원 A: Node 20.5, Python 3.12 | 정상 실행 |
+| 팀원 B: Node 18.12 | npm install 시 호환 경고, 일부 모듈 동작 불일치 |
+| 팀원 C: Python 3.10 + Windows | bcrypt 휠 빌드 실패, venv 활성화 PowerShell 권한 이슈 |
+
+캡스톤 진행 중 환경 셋업 디버깅에 누적 시간이 너무 많이 들어가 데드라인 압박 가중. 본 작업은 이를 한 번에 해소.
+
+**선택한 방식 — Dockerfile 을 git 으로 공유**
+
+3가지 배포 방식 중 비교 후 결정:
+
+| 옵션 | 특징 | 본 프로젝트 적합도 |
+|---|---|---|
+| Docker Hub / GHCR push | 이미지 자체를 레지스트리에 올림 | ❌ 캡스톤엔 과한 인프라 |
+| `docker save` → tar 파일 배포 | 오프라인용, USB/슬랙 전달 | ❌ 코드 수정마다 tar 새로 보내야 함, git 흐름과 충돌 |
+| **Dockerfile + compose.yml git 공유** | 텍스트 파일만 공유, 팀원이 자체 빌드 | ⭐ 채택 |
+
+세 번째 방식이 가진 장점:
+
+- 환경 정의 파일이 **코드와 함께 버전 관리**됨 (git blame 가능)
+- 팀원이 코드 수정해서 push 하는 흐름이 그대로 유지됨
+- 이미지 자체를 보내지 않으니 변경 전파가 단순 — git pull 이 곧 환경 동기화
+
+### 3. 컨테이너 구성
+
+**3개 서비스, 외부 인프라 그대로 사용**
+
+```
+┌─────────────────┐  http://localhost:5173 (브라우저)
+│ frontend        │
+│ node:20-alpine  │  Vite dev server, --host 0.0.0.0
+│ port 5173       │
+└─────────┬───────┘
+          │ Vite dev 환경에선 브라우저 ↔ Express 직접 통신
+          │ (Vite 빌드 산출물이 브라우저에서 돌아감)
+          ▼
+┌─────────────────┐  http://localhost:3000 (브라우저)
+│ backend         │  http://backend:3000   (컨테이너 간)
+│ node:20-alpine  │  Express, node --watch 로 hot reload
+│ port 3000       │  multer-s3 → AWS S3
+└─────────┬───────┘
+          │ http://python_api:8000 (compose 내부 DNS)
+          ▼
+┌─────────────────┐
+│ python_api      │  http://localhost:8000 (디버깅용 노출)
+│ python:3.12-slim│  uvicorn --reload, pymysql → AWS RDS
+│ port 8000       │
+└─────────┬───────┘
+          │
+          ▼
+   AWS RDS MySQL (외부)
+   AWS S3       (외부)
+```
+
+핵심 결정 사항:
+
+- **로컬 MySQL 컨테이너 미도입** — 팀이 이미 RDS 공유 사용 중. 데이터 통일성 우선.
+- **이미지 사이즈 최적화** — alpine / slim 베이스 + 레이어 캐싱 + .dockerignore 로 의존성 파일을 코드보다 먼저 복사 (의존성 안 바뀌면 `npm install` 캐시 재사용)
+- **node_modules / venv 격리** — named volume 으로 컨테이너 안에만 두어 Mac (M1) ↔ Windows ↔ Linux 의 native 모듈 차이 차단
+- **컨테이너 통신은 서비스명** — `PYTHON_API=http://python_api:8000` 을 docker-compose.yml 에서 환경변수로 덮어씀. `.env` 의 `localhost:8000` 은 비-Docker 사용자용으로 유지.
+
+### 4. 핫 리로드 동작 원리
+
+```
+[팀원 PC]                                    [컨테이너 안]
+                                             
+src/backend/routes/feed.js   ←—volume mount—→  /app/routes/feed.js
+                                                    │
+                                                    │ 파일 수정 감지
+                                                    ▼
+                                              node --watch app.js
+                                                    │ 자동 재시작
+                                                    ▼
+                                              Express 서버 재기동
+                                              새 코드로 응답
+```
+
+- **Frontend (Vite)** — `CHOKIDAR_USEPOLLING=true` 환경변수로 Mac/Windows 바인드 마운트의 inotify 차이 보정
+- **Backend (Node)** — `node --watch` (Node 20+ 내장 기능, nodemon 추가 의존성 불필요)
+- **Python API (uvicorn)** — `--reload` 플래그 (기존 start.sh 와 동일)
+
+팀원은 평소처럼 IDE 로 코드 수정 → 저장 → 브라우저 새로고침. Docker 가 거기 있는 줄도 의식 안 해도 됨.
+
+### 5. 추가/생성된 파일 목록 (8개)
+
+| 파일 | 역할 |
+|---|---|
+| `Dockerfile.frontend` | React/Vite 컨테이너 이미지 정의 (node:20-alpine, port 5173) |
+| `Dockerfile.backend` | Express 컨테이너 이미지 정의 (node:20-alpine, port 3000, `node --watch`) |
+| `Dockerfile.python_api` | FastAPI 컨테이너 이미지 정의 (python:3.12-slim, port 8000, `uvicorn --reload`) |
+| `docker-compose.yml` | 3개 서비스 + 네트워크 + 볼륨 + env_file 통합 정의 |
+| `.dockerignore` (루트) | frontend 빌드 시 이미지에 안 들어갈 파일 (node_modules, .env, .git 등) |
+| `src/backend/.dockerignore` | backend 빌드 컨텍스트용 |
+| `src/python_api/.dockerignore` | python_api 빌드 컨텍스트용 |
+| `.gitattributes` | Windows/macOS 줄바꿈 통일 (LF 강제) — sh 스크립트가 컨테이너에서 깨지지 않도록 |
+| `start-docker.sh` | 팀원용 한 줄 래퍼 — Docker 데몬 / .env 사전 검사 후 `docker compose up` 호출 |
+| `README.md` | "Docker 로 실행하기" 섹션 추가 + 본 작업 내역 기록 |
+
+> 기존 `start.sh` 는 그대로 유지 — Docker 안 쓰는 팀원이나 빠른 단독 실행용 fallback.
+
+### 6. 보안 / 운영 고려사항
+
+| 항목 | 처리 방식 |
+|---|---|
+| **AWS Access Key / RDS 비번** | `.env` 3개로 분리 → `.gitignore` 비추적 → 슬랙 DM 으로 별도 전달 |
+| **이미지에 비밀 베이크 금지** | `Dockerfile` 안에 `ENV AWS_*` 하드코딩 ❌. `env_file:` 디렉티브로 런타임 주입 ✅ |
+| **컨테이너 권한** | 현재 root 로 실행 (개발 모드). 운영 전환 시 비권한 사용자(`USER node`) 적용 권장 |
+| **버전 핀** | 베이스 이미지 `node:20-alpine` / `python:3.12-slim` 만 사용 — `:latest` 금지 (재현성 보장) |
+| **레이어 캐싱** | 의존성 파일 → 의존성 설치 → 코드 마운트 순으로 정렬 → 코드 수정만으론 의존성 재설치 안 됨 |
+
+### 7. 운영 흐름 — 본인 / 팀원
+
+#### 본인 (배포 담당)
+
+```bash
+# 1. Dockerfile / package.json / requirements.txt 등 환경 변경 시
+git add Dockerfile.* docker-compose.yml ...
+git commit -m "ops: Docker 의존성 추가/변경"
+git push origin dev
+
+# 2. 슬랙 공지
+"환경 변경했어. git pull 후 docker compose up --build 해줘."
+```
+
+#### 팀원 (배포 받기)
+
+```bash
+# 최초 1회
+git clone <repo>
+cp .env.example .env (× 3)
+# .env 파일에 슬랙 DM 받은 키 입력
+
+./start-docker.sh         # 또는 docker compose up
+
+# 매일
+docker compose up -d      # 백그라운드
+# IDE 로 코드 수정 — 평소대로
+git add / commit / push   # 평소대로
+docker compose down       # 일과 종료
+
+# 환경 변경 알림 받았을 때
+git pull
+docker compose up --build
+```
+
+### 8. 검증
+
+- 본인 PC (Mac, Apple Silicon, Docker Desktop v5.1.3) 에서 빌드 성공:
+  - `stoic-hamilton-e58836-frontend:latest` 424MB
+  - `stoic-hamilton-e58836-backend:latest` 240MB
+  - `stoic-hamilton-e58836-python_api:latest` 239MB
+- `docker compose config` 문법 검증 통과
+- 호스트 코드 수정 → 컨테이너 안 자동 반영 동작 확인 (Vite/node --watch/uvicorn --reload)
+- `start-docker.sh` 가 .env 누락 / Docker 데몬 미실행 사전 차단
+
+### 9. 알려진 한계 / 향후 과제
+
+| 항목 | 현재 상태 | 향후 고려 |
+|---|---|---|
+| 운영용 빌드 | 도입 안 함 (dev only) | `docker-compose.prod.yml` 분리, multi-stage build, `npm run build` 정적 파일 nginx 서빙 |
+| HTTPS | 평문 HTTP only | EC2 배포 시 nginx + Let's Encrypt 또는 ALB + ACM |
+| 컨테이너 root 권한 | dev 모드라 그대로 | 운영 전 비권한 사용자(`USER node`) 적용 |
+| 이미지 레지스트리 | 미사용 | 운영 단계 진입 시 GHCR/ECR 도입 검토 |
+| Windows 바인드 마운트 속도 | WSL2 기준 양호 | 느리면 Mutagen / docker-sync 검토 (현재 단계엔 불필요) |
+| Vite HMR 안정성 | `CHOKIDAR_USEPOLLING=true` 적용 | 폴링 대신 파일시스템 이벤트가 정상 동작하는지 팀원 검증 후 폴링 옵션 제거 가능 |
+
+### 10. 팀원 안내 슬랙 템플릿
+
+```
+🐳 Docker 환경 도입했어. 이제 앞으로는 다음과 같이 실행하면 돼:
+
+[최초 1회]
+1. Docker Desktop 설치: https://docker.com/products/docker-desktop
+2. git pull origin dev
+3. .env 파일 3개 작성 (.env.example 복사 후 값 입력)
+   - 루트 .env
+   - src/backend/.env  ← AWS 키 4줄 (별도 DM)
+   - src/python_api/.env  ← RDS 자격증명 (별도 DM)
+4. ./start-docker.sh
+
+[매일]
+- docker compose up -d (시작)
+- 코드 수정은 평소대로 (자동 핫 리로드)
+- docker compose down (종료)
+
+[환경 변경 알림 받았을 때]
+- git pull && docker compose up --build
+
+기존 start.sh 도 그대로 살아있으니 Docker 안 쓰고 싶으면 그쪽으로 가도 돼.
+막히면 README 의 "Docker 로 실행하기" 섹션 보거나 나한테 DM.
+```
 
 ---
 

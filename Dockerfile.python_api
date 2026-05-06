@@ -1,0 +1,38 @@
+# ============================================================
+# Routine Mate — Python API (FastAPI) 컨테이너
+# ============================================================
+# 베이스 이미지: python:3.12-slim
+#   - slim 은 Debian 기반 + 불필요 패키지 제거 → 이미지 작음
+#   - alpine 은 musl libc 기반이라 일부 PyPI 휠과 호환 문제가 있을 수 있어
+#     Python 은 alpine 보다 slim 권장
+#
+# 컨테이너 안 동작:
+#   1. /app 작업 디렉터리
+#   2. requirements.txt 먼저 복사 → pip install (레이어 캐싱)
+#   3. 코드는 docker-compose volume 으로 호스트 동기화
+#   4. uvicorn --reload 모드 → 코드 변경 시 자동 재시작
+#
+# 빌드 컨텍스트: ./src/python_api
+# ============================================================
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# pip 캐시 비활성화: 이미지 크기 절감 (캐시는 호스트 어차피 따로 있음)
+ENV PIP_NO_CACHE_DIR=1
+ENV PYTHONUNBUFFERED=1
+
+# 의존성 파일만 먼저 복사
+COPY requirements.txt ./
+
+# 의존성 설치 (fastapi, uvicorn, pymysql, bcrypt 등)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# FastAPI 서버 포트
+EXPOSE 8000
+
+# uvicorn 시작
+# --host 0.0.0.0: 컨테이너 외부에서 접근 가능
+# --reload: 코드 변경 시 자동 재시작 (개발 모드)
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
