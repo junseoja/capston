@@ -36,7 +36,7 @@ function HomePage({
       return { title: "🌅 아침 루틴", range: "06:00 ~ 11:59" };
     }
     if (time === "lunch") {
-      return { title: "🍱 점심 루틴", range: "12:00 ~ 17:59" };
+      return { title: "🌤️ 점심 루틴", range: "12:00 ~ 17:59" };
     }
     return { title: "🌙 저녁 루틴", range: "18:00 ~ 05:59" };
   };
@@ -217,211 +217,214 @@ function HomePage({
           </p>
         ) : (
           <>
-          <div className="home-routine-list">
-            {filteredRoutines.map((routine) => {
-              const timeStatus = getRoutineTimeStatus(routine.time);
-              const isDisabled =
-                !routine.completed && timeStatus !== "active";
+            <div className="home-routine-list">
+              {filteredRoutines.map((routine) => {
+                const timeStatus = getRoutineTimeStatus(routine.time);
+                const isDisabled =
+                  !routine.completed && timeStatus !== "active";
 
-              return (
-                <div
-                  className={`home-routine-card ${routine.completed ? "home-routine-card-completed" : ""
-                    }`}
-                  key={routine.id}
-                >
-                  <div className="home-routine-card-left">
-                    <div className="home-routine-card-top">
-                      <h3 onClick={() => setSelectedTitle(routine.title)}>
-                        {routine.title}
-                      </h3>
-                      <span className="home-routine-badge">
-                        {routine.category}
-                      </span>
+                return (
+                  <div
+                    className={`home-routine-card ${routine.completed ? "home-routine-card-completed" : ""
+                      }`}
+                    key={routine.id}
+                  >
+                    <div className="home-routine-card-left">
+                      <div className="home-routine-card-top">
+                        <h3 onClick={() => setSelectedTitle(routine.title)}>
+                          {routine.title}
+                        </h3>
+                        <span className="home-routine-badge">
+                          {routine.category}
+                        </span>
+                      </div>
+
+                      <p className="home-routine-type">
+                        {getModeText(routine.routineMode)}
+                      </p>
+
+                      <p className="home-routine-desc">
+                        {routine.description || "루틴 설명이 아직 없습니다."}
+                      </p>
+
+                      <div className="home-routine-meta">
+                        {routine.goal && <span>{routine.goal}</span>}
+                        {routine.repeat && <span>{routine.repeat}</span>}
+                      </div>
                     </div>
 
-                    <p className="home-routine-type">
-                      {getModeText(routine.routineMode)}
-                    </p>
-
-                    <p className="home-routine-desc">
-                      {routine.description || "루틴 설명이 아직 없습니다."}
-                    </p>
-
-                    <div className="home-routine-meta">
-                      {routine.goal && <span>{routine.goal}</span>}
-                      {routine.repeat && <span>{routine.repeat}</span>}
-                    </div>
-                  </div>
-
-                  <div className="home-routine-card-right">
-                    {routine.completed ? (
-                      <button
-                        type="button"
-                        className="home-complete-box"
-                        onClick={() => handleCancelComplete(routine.id)}
-                      >
-                        <p className="home-complete-text">
-                          완료 시간: {routine.completedAt}
-                        </p>
-
-                        {routine.proofText && (
-                          <p className="home-proof-text">
-                            {routine.proofText}
+                    <div className="home-routine-card-right">
+                      {routine.completed ? (
+                        <button
+                          type="button"
+                          className="home-complete-box"
+                          onClick={() => handleCancelComplete(routine.id)}
+                        >
+                          <p className="home-complete-text">
+                            완료 시간: {routine.completedAt}
                           </p>
-                        )}
 
-                        {routine.proofFiles &&
-                          routine.proofFiles.length > 0 && (
-                            <div className="proof-preview-list completed-proof-preview-list">
-                              {routine.proofFiles.map((file, index) => (
-                                <div key={index} className="proof-preview-item">
-                                  {file.type.startsWith("image/") ? (
-                                    <img
-                                      src={file.url}
-                                      alt=""
-                                      className="proof-preview-media"
-                                    />
-                                  ) : file.type.startsWith("video/") ? (
-                                    <video
-                                      src={file.url}
-                                      controls
-                                      className="proof-preview-media"
-                                    />
-                                  ) : (
-                                    <p>{file.name}</p>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
+                          {routine.proofText && (
+                            <p className="home-proof-text">
+                              {routine.proofText}
+                            </p>
                           )}
-                      </button>
-                    ) : routine.routineMode === "check" ? (
-                      <button
-                        className="routine-check-btn home-action-btn"
-                        onClick={() =>
-                          handleCheckComplete(routine.id, routine.time)
-                        }
-                        disabled={isDisabled}
-                      >
-                        {getCheckButtonText(timeStatus)}
-                      </button>
-                    ) : (
-                      <div className="home-detail-action">
-                        {openProofId === routine.id ? (
-                          <div className="proof-box">
-                            <textarea
-                              placeholder="오늘 루틴 인증 내용을 입력하세요 (최대 200자)"
-                              value={proofInputs[routine.id] || ""}
-                              onChange={(e) =>
-                                handleProofChange(routine.id, e.target.value)
-                              }
-                              maxLength={200}
-                            />
 
-                            <label className="proof-file-label">
-                              사진 / 영상 추가
-                              <input
-                                type="file"
-                                accept="image/*,video/*"
-                                multiple
+                          {routine.proofFiles &&
+                            routine.proofFiles.length > 0 && (
+                              <div className="proof-preview-list completed-proof-preview-list">
+                                {routine.proofFiles.map((file, index) => (
+                                  <div key={index} className="proof-preview-item">
+                                    {file.type.startsWith("image/") ? (
+                                      <img
+                                        src={file.url}
+                                        alt=""
+                                        className="proof-preview-media"
+                                      />
+                                    ) : file.type.startsWith("video/") ? (
+                                      <video
+                                        src={file.url}
+                                        controls
+                                        className="proof-preview-media"
+                                      />
+                                    ) : (
+                                      <p>{file.name}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                        </button>
+                      ) : routine.routineMode === "check" ? (
+                        <button
+                          className="routine-check-btn home-action-btn"
+                          onClick={() =>
+                            handleCheckComplete(routine.id, routine.time)
+                          }
+                          disabled={isDisabled}
+                        >
+                          {getCheckButtonText(timeStatus)}
+                        </button>
+                      ) : (
+                        <div className="home-detail-action">
+                          {openProofId === routine.id ? (
+                            <div className="proof-box">
+                              <textarea
+                                placeholder="오늘 루틴 인증 내용을 입력하세요 (최대 200자)"
+                                value={proofInputs[routine.id] || ""}
                                 onChange={(e) =>
-                                  handleFileChange(routine.id, e.target.files)
+                                  handleProofChange(routine.id, e.target.value)
                                 }
+                                maxLength={200}
                               />
-                            </label>
 
-                            {proofFiles[routine.id] &&
-                              proofFiles[routine.id].length > 0 && (
-                                <div className="proof-preview-list">
-                                  {proofFiles[routine.id].map((file, index) => (
-                                    <div
-                                      key={index}
-                                      className="proof-preview-item"
-                                    >
-                                      {file.type.startsWith("image/") ? (
-                                        <img
-                                          src={file.url}
-                                          alt=""
-                                          className="proof-preview-media"
-                                        />
-                                      ) : file.type.startsWith("video/") ? (
-                                        <video
-                                          src={file.url}
-                                          controls
-                                          className="proof-preview-media"
-                                        />
-                                      ) : (
-                                        <p className="proof-file-name">
-                                          {file.name}
-                                        </p>
-                                      )}
-                                    </div>
-                                  ))}
+                              <label className="proof-file-label">
+                                사진 / 영상 추가
+                                <input
+                                  type="file"
+                                  accept="image/*,video/*"
+                                  multiple
+                                  onChange={(e) =>
+                                    handleFileChange(routine.id, e.target.files)
+                                  }
+                                />
+                              </label>
+
+                              {proofFiles[routine.id] &&
+                                proofFiles[routine.id].length > 0 && (
+                                  <div className="proof-preview-list">
+                                    {proofFiles[routine.id].map((file, index) => (
+                                      <div
+                                        key={index}
+                                        className="proof-preview-item"
+                                      >
+                                        {file.type.startsWith("image/") ? (
+                                          <img
+                                            src={file.url}
+                                            alt=""
+                                            className="proof-preview-media"
+                                          />
+                                        ) : file.type.startsWith("video/") ? (
+                                          <video
+                                            src={file.url}
+                                            controls
+                                            className="proof-preview-media"
+                                          />
+                                        ) : (
+                                          <p className="proof-file-name">
+                                            {file.name}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                              <label>
+                                <div className="feed-upload-check">
+                                  <input
+                                    type="checkbox"
+                                    id={`feed-upload-${routine.id}`}
+                                    checked={uploadChecks[routine.id] || false}
+                                    onChange={(e) =>
+                                      handleUploadCheckChange(routine.id, e.target.checked)
+                                    }
+                                  />
+
+                                  <label htmlFor={`feed-upload-${routine.id}`}>
+                                    피드에도 올리기
+                                  </label>
                                 </div>
-                              )}
+                              </label>
 
-                            <label>
-                              <input
-                                type="checkbox"
-                                checked={uploadChecks[routine.id] || false}
-                                onChange={(e) =>
-                                  handleUploadCheckChange(
-                                    routine.id,
-                                    e.target.checked
-                                  )
+                              <button
+                                className="proof-save-btn"
+                                onClick={() =>
+                                  handleDetailSubmit(routine.id, routine.time)
                                 }
-                              />{" "}
-                              피드에도 올리기
-                            </label>
-
+                                disabled={isDisabled}
+                              >
+                                {getDetailSubmitButtonText(timeStatus)}
+                              </button>
+                            </div>
+                          ) : (
                             <button
-                              className="proof-save-btn"
-                              onClick={() =>
-                                handleDetailSubmit(routine.id, routine.time)
-                              }
+                              className="routine-detail-btn home-action-btn"
+                              onClick={() => setOpenProofId(routine.id)}
                               disabled={isDisabled}
                             >
-                              {getDetailSubmitButtonText(timeStatus)}
+                              {getDetailButtonText(timeStatus)}
                             </button>
-                          </div>
-                        ) : (
-                          <button
-                            className="routine-detail-btn home-action-btn"
-                            onClick={() => setOpenProofId(routine.id)}
-                            disabled={isDisabled}
-                          >
-                            {getDetailButtonText(timeStatus)}
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-                
-              );
-                       })}
-          </div>
 
-          {/* 🔥 모달 */}
-          {selectedTitle && (
-            <div
-              className="title-modal-overlay"
-              onClick={() => setSelectedTitle("")}
-            >
-              <div
-                className="title-modal"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <p>{selectedTitle}</p>
-                <button onClick={() => setSelectedTitle("")}>
-                  닫기
-                </button>
-              </div>
+                );
+              })}
             </div>
-          )}
-</>
+
+            {/* 🔥 모달 */}
+            {selectedTitle && (
+              <div
+                className="title-modal-overlay"
+                onClick={() => setSelectedTitle("")}
+              >
+                <div
+                  className="title-modal"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <p>{selectedTitle}</p>
+                  <button onClick={() => setSelectedTitle("")}>
+                    닫기
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
-      
+
       </div>
     </div>
   );
