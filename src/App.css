@@ -2,7 +2,71 @@
    Routine Mate - Modern UI App.css
    최신 frontend 코드 기준 / JSX 수정 없이 App.css만 교체
    ========================================================= */
+/* ===============================
+   반응형
+================================ */
 
+@media (max-width: 768px) {
+
+  .home-routine-card {
+    flex-direction: column;
+    gap: 18px;
+    padding: 18px;
+  }
+
+  .home-routine-card-right {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .home-detail-action {
+    width: 100%;
+  }
+
+  .routine-check-btn,
+  .home-action-btn {
+    width: 100%;
+  }
+}
+@media (max-width: 768px) {
+
+  .week {
+    gap: 6px;
+    padding: 10px;
+  }
+
+  .day {
+    min-height: 58px;
+    padding: 6px 4px;
+  }
+
+  .day p:first-child {
+    font-size: 11px;
+  }
+
+  .day p:last-child {
+    font-size: 15px;
+  }
+}
+@media (max-width: 768px) {
+
+  .instagram-feed-list {
+    gap: 18px;
+  }
+
+  .instagram-feed-card {
+    border-radius: 18px;
+  }
+
+  .instagram-feed-routine-title {
+    font-size: 18px;
+  }
+
+  .instagram-feed-caption {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+}
 /* ===============================
    1. 디자인 시스템
 ================================ */
