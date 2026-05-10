@@ -67,6 +67,267 @@
     line-height: 1.6;
   }
 }
+/* =========================================================
+   추가 반응형 최종 보정
+========================================================= */
+
+@media (max-width: 768px) {
+
+  /* 전체 */
+  body {
+    overflow-x: hidden;
+  }
+
+  .page-container,
+  .routine-page,
+  .feed-page,
+  .mypage,
+  .home {
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  /* 상단바 */
+  .topbar {
+    position: static;
+    border-radius: 22px;
+  }
+
+  .logo {
+    font-size: 20px;
+  }
+
+  .nav {
+    gap: 6px;
+  }
+
+  .nav button {
+    font-size: 13px;
+    padding: 10px 6px;
+  }
+
+  /* 홈 */
+  .routine-content {
+    padding: 18px;
+  }
+
+  .home-section-title {
+    font-size: 22px;
+    line-height: 1.4;
+  }
+
+  .home-routine-card {
+    padding: 16px;
+    border-radius: 20px;
+    gap: 16px;
+  }
+
+  .home-routine-card-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .home-routine-card h3 {
+    font-size: 22px;
+    line-height: 1.4;
+  }
+
+  .home-routine-desc {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .home-routine-meta {
+    gap: 6px;
+  }
+
+  .home-routine-meta span {
+    font-size: 11px;
+    padding: 6px 10px;
+  }
+
+  /* 버튼 */
+  .routine-check-btn,
+  .home-action-btn,
+  .proof-save-btn,
+  .routine-save-btn,
+  .routine-add-btn {
+    width: 100%;
+    min-width: 0;
+    font-size: 14px;
+    padding: 14px;
+  }
+
+  /* 루틴 페이지 */
+  .routine-card {
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  .routine-card-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .routine-card h3 {
+    font-size: 23px;
+  }
+
+  .routine-card-desc {
+    font-size: 14px;
+  }
+
+  .routine-card-actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .routine-delete-btn {
+    width: 100%;
+  }
+
+  /* 루틴 추가 */
+  .routine-form-box {
+    padding: 20px;
+  }
+
+  .repeat-day-list {
+    gap: 8px;
+  }
+
+  .repeat-day-btn {
+    flex: 1 1 calc(33.333% - 8px);
+    justify-content: center;
+    text-align: center;
+  }
+
+  /* 로그인 회원가입 */
+  .login-card,
+  .signup-box {
+    padding: 28px 18px;
+  }
+
+  .login-title,
+  .signup-title {
+    font-size: 26px;
+  }
+
+  .login-subtitle {
+    font-size: 14px;
+  }
+
+  /* 피드 */
+  .instagram-feed-card {
+    border-radius: 20px;
+  }
+
+  .instagram-feed-top {
+    padding: 18px;
+  }
+
+  .instagram-feed-body {
+    padding: 16px 18px 20px;
+  }
+
+  .instagram-feed-routine-title {
+    font-size: 18px;
+    line-height: 1.4;
+  }
+
+  .instagram-feed-media {
+    max-height: 360px;
+  }
+
+  .instagram-feed-caption {
+    font-size: 14px;
+  }
+
+  /* 달력 */
+  .week {
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .day {
+    min-height: 52px;
+    padding: 4px;
+  }
+
+  .day p:first-child {
+    font-size: 10px;
+  }
+
+  .day p:last-child {
+    font-size: 13px;
+  }
+
+  /* 관리자 페이지 */
+  table {
+    min-width: 600px;
+  }
+
+  .routine-form-box {
+    overflow-x: auto;
+  }
+
+  /* 파일 업로드 */
+  .proof-preview-item {
+    width: 88px;
+    height: 88px;
+  }
+
+  /* 긴 글 방지 */
+  h1,
+  h2,
+  h3,
+  p,
+  span,
+  button {
+    word-break: keep-all;
+  }
+}
+
+
+/* 초소형 모바일 */
+@media (max-width: 480px) {
+
+  .topbar {
+    padding: 12px;
+  }
+
+  .nav {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .home-section-title,
+  .routine-title,
+  .feed-title {
+    font-size: 20px;
+  }
+
+  .home-routine-card h3,
+  .routine-card h3 {
+    font-size: 20px;
+  }
+
+  .home-routine-desc,
+  .routine-card-desc,
+  .instagram-feed-caption {
+    font-size: 13px;
+  }
+
+  .routine-content,
+  .routine-form-box,
+  .feed-header,
+  .routine-header {
+    padding: 16px;
+  }
+
+  .proof-preview-item {
+    width: 72px;
+    height: 72px;
+  }
+}
 /* ===============================
    1. 디자인 시스템
 ================================ */
