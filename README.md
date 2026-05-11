@@ -213,6 +213,12 @@ PORT=3000
 # FastAPI 서버 URL
 PYTHON_API=http://localhost:8000
 
+# Express → FastAPI 내부 호출 인증 키
+# [추가 2026-05-10]
+# 이유: FastAPI 포트가 직접 열려도 Express가 붙이는 내부 헤더 없이는 DB 변경 API를 호출하지 못하게 막기 위함.
+# 설명: src/python_api/.env 의 INTERNAL_API_KEY 와 반드시 같은 긴 랜덤 문자열로 맞추세요.
+INTERNAL_API_KEY=replace-with-a-long-random-shared-secret
+
 # React 프론트엔드 URL (CORS 허용 대상)
 FRONTEND_URL=http://localhost:5173
 ```
@@ -220,7 +226,7 @@ FRONTEND_URL=http://localhost:5173
 ### 3. Python FastAPI `.env`
 
 ```bash
-cp src/python_api/.env.example src/python_api/.env   # .env.example이 없으면 직접 생성
+cp src/python_api/.env.example src/python_api/.env
 ```
 
 ```
@@ -229,7 +235,34 @@ DB_USER=admin
 DB_PASSWORD=your-password
 DB_NAME=capston
 DB_PORT=3306
+
+# Express → FastAPI 내부 호출 인증 키
+# [추가 2026-05-10]
+# 이유: FastAPI는 공개 API가 아니라 Express 뒤의 내부 데이터 계층이므로 직접 호출을 차단합니다.
+# 설명: src/backend/.env 의 INTERNAL_API_KEY 와 반드시 같은 긴 랜덤 문자열로 맞추세요.
+INTERNAL_API_KEY=replace-with-a-long-random-shared-secret
+
+# DB 커넥션 풀 / 성능 측정
+# [추가 2026-05-10]
+# 이유: 요청마다 MySQL 연결을 새로 만들지 않고 재사용하여 RDS 연결 생성 비용을 줄입니다.
+DB_POOL_SIZE=8
+DB_POOL_MAX_OVERFLOW=4
+SLOW_QUERY_MS=200
+SLOW_REQUEST_MS=500
 ```
+
+### 4. 성능 관련 선택 설정
+
+```env
+# src/backend/.env
+# [추가 2026-05-10]
+# 이유: 느린 Express 요청을 찾고, 통계 API 반복 조회 비용을 줄이기 위한 설정입니다.
+SLOW_REQUEST_MS=500
+STATS_CACHE_TTL_MS=60000
+```
+
+DB 인덱스 권장안은 `docs/performance-indexes-2026-05-10.sql`에 정리되어 있습니다.
+실제 RDS에는 `SHOW INDEX`로 기존 인덱스 중복 여부를 확인한 뒤 적용하세요.
 
 ---
 
@@ -2638,6 +2671,352 @@ docker compose up --build
 
 ---
 
+## 🔧 2026-05-10 작업 내역
+
+### 1. 이번 세션 개요
+
+이번 작업은 기존 구조인 **React → Express → FastAPI → MySQL** 을 유지하면서,
+보안 경계 강화, 마이페이지/통계 실제 데이터 연결, 성능 개선 기반을 한 번에 정리한 세션이다.
+
+핵심 목표:
+
+- FastAPI 직접 호출 우회 방지
+- 완료/피드 생성 시 소유권 검증 강화
+- MyPage / StatsPage 의 mock 데이터 제거
+- DB 커넥션 재사용, 요청 시간 측정, 짧은 통계 캐시 도입
+- 향후 RDS 적용용 인덱스 SQL 정리
+
+---
+
+### 2. FastAPI 직접 접근 방어
+
+#### 2-1. 내부 인증 헤더 도입
+
+FastAPI는 브라우저가 직접 호출하는 공개 API가 아니라 Express 뒤의 내부 데이터 계층이다.
+따라서 Express가 FastAPI를 호출할 때만 공유 키를 헤더로 붙이고, FastAPI는 이 헤더가 없거나 틀리면 요청을 차단하도록 변경했다.
+
+| 항목 | 변경 내용 |
+|---|---|
+| 헤더 이름 | `X-Internal-Api-Key` |
+| Express 설정 | `src/backend/database.js` 의 `fetchJson()` 이 모든 FastAPI 요청에 내부 헤더 자동 주입 |
+| 예외 처리 | `routes/login.js` 의 중복체크 직접 fetch에도 내부 헤더 추가 |
+| FastAPI 설정 | `src/python_api/app.py` 전역 미들웨어에서 헤더 검증 |
+| 공개 예외 경로 | `/docs`, `/redoc`, `/openapi.json`, `/docs/oauth2-redirect`, `/favicon.ico` |
+
+환경변수:
+
+```env
+# src/backend/.env
+INTERNAL_API_KEY=긴_랜덤_공유_키
+
+# src/python_api/.env
+INTERNAL_API_KEY=같은_긴_랜덤_공유_키
+```
+
+결과:
+
+- Express를 거치지 않은 FastAPI 직접 호출은 기본적으로 403 차단
+- `PATCH /user/password/{user_id}` 같은 내부 전용 API의 외부 우회 위험 감소
+- 설정 누락 시 FastAPI가 500으로 실패하여 잘못 열린 상태로 동작하지 않음
+
+---
+
+### 3. 완료/피드 생성 소유권 검증 강화
+
+기존에는 Express가 세션에서 `user_id`를 주입하더라도, `routine_id`와 `completion_id`는 프론트 입력값이므로 FastAPI에서 한 번 더 검증할 필요가 있었다.
+
+| 파일 | 변경 내용 |
+|---|---|
+| `src/python_api/routers/completion.py` | 완료 생성 전 `routine_id + user_id + deleted_at IS NULL` 검증 |
+| `src/python_api/routers/feed.py` | 피드 생성 전 `completion_id + routine_id + user_id + deleted_at IS NULL` 검증 |
+
+차단되는 케이스:
+
+- 타인의 `routine_id`로 완료 기록 생성
+- 타인의 `completion_id`로 피드 생성
+- 서로 관계없는 루틴/완료 기록을 강제로 연결
+- 이후 MyPage / Stats 통계가 잘못된 데이터로 오염되는 문제
+
+---
+
+### 4. 피드 업로드 실패 처리 개선
+
+`fetch()`는 HTTP 400/500에서도 throw 하지 않기 때문에, 기존 `App.jsx`는 `POST /feed` 실패를 성공처럼 넘길 수 있었다.
+
+변경:
+
+- `src/frontend/App.jsx`
+  - 피드 업로드 응답의 `res.ok`와 `data.success`를 모두 확인
+  - 실패 시 catch로 보내고 사용자에게 "루틴 완료는 저장되었지만, 피드 업로드에 실패했습니다." 안내
+
+결과:
+
+- 완료 기록 저장과 피드 업로드의 부분 성공/실패 상태를 사용자에게 명확히 전달
+- S3/FastAPI/DB 실패가 조용히 묻히는 문제 감소
+
+---
+
+### 5. MyPage 실제 데이터 API 연결
+
+#### 5-1. 신규 API
+
+| 계층 | 엔드포인트 | 역할 |
+|---|---|---|
+| Express | `GET /mypage` | 유저 정보 + summary + gallery 통합 조회 |
+| Express | `GET /mypage/summary` | 마이페이지 핵심 지표 조회 |
+| Express | `GET /mypage/gallery` | 내 인증 갤러리 조회 |
+| FastAPI | `GET /mypage/{user_id}` | 유저 정보 + summary + gallery 통합 계산 |
+| FastAPI | `GET /mypage/summary/{user_id}` | summary 단독 조회 |
+| FastAPI | `GET /mypage/gallery/{user_id}` | gallery 단독 조회 |
+
+#### 5-2. 프론트 변경
+
+`src/frontend/MyPage.jsx`:
+
+- 기존 `/me`, `/routine`, `/completion/history` 병렬 호출 구조 제거
+- 기존 mock 달성률 / `continuousDays = 12` / Unsplash 갤러리 제거
+- `GET /mypage?gallery_limit=9` 한 번으로 아래 데이터 조회
+  - 유저 정보
+  - 총 루틴 수
+  - 오늘 통합 달성률
+  - 현재 연속 달성일
+  - 인증 게시글 수
+  - 내 인증 갤러리 이미지/영상
+
+#### 5-3. 계산 기준
+
+| 지표 | 기준 |
+|---|---|
+| 총 루틴 수 | `routines.deleted_at IS NULL` |
+| 오늘 달성률 | 오늘 완료한 distinct routine 수 / 활성 루틴 수 |
+| 시간대별 달성률 | 해당 `time_slot` 활성 루틴 대비 오늘 완료 수 |
+| 연속 달성 | 오늘부터 역순으로 "하루 1개 이상 완료"가 이어진 날짜 수 |
+| 인증 게시글 수 | `feeds` 에서 현재 user_id가 작성한 게시글 수 |
+| 갤러리 | `feeds` + `feed_images` 최신순 |
+
+---
+
+### 6. StatsPage 실제 데이터 API 연결
+
+#### 6-1. 신규 API
+
+| 계층 | 엔드포인트 | 역할 |
+|---|---|---|
+| Express | `GET /stats?mode=weekly\|monthly&start=YYYY-MM-DD&end=YYYY-MM-DD` | 현재 로그인 유저 기준 통계 조회 |
+| FastAPI | `GET /stats/{user_id}` | 루틴/완료 기록 기반 통계 계산 |
+
+#### 6-2. 프론트 변경
+
+`src/frontend/StatsPage.jsx`:
+
+- 고정 mock 데이터 제거
+- 현재 주/월 범위를 실제 오늘 날짜 기준으로 계산
+- 달력에서 선택한 범위를 `GET /stats` 쿼리로 전달
+- 응답 기반으로 아래 영역 렌더링
+  - 통합 달성률
+  - 요일별/주차별 차트
+  - 시간대별 루틴 달성률
+  - 카테고리별 달성률
+  - 최다 연속 달성일
+
+#### 6-3. 계산 기준
+
+현재 `repeat_cycle`은 `"매일"`, `"월, 수"` 같은 자유 문자열이므로, 이번 구현에서는 안전하게 **활성 루틴 전체 × 기간 일수**를 목표량으로 계산한다.
+
+향후 더 정확한 예정 루틴 기준 달성률을 내려면:
+
+- 반복 요일을 별도 테이블로 정규화하거나
+- `repeat_cycle`을 JSON/ENUM 기반 구조로 바꾸고
+- 통계 쿼리에서 해당 날짜의 예정 루틴만 denominator에 포함해야 한다.
+
+---
+
+### 7. 성능 개선
+
+#### 7-1. 요청 시간 측정
+
+| 계층 | 파일 | 동작 |
+|---|---|---|
+| Express | `src/backend/app.js` | `SLOW_REQUEST_MS` 이상 걸린 요청 로그 |
+| FastAPI | `src/python_api/app.py` | `SLOW_REQUEST_MS` 이상 걸린 요청 로그 |
+| MySQL | `src/python_api/database.py` | `SLOW_QUERY_MS` 이상 걸린 SQL 로그 |
+
+기본값:
+
+```env
+SLOW_REQUEST_MS=500
+SLOW_QUERY_MS=200
+```
+
+로그 예:
+
+```text
+🐢 [express] GET /stats 200 722.4ms
+🐢 [fastapi] GET /stats/... 200 650.1ms
+🐢 [slow-sql] 245.8ms SELECT ...
+```
+
+#### 7-2. FastAPI DB 커넥션 풀
+
+`src/python_api/database.py`를 요청마다 새 연결 생성 방식에서 커넥션 풀 방식으로 변경했다.
+
+| 항목 | 변경 전 | 변경 후 |
+|---|---|---|
+| 연결 방식 | 요청마다 `pymysql.connect()` | 앱 프로세스 내 커넥션 풀 재사용 |
+| 라우터 코드 | `conn.close()`로 실제 종료 | `conn.close()` 호출 시 풀 반환 |
+| 타임존 | 연결마다 `SET time_zone = '+09:00'` | 풀 커넥션 생성 시 동일 적용 |
+| slow SQL | 없음 | `SLOW_QUERY_MS` 이상 로그 |
+
+환경변수:
+
+```env
+DB_POOL_SIZE=8
+DB_POOL_MAX_OVERFLOW=4
+SLOW_QUERY_MS=200
+```
+
+장점:
+
+- RDS 연결 생성/인증 비용 감소
+- 동시 요청에서 연결 재사용
+- 기존 라우터의 `try/finally conn.close()` 패턴 유지
+
+#### 7-3. Stats 짧은 TTL 캐시
+
+`src/backend/routes/stats.js`에 사용자/기간별 메모리 캐시를 추가했다.
+
+| 항목 | 내용 |
+|---|---|
+| 캐시 키 | `user_id + mode + start + end` |
+| 기본 TTL | `60000ms` |
+| 목적 | 같은 기간 통계 재조회 시 Express → FastAPI → MySQL 왕복 감소 |
+| 한계 | 완료/취소 직후 최대 TTL 만큼 통계 반영이 늦을 수 있음 |
+
+환경변수:
+
+```env
+STATS_CACHE_TTL_MS=60000
+```
+
+#### 7-4. 마이페이지 API 왕복 감소
+
+기존:
+
+```text
+MyPage.jsx
+  ├─ GET /me
+  ├─ GET /mypage/summary
+  └─ GET /mypage/gallery
+```
+
+변경:
+
+```text
+MyPage.jsx
+  └─ GET /mypage
+       ├─ user
+       ├─ summary
+       └─ gallery
+```
+
+React → Express → FastAPI 왕복이 3회에서 1회로 줄어든다.
+
+#### 7-5. 피드/갤러리 미디어 로딩 최적화
+
+| 파일 | 변경 |
+|---|---|
+| `src/frontend/FeedPage.jsx` | 이미지 `loading="lazy"`, `decoding="async"`, 영상 `preload="metadata"` |
+| `src/frontend/MyPage.jsx` | 갤러리 이미지 lazy/async, 영상 metadata preload |
+
+원본 S3 이미지를 그대로 쓰는 구조는 유지하되, 목록 화면에서 불필요한 즉시 로딩을 줄였다.
+
+---
+
+### 8. 인덱스 권장 SQL 작성
+
+실제 RDS에 바로 DDL을 실행하지 않고, 적용용 SQL 파일을 별도로 작성했다.
+
+| 파일 | 역할 |
+|---|---|
+| `docs/performance-indexes-2026-05-10.sql` | `/feed`, `/completion/today`, `/mypage`, `/stats` 성능 개선용 인덱스 권장안 |
+
+포함 인덱스:
+
+- `routines(user_id, deleted_at, time_slot)`
+- `routines(user_id, deleted_at, category)`
+- `routine_completions(user_id, deleted_at, completed_at)`
+- `routine_completions(user_id, routine_id, completed_at)`
+- `feeds(user_id, created_at)`
+- `feed_images(feed_id, created_at)`
+- `feed_likes(feed_id, user_id)`
+- `feed_comments(feed_id, created_at)`
+
+주의:
+
+- 실제 RDS 적용 전 `SHOW INDEX`로 중복 인덱스 확인 필요
+- 데이터가 많은 테이블에서는 `CREATE INDEX` 중 쓰기 성능이 일시 저하될 수 있음
+- 팀 검토 후 적용 권장
+
+---
+
+### 9. 환경변수 / 문서 변경
+
+| 파일 | 변경 내용 |
+|---|---|
+| `src/backend/.env.example` | `INTERNAL_API_KEY`, `SLOW_REQUEST_MS`, `STATS_CACHE_TTL_MS` 추가 |
+| `src/python_api/.env.example` | 신규 생성. DB 접속 정보, `INTERNAL_API_KEY`, DB 풀/slow log 설정 추가 |
+| `README.md` | 환경 설정 섹션에 2026-05-10 보안/성능 env 안내 추가 |
+
+---
+
+### 10. 검증
+
+이번 작업 후 실행한 검증:
+
+- `python3 -m py_compile src/python_api/app.py src/python_api/database.py src/python_api/routers/*.py`
+- `node --check src/backend/app.js`
+- `node --check src/backend/database.js`
+- `node --check src/backend/routes/stats.js`
+- `npm run lint`
+- `npm run build`
+- `git diff --check`
+
+결과:
+
+- 빌드 / 문법 / diff whitespace 검증 통과
+- `npm run lint` 에러 없음
+- 기존 warning 2개는 유지
+  - `.claude/worktrees/.../src/backend/app.js` unused eslint-disable
+  - `src/frontend/HomePage.jsx` Object URL cleanup ref 경고
+
+---
+
+### 11. 변경 파일 목록
+
+| 파일 | 변경 내용 |
+|---|---|
+| `src/backend/app.js` | slow request 로그 미들웨어, mypage/stats 라우터 등록 |
+| `src/backend/database.js` | 내부 인증 헤더 주입, mypage/stats 브리지 함수 추가 |
+| `src/backend/routes/login.js` | 중복체크 FastAPI 직접 fetch에도 내부 인증 헤더 추가 |
+| `src/backend/routes/mypage.js` | 신규. `/mypage`, `/mypage/summary`, `/mypage/gallery` |
+| `src/backend/routes/stats.js` | 신규. `/stats` + 짧은 TTL 메모리 캐시 |
+| `src/frontend/App.jsx` | 피드 업로드 실패 응답 검증 |
+| `src/frontend/MyPage.jsx` | mock 제거, `/mypage` 통합 API 연결, 실제 갤러리 표시 |
+| `src/frontend/StatsPage.jsx` | mock 제거, `/stats` 실제 API 연결 |
+| `src/frontend/FeedPage.jsx` | 이미지 lazy/async, 영상 metadata preload |
+| `src/python_api/app.py` | 내부 인증 미들웨어, slow request 로그, mypage/stats 라우터 등록 |
+| `src/python_api/database.py` | PyMySQL 커넥션 풀, slow SQL 로그 |
+| `src/python_api/routers/completion.py` | 완료 생성 전 루틴 소유권 검증 |
+| `src/python_api/routers/feed.py` | 피드 생성 전 completion/routine/user 관계 검증 |
+| `src/python_api/routers/user.py` | password lazy migration 엔드포인트 보안 주석 갱신 |
+| `src/python_api/routers/mypage.py` | 신규. 마이페이지 summary/gallery/overview 실제 데이터 |
+| `src/python_api/routers/stats.py` | 신규. 주간/월간/시간대/카테고리 통계 |
+| `src/python_api/.env.example` | 신규. Python API 환경변수 예시 |
+| `docs/performance-indexes-2026-05-10.sql` | 신규. 성능 인덱스 권장 SQL |
+| `README.md` | 2026-05-10 작업 내역 및 환경변수 안내 추가 |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
@@ -2654,7 +3033,9 @@ docker compose up --build
 - [x] ~~루틴 삭제 시 인증 피드/댓글/좋아요 함께 사라지는 문제~~ ✅ 2026-05-01 완료 (Soft Delete)
 - [x] ~~GET /feed N+1 쿼리 + 페이지네이션 없음 — #5 (2026-05-02 분석: 신규 #10·#11)~~ ✅ 2026-05-03 완료 (단일 JOIN + cursor 페이지네이션 + 무한 스크롤)
 - [x] ~~`like.py` rollback 누락 — #8~~ ✅ 2026-05-02 완료 (rollback + 단일 커넥션 패턴)
-- [ ] DB 커넥션 풀 도입 — #9 (2026-05-02 분석: 신규 #9)
+- [x] ~~FastAPI 직접 호출 방어 / 내부 공유 키 검증~~ ✅ 2026-05-10 완료 (`X-Internal-Api-Key`)
+- [x] ~~완료/피드 생성 소유권 검증 강화~~ ✅ 2026-05-10 완료
+- [x] ~~DB 커넥션 풀 도입 — #9 (2026-05-02 분석: 신규 #9)~~ ✅ 2026-05-10 완료
 - [ ] Rate limiting 추가 — #11
 - [ ] 피드 이미지 압축/썸네일 생성 — 2026-05-02 신규 #12
 - [ ] 세션 검증 LRU 캐시 도입 — 2026-05-02 신규 #13
@@ -2662,7 +3043,8 @@ docker compose up --build
 - [ ] 에러 모니터링 (Sentry) — 2026-05-02 신규 #15
 - [ ] 회원 탈퇴 엔드포인트 (Soft Delete 컬럼은 준비됨, login_id UNIQUE 정책 결정 필요)
 - [ ] Soft Delete 영구 삭제 배치 (예: 30일 경과 시 실제 DELETE)
-- [ ] 마이페이지 → 이번 주 달성률, 인증 게시글 수 백엔드 연결
+- [x] ~~마이페이지 → 이번 주 달성률, 인증 게시글 수 백엔드 연결~~ ✅ 2026-05-10 완료 (`/mypage`)
+- [x] ~~상세 통계 페이지 mock 데이터 제거 및 실제 API 연결~~ ✅ 2026-05-10 완료 (`/stats`)
 - [ ] 현재 루틴을 추가하면 인증한 루틴 표시가 사라지는 버그 확인 필요
 - [x] ~~피드 이미지 → 현재 로컬 디스크 저장 방식, 추후 S3 등 클라우드 스토리지 전환 고려~~ ✅ 2026-05-05 완료 (multer-s3 도입)
 ---

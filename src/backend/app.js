@@ -30,6 +30,7 @@ const cookieParser = require("cookie-parser");
 
 const PORT = process.env.PORT || 3000;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS || 500);
 
 // 인증 라우터: 회원가입(/signup), 로그인(/login), 로그아웃(/logout),
 //             현재 유저(/me), 중복체크(/check-duplicate)
@@ -50,6 +51,12 @@ const likeRouter = require("./routes/like");
 // 댓글 라우터: POST /comment, GET /comment/:feed_id, DELETE /comment/:comment_id
 const commentRouter = require("./routes/comment");
 
+// 마이페이지 라우터: GET /mypage/summary, GET /mypage/gallery
+const mypageRouter = require("./routes/mypage");
+
+// 통계 라우터: GET /stats
+const statsRouter = require("./routes/stats");
+
 const app = express();
 
 // ── 미들웨어 등록 ────────────────────────────────────────────────────────────
@@ -64,6 +71,31 @@ app.use(express.json());
 
 // 쿠키 파싱 미들웨어 → req.cookies.sessionId 처럼 쿠키 값에 접근 가능
 app.use(cookieParser());
+
+// [추가 2026-05-10] Express 요청 처리 시간 측정.
+//
+// 이유:
+//   React → Express → FastAPI → MySQL 구조를 유지하면서 성능을 높이려면
+//   어느 API가 실제로 느린지 먼저 숫자로 확인해야 한다.
+//
+// 동작:
+//   모든 요청의 시작/종료 시간을 측정하고, SLOW_REQUEST_MS 이상 걸린 요청만 로그로 남긴다.
+//   빠른 요청까지 전부 찍으면 개발 로그가 너무 커지므로 기본값은 500ms 이상만 기록한다.
+//
+// 결과:
+//   Express 자체 병목인지, FastAPI/DB 대기인지, 특정 화면 API가 느린지 추적할 수 있다.
+app.use((req, res, next) => {
+    const startedAt = process.hrtime.bigint();
+    res.on("finish", () => {
+        const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+        if (elapsedMs >= SLOW_REQUEST_MS) {
+            console.warn(
+                `🐢 [express] ${req.method} ${req.originalUrl} ${res.statusCode} ${elapsedMs.toFixed(1)}ms`
+            );
+        }
+    });
+    next();
+});
 
 // [제거 2026-05-05] /uploads 정적 서빙 — 피드 이미지를 S3 로 이전.
 // 기존: app.use("/uploads", express.static(...))  → 로컬 디스크의 업로드 파일 서빙
@@ -106,6 +138,12 @@ app.use("/", likeRouter);
 // - GET    /comment/:feed_id     : 댓글 목록 조회
 // - DELETE /comment/:comment_id  : 댓글 삭제
 app.use("/", commentRouter);
+
+// [추가 2026-05-10] 마이페이지/통계 실제 데이터 라우트.
+// 이유: MyPage.jsx / StatsPage.jsx 의 mock 값을 DB 기반 API로 대체하기 위함.
+// 설명: 두 라우터 모두 requireAuth 로 세션 user_id 를 주입한 뒤 FastAPI 에 전달한다.
+app.use("/", mypageRouter);
+app.use("/", statsRouter);
 
 // ── 글로벌 에러 핸들러 ───────────────────────────────────────────────────────
 // 해결하는 에러 (README 4월 18일 #3 — 글로벌 에러 핸들러 없음):

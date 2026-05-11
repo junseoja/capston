@@ -67,6 +67,35 @@ def create_feed(body: FeedCreate):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # ────────────────────────────────────────────────────────────
+            # [추가 2026-05-10] 피드 생성 전 completion/routine/user 관계 검증.
+            # ────────────────────────────────────────────────────────────
+            # 이유:
+            #   Express 는 세션에서 user_id 를 주입하지만 routine_id/completion_id 는
+            #   프론트가 보낸 multipart 필드다. FastAPI 가 관계를 확인하지 않으면
+            #   사용자가 타인의 completion_id 로 피드를 만들거나, 서로 다른 루틴/완료 기록을
+            #   억지로 연결해 MyPage/Stats 의 인증 게시글·갤러리·달성률 데이터를 오염시킬 수 있다.
+            #
+            # 동작:
+            #   routine_completions 에서 completion_id + routine_id + user_id 가 모두 일치하고,
+            #   완료 기록 자체가 취소되지 않은(deleted_at IS NULL) 경우에만 feeds INSERT 를 허용한다.
+            #
+            # 결과:
+            #   피드는 반드시 "현재 로그인 유저가 방금 만든 본인 완료 기록"에만 연결된다.
+            # ────────────────────────────────────────────────────────────
+            cursor.execute(
+                """SELECT completion_id
+                FROM routine_completions
+                WHERE completion_id = %s
+                  AND routine_id = %s
+                  AND user_id = %s
+                  AND deleted_at IS NULL""",
+                (body.completion_id, body.routine_id, body.user_id)
+            )
+            completion = cursor.fetchone()
+            if not completion:
+                raise HTTPException(status_code=403, detail="본인 소유의 완료 기록에만 피드를 생성할 수 있습니다.")
+
             new_uuid = uuid7str()  # 피드 고유 ID 생성
             cursor.execute(
                 """INSERT INTO feeds (feed_id, user_id, routine_id, completion_id, content)
@@ -77,6 +106,8 @@ def create_feed(body: FeedCreate):
             )
         conn.commit()
         return {"success": True, "feed_id": new_uuid}  # 이미지 추가에 feed_id 필요
+    except HTTPException:
+        raise
     except Exception as e:
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))

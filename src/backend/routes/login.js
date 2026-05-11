@@ -29,6 +29,7 @@ const { v4: uuidv4 } = require("uuid"); // 세션 ID 생성용 UUID v4
 const requireAuth = require("../middleware/requireAuth");
 
 const PYTHON_API = process.env.PYTHON_API || "http://localhost:8000"; // FastAPI 서버 주소
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY; // [추가 2026-05-10] FastAPI 내부 호출 인증 키
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // [추가] 백엔드 기본 이메일 형식 검사
 const ALLOWED_GENDERS = ["남", "여", "기타"]; // [추가] DB ENUM과 동일한 허용 성별 목록
 
@@ -317,8 +318,21 @@ router.get("/check-duplicate", async (req, res) => {
 
     try {
         const fetch = require("node-fetch");
-        const response = await fetch(url);
+        // [추가 2026-05-10] /check-duplicate 는 database.fetchJson()을 거치지 않고
+        // FastAPI를 직접 fetch 하므로, 여기서도 내부 인증 헤더를 반드시 붙인다.
+        // 이유: FastAPI 전역 미들웨어가 X-Internal-Api-Key 없는 직접 호출을 차단하도록
+        // 바뀌었기 때문에 중복체크만 403으로 깨지는 일을 막기 위함.
+        const headers = INTERNAL_API_KEY
+            ? { "X-Internal-Api-Key": INTERNAL_API_KEY }
+            : {};
+        const response = await fetch(url, { headers });
         const result = await response.json();
+        if (!response.ok) {
+            return res.status(response.status).json({
+                success: false,
+                message: result?.detail || result?.message || "중복체크 요청에 실패했습니다.",
+            });
+        }
         // FastAPI 응답: { isDuplicate: true/false }
         return res.json(result);
     } catch (error) {

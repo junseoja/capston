@@ -16,6 +16,8 @@
 //   피드 관련   : createFeed, addFeedImage, getFeeds, getFeedDetail, deleteFeed
 //   좋아요 관련 : toggleLike, checkLike
 //   댓글 관련   : createComment, getComments, deleteComment
+//   마이페이지   : getMypageSummary, getMypageGallery
+//   통계 관련   : getStats
 //
 // [리팩터링 #2] FastAPI 호출 에러 처리 통합 (README 4월 18일 #2)
 //   기존 문제:
@@ -32,6 +34,7 @@
 const fetch = require("node-fetch"); // HTTP 요청 라이브러리 (node.js 환경용)
 
 const PYTHON_API = process.env.PYTHON_API || "http://localhost:8000"; // FastAPI 서버 주소
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY; // Express → FastAPI 내부 호출 인증 키
 
 // ─── FastAPI 호출 공통 헬퍼 ────────────────────────────────────────────────
 
@@ -47,6 +50,38 @@ class FastApiError extends Error {
         this.name = "FastApiError";
         this.status = status; // 0 이면 네트워크 자체 실패 (서버 다운 등)
     }
+}
+
+/**
+ * [추가 2026-05-10] Express → FastAPI 내부 인증 헤더 주입 헬퍼.
+ *
+ * 이유:
+ *   FastAPI(8000)는 원칙적으로 브라우저가 직접 호출하는 공개 API가 아니라,
+ *   Express(3000)가 세션 쿠키를 검증한 뒤 호출하는 내부 데이터 계층이다.
+ *   그런데 개발/배포 설정 실수로 FastAPI 포트가 외부에 열리면
+ *   /user/password, /completion, /feed 같은 내부 엔드포인트를 우회 호출할 수 있다.
+ *
+ * 동작:
+ *   모든 fetchJson() 호출에 X-Internal-Api-Key 헤더를 자동으로 붙인다.
+ *   개별 라우터가 헤더를 빠뜨리지 않도록 공통 헬퍼에서 처리한다.
+ *
+ * 주의:
+ *   FastAPI 쪽 INTERNAL_API_KEY 와 Express 쪽 INTERNAL_API_KEY 값이 반드시 같아야 한다.
+ *   값이 누락되면 FastAPI 미들웨어가 500/403으로 차단하므로 .env 설정이 필요하다.
+ */
+function withInternalAuth(options = {}) {
+    const headers = {
+        ...(options.headers || {}),
+    };
+
+    if (INTERNAL_API_KEY) {
+        headers["X-Internal-Api-Key"] = INTERNAL_API_KEY;
+    }
+
+    return {
+        ...options,
+        headers,
+    };
 }
 
 /**
@@ -68,7 +103,7 @@ class FastApiError extends Error {
 async function fetchJson(url, options) {
     let response;
     try {
-        response = await fetch(url, options);
+        response = await fetch(url, withInternalAuth(options));
     } catch (error) {
         // 네트워크 레벨 실패: FastAPI 서버 다운, DNS 실패, 타임아웃 등
         // 이 throw를 잡지 않으면 기존에는 Express 기본 핸들러가 HTML 500을 내렸음
@@ -150,7 +185,8 @@ async function createUser(userInfo) {
 // 주의:
 //   - hashed_password 인자에는 반드시 "이미 bcrypt 로 해싱된 문자열" 을 전달.
 //     평문을 넘기면 평문이 그대로 DB 에 저장되어 보안 사고가 된다.
-//   - FastAPI(8000) 는 외부 비공개여야 하며, 인증 헤더 없이 호출됨.
+//   - [수정 2026-05-10] FastAPI(8000) 는 외부 비공개여야 하며,
+//     추가로 fetchJson() 이 X-Internal-Api-Key 내부 인증 헤더를 붙여 호출한다.
 // ─────────────────────────────────────────────────────────────────────────────
 /**
  * 유저의 비밀번호 해시값을 DB 에 업데이트.
@@ -397,6 +433,56 @@ async function deleteComment(comment_id, user_id) {
     );
 }
 
+// ─── 마이페이지 / 통계 관련 함수 ─────────────────────────────────────────────
+
+/**
+ * [추가 2026-05-10] 마이페이지 핵심 지표 조회.
+ *
+ * 이유:
+ *   MyPage.jsx 의 오늘 달성률/연속 달성/인증 게시글 수 mock 값을
+ *   FastAPI 가 계산한 실제 DB 값으로 대체하기 위함.
+ */
+async function getMypageSummary(user_id) {
+    return await fetchJson(`${PYTHON_API}/mypage/summary/${user_id}`);
+}
+
+/**
+ * [추가 2026-05-10] 마이페이지 통합 조회.
+ *
+ * 이유:
+ *   /me + /mypage/summary + /mypage/gallery 를 한 화면 API로 합쳐
+ *   React → Express → FastAPI 왕복 횟수를 줄이기 위함.
+ */
+async function getMypageOverview(user_id, galleryLimit = 9) {
+    const params = new URLSearchParams({ gallery_limit: String(galleryLimit) });
+    return await fetchJson(`${PYTHON_API}/mypage/${user_id}?${params.toString()}`);
+}
+
+/**
+ * [추가 2026-05-10] 내 인증 갤러리 조회.
+ *
+ * 이유:
+ *   MyPage.jsx 의 Unsplash placeholder 이미지를 실제 feed_images 데이터로 대체하기 위함.
+ */
+async function getMypageGallery(user_id, limit = 9) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    return await fetchJson(`${PYTHON_API}/mypage/gallery/${user_id}?${params.toString()}`);
+}
+
+/**
+ * [추가 2026-05-10] 상세 분석 통계 조회.
+ *
+ * 이유:
+ *   StatsPage.jsx 의 주간/월간/시간대/카테고리 mock 데이터를
+ *   routine_completions 기반 실제 통계로 대체하기 위함.
+ */
+async function getStats(user_id, { mode = "weekly", start, end } = {}) {
+    const params = new URLSearchParams({ mode });
+    if (start) params.set("start", start);
+    if (end) params.set("end", end);
+    return await fetchJson(`${PYTHON_API}/stats/${user_id}?${params.toString()}`);
+}
+
 // ── 모듈 내보내기 ────────────────────────────────────────────────────────────
 module.exports = {
     // 헬퍼 / 커스텀 에러 — 라우터에서 `error instanceof FastApiError` 로 구분 가능
@@ -427,4 +513,8 @@ module.exports = {
     createComment,
     getComments,
     deleteComment,
+    getMypageOverview,
+    getMypageSummary,
+    getMypageGallery,
+    getStats,
 };
