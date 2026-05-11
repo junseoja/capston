@@ -2638,6 +2638,179 @@ docker compose up --build
 
 ---
 
+## 🔧 2026-05-11 작업 내역
+
+### 1. 이번 세션 개요
+
+5/7 Docker 도입 후 첫 종합 코드 리뷰 세션. README + 백엔드(Express/FastAPI) + 프론트(React) + 인프라를 3축 분담 분석한 뒤, 가장 시급한 **P0 보안 이슈 — `src/python_api/.env` 가 GitHub 퍼블릭 리포에 추적되어 RDS admin 자격증명 노출** — 을 즉시 처리. README 잔여 부채 #9~#15 외에 **신규 부채 4건 (#16~#19)** 추가 식별.
+
+| 결과물 | 내용 |
+|---|---|
+| 종합 리뷰 | 백엔드/프론트/인프라 3축 진단, 잘 된 부분과 개선 항목 분리 |
+| **P0 발견 + 처리** | `.env` git 추적 제거 + `.env.example` 신설 + PR #1 → dev 머지 |
+| 신규 부채 | #16 분산 트랜잭션 / #17 S3 URL 검증 / #18 라우터 트랜잭션 정합성 / #19 비번 정책 |
+| 프론트 누수/race 3종 | IntersectionObserver cleanup / blob URL revoke / 댓글 모달 fetch race |
+
+---
+
+### 2. P0 — RDS admin 자격증명 GitHub 퍼블릭 노출
+
+#### 2-1. 발견 경위
+
+인프라 리뷰 중 `git ls-files | grep env` 결과에 `src/python_api/.env` 가 잡힘. 직접 검증:
+
+| 검증 | 결과 |
+|---|---|
+| `https://github.com/junseoja/capston` 접근 | 200 OK (no auth) → **퍼블릭 확정** |
+| `https://raw.githubusercontent.com/junseoja/capston/dev/src/python_api/.env` | 200 OK → **누구나 raw 다운로드 가능** |
+| 노출 내용 | `DB_HOST=database-1.chysgoaw43v3.ap-northeast-2.rds.amazonaws.com`, `DB_USER=admin`, `DB_PASSWORD=...`, `DB_NAME=capston` |
+| 첫 노출 커밋 | `57e11de` ("로그인/회원가입 기능 구현 및 AWS RDS 연결"), 이후 `76af630`/`5bd5a5d` 에서도 변경 |
+
+#### 2-2. 근본 원인
+
+`.gitignore` 에 `.env` / `*.env` 규칙은 존재했지만, 첫 커밋 시점에 이미 추적된 후 그대로 유지됨. **`.gitignore` 는 이미 추적 중인 파일에는 효력 없음**.
+
+#### 2-3. 처리 내용
+
+| 단계 | 작업 | 상태 |
+|---|---|---|
+| 1 | `git rm --cached src/python_api/.env` (디스크 파일은 보존 → FastAPI 정상 동작) | ✅ 완료 |
+| 2 | `src/python_api/.env.example` 신규 작성 (backend 패턴과 일관) | ✅ 완료 |
+| 3 | 워크트리 브랜치 → dev 로 PR #1 머지 (커밋 `37ee79b`) | ✅ 완료 |
+| 4 | `dev` 시점부터 raw URL `.env` 접근 차단 검증 | ✅ 404 응답 확인 |
+| 5 | git history 정리 (filter-repo + force push) | ❌ 미실시 (사용자 결정 — 신경 안 쓰는 범위로 판단) |
+| 6 | AWS 콘솔에서 RDS admin 비번 회전 + 보안그룹 inbound IP 좁히기 | ⏳ 사용자 작업 영역 |
+
+#### 2-4. 검증
+
+- `git ls-tree origin/dev src/python_api/` → `.env` 없음, `.env.example` 만 존재
+- `curl https://raw.githubusercontent.com/junseoja/capston/dev/src/python_api/.env` → **404**
+- `curl https://raw.githubusercontent.com/junseoja/capston/dev/src/python_api/.env.example` → **200**
+
+#### 2-5. 잔여 위험
+
+git **history** 에는 여전히 `.env` 가 존재 — 예: `https://raw.githubusercontent.com/junseoja/capston/57e11de/src/python_api/.env` 같은 과거 커밋 SHA 직접 접근 시 노출. 자동 스캐너(GitGuardian, GitHub Secret Scanning) 가 이미 인덱싱했을 가능성도 있음. **운영 진입 전엔 별도 비번 회전 권장**.
+
+---
+
+### 3. 종합 코드 리뷰 결과
+
+#### 3-1. 잘 되어 있는 부분 (유지)
+
+| 항목 | 위치 |
+|---|---|
+| 에러 처리 표준화 | `database.js` `fetchJson` + `app.js` 글로벌 핸들러 + 라우터 `try/catch` |
+| 세션 복원 | `requireAuth` 미들웨어 + `App.jsx` `/me` 자동 호출 |
+| Lazy bcrypt migration | 평문 사용자 로그인 시 자연스럽게 해시화 (4/29 작업) |
+| N+1 + 페이지네이션 | 단일 JOIN + `MAX(CASE WHEN)` + `IN` 쿼리 분리, tie-breaker `feed_id` 포함 (5/3 작업) |
+| Docker 결정 | Dockerfile + compose.yml git 공유, named volume 격리 (5/7 작업) |
+| README 변경 이력 | 시간순 누적 + 4단 분석 포맷 일관성 |
+
+#### 3-2. 신규 발견 부채 — 4단 분석
+
+##### 신규 #16. Express ↔ FastAPI 분산 트랜잭션 부재
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `src/backend/routes/feed.js` 의 `createFeed → addFeedImage` 다단 호출. 중간 실패 시 S3 cleanup 은 동작하지만 `feeds` 행은 orphan |
+| 수정 후 방식 | FastAPI 에 `POST /feed/with-images` 신설 — 단일 트랜잭션으로 `feeds + feed_images` 일괄 INSERT, 실패 시 ROLLBACK. Express 는 한 번만 호출 |
+| 기대 효과 | DB 정합성 보장, S3 cleanup 과 DB 상태 분리 해소, Express 코드 단순화 |
+| 문제점 | FastAPI 페이로드 증가(이미지 URL 배열). 파일 크기/MIME 검증은 Express 단계 유지. 풀(#9) 도입 후 진행이 자연스러움 |
+
+##### 신규 #17. S3 URL 검증이 호스트네임만 체크
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `extractS3Key()` 가 hostname 만 검사. 버킷명 정확 매칭 / `..` 시퀀스 차단 / key prefix 화이트리스트 모두 없음. 현재는 클라이언트가 `file_url` 을 보내지 않아 안전하지만 향후 변경 시 임의 객체 삭제 가능 |
+| 수정 후 방식 | hostname `${AWS_S3_BUCKET}.s3.${REGION}.amazonaws.com` 정확 매칭 + `..` 시퀀스 reject + 추출 key 가 화이트리스트 prefix(`feed/`, `profile/`) 로 시작하는지 확인 |
+| 기대 효과 | 향후 클라이언트 입력 경로 추가되어도 임의 객체 삭제 불가 |
+| 문제점 | prefix 정책을 코드와 S3 IAM 양쪽에 일관성 있게 유지 필요 |
+
+##### 신규 #18. 라우터별 트랜잭션 정합성 일괄 점검
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | 5/2 에 `like.py` 만 rollback 패턴으로 정리됨. `feed.py` / `completion.py` / `user.py` 등 다른 라우터의 다단계 INSERT/UPDATE 가 같은 패턴인지 미점검 |
+| 수정 후 방식 | 모든 라우터 `try/except/finally + conn.rollback()` 표준화. 풀 도입(#9) 작업과 묶어서 처리 |
+| 기대 효과 | 1205 락 타임아웃 재발 방지, 풀 마이그레이션 시 깔끔 |
+| 문제점 | 단순 작업이지만 모든 라우터에 손이 들어가므로 변경 폭 큼 — PR 분할 권장 |
+
+##### 신규 #19. 회원가입 비밀번호 정책 부재
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | Express 에서 bcrypt 해시화하지만 FastAPI 의 Pydantic 모델에 validator 없음 — 향후 평문 경로 추가 시 무방비 |
+| 수정 후 방식 | Pydantic `field_validator` 로 `$2a$/$2b$` prefix + length 60 강제 |
+| 기대 효과 | 운영 오류로 평문이 들어와도 INSERT 차단 |
+| 문제점 | 정상 흐름엔 영향 없음. 단순 추가 작업 |
+
+#### 3-3. 프론트엔드 누수/race 3종
+
+작은 PR 로 묶기 좋음:
+
+- `src/frontend/FeedPage.jsx` — IntersectionObserver 언마운트 cleanup 누락 → 페이지 이동 시 observer 잔존
+- `src/frontend/HomePage.jsx` — `proofFiles` 재선택 시 이전 blob URL `URL.revokeObjectURL` 누락 → 인증 모달 여닫을 때마다 누적
+- `src/frontend/FeedPage.jsx` — 댓글 모달 빠른 클릭 시 fetch race (5/3 README 본인 인지 사항) → `AbortController` 도입
+
+#### 3-4. 600줄 이상 단일 컴포넌트 분할 권장
+
+| 파일 | LOC | 분할 |
+|---|---|---|
+| `FeedPage.jsx` | 732 | `<FeedCard>`, `<MediaCarousel>`, `<CommentModal>` — 캐러셀이 피드/모달 양쪽 중복 → 추출만으로 200줄 감소 |
+| `SignupPage.jsx` | 628 | `<FormField>`, `<DuplicateCheckField>` |
+| `HomePage.jsx` | 575 | `<RoutineCard>`, `<ProofBox>` |
+
+#### 3-5. Minor 정리 항목 (한 PR 로 묶기)
+
+- `build-output.txt` 가 git 추적 중 → `git rm --cached` 후 `.gitignore` 추가
+- `src/backend/package.json` 에 `dev`/`start` 스크립트 없음 (Docker 외 환경 불편)
+- `src/backend/routes/login.js` 의 `/check-duplicate` 만 `fetchJson` 헬퍼 미사용 (다른 곳은 일관)
+- 세션 만료가 절대시간 비교만 — 비활성 타임아웃(`last_activity` 갱신) 검토 (신규 #13 LRU 캐시와 함께)
+
+---
+
+### 4. 권장 처리 순서 (5/2 권장 + 5/11 신규 통합)
+
+| 순서 | 항목 | 출처 |
+|---|---|---|
+| 1 | (P0 후속) AWS RDS admin 비번 회전 | 5/11 P0 잔여 |
+| 2 | 신규 #18 라우터 트랜잭션 정합성 일괄 점검 | 5/11 신규 |
+| 3 | README #9 / 신규 #9 — DB 커넥션 풀 + async 마이그레이션 | 5/2 권장 1번 |
+| 4 | 신규 #16 분산 트랜잭션 / 신규 #17 S3 URL 검증 | 5/11 신규 |
+| 5 | 프론트 누수 3종 + FeedPage 캐러셀 추출 | 5/11 신규 |
+| 6 | README #12 → #13 → #14 → #15 → #11 (이미지 압축 → 세션 캐시 → 로깅 → Sentry → Rate limit) | 5/2 권장 |
+| 7 | Minor 정리 PR (build-output.txt 외) | 5/11 신규 |
+
+---
+
+### 5. 변경 파일 목록 (2개)
+
+| 파일 | 변경 |
+|---|---|
+| `src/python_api/.env` | 삭제 (git 추적에서만 — 디스크 보존, FastAPI 정상 동작) |
+| `src/python_api/.env.example` | 신규 (DB_HOST/USER/PASSWORD/NAME/PORT 템플릿) |
+
+PR #1 (커밋 `37ee79b`) → dev 머지 완료.
+
+---
+
+### 6. 기타 — 웹뷰 앱화 단계 검토 (정보 공유)
+
+캡스톤 최종 목표인 "웹을 웹뷰로 앱 데모" 를 위한 단계 정보 공유 (실제 작업은 미시작):
+
+| Phase | 작업 | 비고 |
+|---|---|---|
+| 0 | P0 보안 이슈 처리 | (이번 세션에서 부분 처리) |
+| 1 | 백엔드 운영 배포 + HTTPS | EC2/Render + Let's Encrypt 또는 ALB+ACM. **가장 큰 작업** |
+| 2 | 프론트 정적 호스팅 | Vercel/Netlify 또는 S3+CloudFront |
+| 3 | 백엔드 정책 변경 | CORS origin 배열, 쿠키 `secure: true` + `sameSite: 'none'`, HTTPS 강제 |
+| 4 | Capacitor 도입 | `npx cap add android`, `webDir` 또는 `server.url` 결정 |
+| 5 | 디바이스 권한 + 실기기 테스트 | AndroidManifest 권한, USB 디버깅, APK 산출 |
+
+코드 변경 규모: 프론트 거의 없음 / Express 중간 / FastAPI 변경 없음 / 인프라 큼 / Capacitor 추가는 작음. 채택 옵션은 Capacitor + 백엔드 운영 배포 조합 권장 (캡스톤 데모용 가장 합리적).
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
@@ -2665,6 +2838,21 @@ docker compose up --build
 - [ ] 마이페이지 → 이번 주 달성률, 인증 게시글 수 백엔드 연결
 - [ ] 현재 루틴을 추가하면 인증한 루틴 표시가 사라지는 버그 확인 필요
 - [x] ~~피드 이미지 → 현재 로컬 디스크 저장 방식, 추후 S3 등 클라우드 스토리지 전환 고려~~ ✅ 2026-05-05 완료 (multer-s3 도입)
+- [x] ~~`src/python_api/.env` git 추적 제거 (RDS 자격증명 GitHub 퍼블릭 노출)~~ ✅ 2026-05-11 부분 완료 (git rm --cached + .env.example 신설, PR #1 머지). git history 정리·RDS 비번 회전은 별도 항목
+- [ ] (P0 후속) AWS RDS admin 비번 회전 — 2026-05-11 잔여 (운영 진입 전 필수)
+- [ ] git history 에서 과거 `.env` 영구 제거 (filter-repo + force push) — 2026-05-11 잔여 (사용자 결정)
+- [ ] Express ↔ FastAPI 분산 트랜잭션 통합 (`POST /feed/with-images`) — 2026-05-11 신규 #16
+- [ ] S3 URL 검증 강화 (버킷명 정확 매칭 / `..` 차단 / prefix 화이트리스트) — 2026-05-11 신규 #17
+- [ ] 라우터별 트랜잭션 정합성 일괄 점검 (`feed.py`/`completion.py`/`user.py` 등) — 2026-05-11 신규 #18
+- [ ] 회원가입 비밀번호 정책 (Pydantic `field_validator`) — 2026-05-11 신규 #19
+- [ ] 600줄+ 단일 컴포넌트 분할 (FeedPage / SignupPage / HomePage) — 2026-05-11 신규
+- [ ] FeedPage IntersectionObserver 언마운트 cleanup — 2026-05-11 신규
+- [ ] HomePage `proofFiles` blob URL 재선택 시 revoke — 2026-05-11 신규
+- [ ] FeedPage 댓글 모달 fetch race (`AbortController`) — 2026-05-11 신규
+- [ ] `build-output.txt` git 추적 제거 — 2026-05-11 신규 (Minor)
+- [ ] `src/backend/package.json` 에 `dev`/`start` 스크립트 추가 — 2026-05-11 신규 (Minor)
+- [ ] `login.js` `/check-duplicate` 의 `fetchJson` 헬퍼 통일 — 2026-05-11 신규 (Minor)
+- [ ] 세션 비활성 타임아웃 (`last_activity` 갱신) — 2026-05-11 신규 (#13 LRU 캐시와 함께)
 ---
 
 ## 👥 팀원
