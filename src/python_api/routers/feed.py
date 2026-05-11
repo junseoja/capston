@@ -2,11 +2,12 @@
 # 피드(Feed) 관련 API 라우터
 # ============================================================
 # 담당 엔드포인트:
-#   POST   /feed/          : 피드 게시물 생성
-#   POST   /feed/image     : 피드 이미지 추가
-#   GET    /feed/          : 전체 피드 목록 조회 (최신순, 좋아요/댓글 수 포함)
-#   GET    /feed/{feed_id} : 특정 피드 상세 조회 (이미지, 댓글 포함)
-#   DELETE /feed/{feed_id} : 피드 게시물 삭제
+#   POST   /feed/             : 피드 게시물 생성
+#   POST   /feed/image        : 피드 이미지 추가
+#   POST   /feed/with-images  : [신규 #16 2026-05-11] 피드 + 이미지 N건 단일 트랜잭션 생성
+#   GET    /feed/             : 전체 피드 목록 조회 (최신순, 좋아요/댓글 수 포함)
+#   GET    /feed/{feed_id}    : 특정 피드 상세 조회 (이미지, 댓글 포함)
+#   DELETE /feed/{feed_id}    : 피드 게시물 삭제
 #
 # DB 테이블:
 #   feeds        : 피드 게시물 (feed_id PK, user_id FK, routine_id FK, completion_id FK, content)
@@ -18,6 +19,21 @@
 #   App.jsx에서 POST /feed로 피드 생성 (상세 루틴 완료 시 피드 업로드)
 #   파일 업로드는 Express multer가 디스크에 저장 후 URL을 POST /feed/image로 전달
 # ============================================================
+#
+# ────────────────────────────────────────────────────────────────────
+# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
+# 날짜: 2026-05-11
+# 기대효과:
+#   - PyMySQL 풀(2026-05-10 도입) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
+#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
+#   - 신규 #16(POST /feed/with-images 분산 트랜잭션) 도입 전 사전 정리
+# 장점:
+#   - except 블록에 try/except rollback 추가만으로 로직 변경 없이 안전성 확보
+#   - 풀 반환 시 깨끗한 트랜잭션 상태 보장 (다음 요청에 영향 없음)
+#   - 파일 단위 패턴 일관성으로 리뷰/유지보수 비용 최소
+# ────────────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -43,6 +59,36 @@ class ImageCreate(BaseModel):
     feed_id: str                        # UUID v7 (feeds.feed_id FK)
     file_url: str                       # 업로드된 이미지/영상 URL (Express uploads/ 경로)
     file_type: Optional[str] = ""      # 파일 MIME 타입 (예: "image/jpeg", "video/mp4")
+
+
+# ────────────────────────────────────────────────────────────────────
+# [추가 2026-05-11] 신규 #16 — 피드 + 이미지 단일 트랜잭션 통합 엔드포인트
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: 신규 #16 (2026-05-11 종합 리뷰 식별)
+# 날짜: 2026-05-11
+# 기대효과:
+#   - Express 가 createFeed → addFeedImage × N 회를 호출하던 다단 구조를 단일 호출로 통합
+#   - 이미지 INSERT 중 어느 한 건이 실패해도 feeds 행까지 ROLLBACK → orphan 피드 행 제거
+#   - 정상 흐름의 HTTP 라운드트립 (1 + N) → 1 회로 축소
+# 장점:
+#   - DB 레벨 트랜잭션으로 정합성 보장 (Express 의 best-effort cleanup 보다 강함)
+#   - Express 코드 단순화: 단일 호출 + 실패 시 S3 cleanup 만 분기
+#   - 기존 POST /feed/ 와 POST /feed/image 는 유지 (레거시 호환 + 단순 시나리오용)
+# ────────────────────────────────────────────────────────────────────
+
+class FeedImagePayload(BaseModel):
+    """단일 트랜잭션 INSERT 대상 이미지 1건 (file_url + MIME 타입)"""
+    file_url: str
+    file_type: Optional[str] = ""
+
+
+class FeedWithImagesCreate(BaseModel):
+    """피드 본문 + 첨부 이미지 N개 통합 생성 요청"""
+    user_id: str                              # UUID v7 (Express 세션에서 주입)
+    routine_id: str                           # UUID v7
+    completion_id: str                        # UUID v7
+    content: Optional[str] = ""
+    images: List[FeedImagePayload] = []      # 0건이면 텍스트 전용 피드
 
 # ── 피드 생성 (POST /feed/) ───────────────────────────────────────────────────
 
@@ -107,8 +153,18 @@ def create_feed(body: FeedCreate):
         conn.commit()
         return {"success": True, "feed_id": new_uuid}  # 이미지 추가에 feed_id 필요
     except HTTPException:
+        # [수정 2026-05-11 #18] HTTPException 도 트랜잭션 미정리 가능 — rollback 후 재전파
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     except Exception as e:
+        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리 — 풀 반환 시 다음 요청 오염 차단
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -145,6 +201,104 @@ def add_feed_image(body: ImageCreate):
         conn.commit()
         return {"success": True}
     except Exception as e:
+        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("🔴 오류:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+# ── [추가 2026-05-11 신규 #16] 피드 + 이미지 단일 트랜잭션 (POST /feed/with-images) ──
+
+@router.post("/with-images")
+def create_feed_with_images(body: FeedWithImagesCreate):
+    """피드 + 첨부 이미지 N개를 단일 트랜잭션으로 일괄 생성.
+
+    [추가 2026-05-11 #16]
+    오류 번호: 신규 #16 (Express ↔ FastAPI 분산 트랜잭션 부재)
+    날짜: 2026-05-11
+    기대효과:
+        - feeds + feed_images N건을 하나의 트랜잭션으로 묶어 ROLLBACK 단위 통일
+        - 이미지 INSERT 도중 실패 시 feeds 행까지 자동 ROLLBACK → orphan 피드 제거
+        - Express → FastAPI 호출 횟수: (1 + N) → 1
+    장점:
+        - DB 레벨 정합성 보장으로 Express 의 best-effort 분리보다 강함
+        - 단일 conn.commit() 시점까지 외부에서 행이 보이지 않아 race condition 차단
+        - 기존 POST /feed/ 와 POST /feed/image 엔드포인트는 그대로 유지 (롤백/레거시 호환)
+
+    동작:
+        1. routine_completions 소유권 검증 (POST /feed/ 와 동일)
+        2. feeds 행 INSERT (commit 하지 않음)
+        3. images 배열 순회하며 feed_images INSERT (commit 하지 않음)
+        4. 모두 성공하면 단 한 번 conn.commit()
+        5. 어느 단계든 예외 발생 시 except 분기에서 rollback → 모든 INSERT 무효화
+
+    Returns:
+        dict: {"success": True, "feed_id": "uuid-v7-...", "image_count": N}
+
+    Raises:
+        HTTPException 403: 본인 소유 완료 기록이 아님
+        HTTPException 500: DB 저장 오류 (이 시점엔 feeds/feed_images 모두 ROLLBACK 됨)
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            # 1) 소유권 검증 — POST /feed/ 와 동일 패턴
+            cursor.execute(
+                """SELECT completion_id
+                FROM routine_completions
+                WHERE completion_id = %s
+                  AND routine_id = %s
+                  AND user_id = %s
+                  AND deleted_at IS NULL""",
+                (body.completion_id, body.routine_id, body.user_id)
+            )
+            if not cursor.fetchone():
+                raise HTTPException(
+                    status_code=403,
+                    detail="본인 소유의 완료 기록에만 피드를 생성할 수 있습니다."
+                )
+
+            # 2) feeds 행 INSERT (commit 하지 않음)
+            feed_id = uuid7str()
+            cursor.execute(
+                """INSERT INTO feeds (feed_id, user_id, routine_id, completion_id, content)
+                VALUES (%s, %s, %s, %s, %s)""",
+                (feed_id, body.user_id, body.routine_id,
+                 body.completion_id, body.content or "")
+            )
+
+            # 3) feed_images N건 INSERT (commit 하지 않음)
+            #    - executemany 도 가능하지만 row 별 image_id(uuid7str) 가 다르므로
+            #      가독성 위해 순회 INSERT 유지. N <= 10 (Express upload.array 한도)
+            #      정도이므로 성능 영향 미미.
+            for image in body.images:
+                cursor.execute(
+                    """INSERT INTO feed_images (image_id, feed_id, file_url, file_type)
+                    VALUES (%s, %s, %s, %s)""",
+                    (uuid7str(), feed_id, image.file_url, image.file_type or "")
+                )
+
+        # 4) 모두 성공한 경우에만 commit
+        conn.commit()
+        return {"success": True, "feed_id": feed_id, "image_count": len(body.images)}
+
+    except HTTPException:
+        # 403 등은 commit 전이므로 명시적으로 rollback 후 재전파
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        # [신규 #16] 어느 단계든 실패 시 feeds + feed_images INSERT 모두 무효화
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -329,6 +483,11 @@ def get_feeds(
 
         return {"feeds": feeds, "next_cursor": next_cursor}
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 미래 INSERT/UPDATE 추가 대비 일관 패턴
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -412,8 +571,18 @@ def get_feed_detail(feed_id: str):
         feed["comments"] = comments
         return feed
     except HTTPException:
+        # [수정 2026-05-11 #18] 404 등도 트랜잭션 정리 후 재전파
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise  # HTTPException(404)은 그대로 전달, 아래 except에서 잡지 않도록
     except Exception as e:
+        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -460,6 +629,11 @@ def delete_feed(
 
         return {"success": True}
     except Exception as e:
+        # [수정 2026-05-11 #18] DELETE 도 INSERT/UPDATE 와 동일하게 트랜잭션 정리
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:

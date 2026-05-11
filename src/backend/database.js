@@ -344,6 +344,40 @@ async function addFeedImage(imageData) {
     });
 }
 
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-11] 신규 #16 — 피드 + 이미지 단일 트랜잭션 통합 호출
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: 신규 #16 (Express ↔ FastAPI 분산 트랜잭션 부재)
+// 날짜: 2026-05-11
+// 기대효과:
+//   - 기존 createFeed → addFeedImage × N 회 호출을 단일 HTTP 호출로 통합
+//   - FastAPI 가 단일 트랜잭션으로 INSERT 후 부분 실패 시 자동 ROLLBACK → orphan 피드 행 제거
+//   - 정상 흐름 라운드트립 (1 + N) → 1 회로 축소
+// 장점:
+//   - DB 정합성을 Express 의 best-effort cleanup 이 아닌 DB 트랜잭션으로 보장
+//   - 호출 측 코드 단순화 + 실패 분기 단일화
+//   - 기존 createFeed/addFeedImage 는 그대로 유지 → 단순 시나리오/롤백 호환
+// ────────────────────────────────────────────────────────────────────
+/**
+ * FastAPI POST /feed/with-images 호출.
+ *
+ * @param {object} payload
+ * @param {string} payload.user_id      - 세션에서 주입된 작성자 UUID v7
+ * @param {string} payload.routine_id   - 루틴 UUID v7
+ * @param {string} payload.completion_id - 완료 기록 UUID v7
+ * @param {string} [payload.content]    - 피드 본문 (없으면 빈 문자열)
+ * @param {Array<{file_url: string, file_type?: string}>} [payload.images]
+ * @returns {Promise<{success: boolean, feed_id: string, image_count: number}>}
+ * @throws {FastApiError} 4xx/5xx (이 시점에 FastAPI 측은 모든 INSERT ROLLBACK 됨)
+ */
+async function createFeedWithImages(payload) {
+    return await fetchJson(`${PYTHON_API}/feed/with-images`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+}
+
 /**
  * 전체 피드 목록 조회 (FastAPI GET /feed/, 최신순, 커서 기반 페이지네이션)
  *
@@ -505,6 +539,8 @@ module.exports = {
     deleteCompletion,
     createFeed,
     addFeedImage,
+    // [추가 2026-05-11 #16] 단일 트랜잭션 통합 호출
+    createFeedWithImages,
     getFeeds,
     getFeedDetail,
     deleteFeed,

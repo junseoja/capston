@@ -37,6 +37,22 @@
 #   - 이때 login_id/email UNIQUE 제약과 충돌 가능 → 별도 정책 필요
 #     (해당 시점에 검토)
 # ─────────────────────────────────────────────────────────────────
+#
+# ────────────────────────────────────────────────────────────────────
+# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
+# 날짜: 2026-05-11
+# 기대효과:
+#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
+#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
+#   - signup() IntegrityError 발생 시 UNIQUE 충돌 행이 락 잔존하는 문제 방지 (특수 케이스)
+#   - Lazy Migration UPDATE 경로(update_password)의 트랜잭션 누수 차단
+# 장점:
+#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
+#   - 회원가입/로그인/세션 관리 등 가장 핵심 라우트에서 트랜잭션 일관성 확보
+#   - 7개 라우터 일괄 패턴화로 리뷰/유지보수 비용 최소
+# ────────────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException
 from database import get_connection
@@ -120,9 +136,19 @@ def signup(body: UserCreate):
         conn.commit()  # INSERT 완료 후 커밋 (이전까지는 트랜잭션 미완료 상태)
         return {"success": True}
     except pymysql.err.IntegrityError:
+        # [수정 2026-05-11 #18] UNIQUE 충돌 행도 트랜잭션 락 잔존 — rollback 필수
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         # UNIQUE 제약 위반: login_id 또는 email이 이미 존재
         raise HTTPException(status_code=409, detail="이미 존재하는 아이디 또는 이메일입니다.")
     except Exception as e:
+        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리 — 풀 반환 시 다음 요청 오염 차단
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -162,6 +188,11 @@ def get_user(login_id: str):
             user = cursor.fetchone()  # 한 행만 반환 (login_id는 UNIQUE)
         return user if user else {}   # 없으면 빈 dict 반환 (None 대신)
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -197,6 +228,11 @@ def create_session(body: SessionCreate):
         conn.commit()
         return {"success": True}
     except Exception as e:
+        # [수정 2026-05-11 #18] INSERT 실패 시 미정리 트랜잭션 정리
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -241,6 +277,11 @@ def get_session(session_id: str):
             session = cursor.fetchone()
         return session if session else {}  # 없거나 만료된 세션이면 빈 dict
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -274,6 +315,11 @@ def delete_session(session_id: str):
         conn.commit()
         return {"success": True}
     except Exception as e:
+        # [수정 2026-05-11 #18] DELETE 실패 시 미정리 트랜잭션 정리
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -348,6 +394,11 @@ def update_password(user_id: str, body: PasswordUpdate):
 
         return {"success": True}
     except Exception as e:
+        # [수정 2026-05-11 #18] Lazy Migration UPDATE 경로의 트랜잭션 누수 차단
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -389,6 +440,11 @@ def check_login_id(login_id: str):
             user = cursor.fetchone()
         return {"isDuplicate": user is not None}  # 결과 있으면 중복
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -427,6 +483,11 @@ def check_nickname(nickname: str):
             user = cursor.fetchone()
         return {"isDuplicate": user is not None}
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:

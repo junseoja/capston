@@ -261,10 +261,30 @@ function HomePage({
     setUploadChecks((prev) => ({ ...prev, [id]: false }));
     setOpenProofId(null); // 인증 박스 닫기
 
-    // [수정] 완료된 루틴 카드와 피드(메모리 상태)가 같은 blob URL을 계속 참조하므로
-    // 제출 직후 revokeObjectURL()을 호출하면 화면 표시가 깨질 수 있음.
-    // 따라서 이 시점에는 proofFiles 입력 상태만 비우고, URL 해제는
-    // 파일 재선택/언마운트 시점에만 수행.
+    // ────────────────────────────────────────────────────────────────────
+    // [수정 2026-05-11] 프론트 누수 #2 — 제출 성공 후 blob URL 즉시 해제
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: 신규 #19 (프론트 누수 3종 중 #2)
+    // 날짜: 2026-05-11
+    // 기대효과:
+    //   - onCompleteDetail() 가 await 로 끝난 시점에는 App.jsx 가 이미 루틴/피드를
+    //     S3 URL 기반으로 재조회/갱신했으므로 blob URL 은 더 이상 참조되지 않음
+    //   - 기존에는 언마운트 전까지 objectUrlsRef 에 누적되어 인증을 반복할수록
+    //     메모리 사용량이 선형 증가했음
+    //   - 즉시 해제 + objectUrlsRef 동시 정리로 누수 차단
+    // 장점:
+    //   - selectedFiles 의 url 만 정확히 해제하므로 다른 루틴의 미해제 URL 에 영향 없음
+    //   - filter() 한 번으로 ref 정리해 O(N) 비용만 발생
+    //   - 언마운트 cleanup 도 그대로 유지되어 fail-safe 이중 안전망
+    // ────────────────────────────────────────────────────────────────────
+    const submittedUrls = selectedFiles.map((file) => file.url).filter(Boolean);
+    submittedUrls.forEach((url) => URL.revokeObjectURL(url));
+    if (submittedUrls.length > 0) {
+      const submittedSet = new Set(submittedUrls);
+      objectUrlsRef.current = objectUrlsRef.current.filter(
+        (url) => !submittedSet.has(url),
+      );
+    }
     setProofFiles((prev) => ({ ...prev, [id]: [] }));
   };
 

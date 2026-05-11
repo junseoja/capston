@@ -94,6 +94,22 @@ function FeedPage({ currentUser }) {
   // [수정 2026-05-03] sentinel 엘리먼트가 뷰포트에 진입하면 fetchFeeds(nextCursor) 호출.
   // useRef + callback ref 패턴으로 sentinel 을 매 렌더마다 새로 관찰하지 않도록 처리.
   const observerRef = useRef(null);
+  // ────────────────────────────────────────────────────────────────────
+  // [수정 2026-05-11] 프론트 누수 #3 — 댓글 모달 페치 경합 방지용 AbortController
+  // ────────────────────────────────────────────────────────────────────
+  // 오류 번호: 신규 #19 (프론트 누수 3종 중 #3)
+  // 날짜: 2026-05-11
+  // 기대효과:
+  //   - 댓글 모달을 빠르게 다른 피드로 전환하거나 닫을 때
+  //     이전 GET /comment/{feed_id} 응답이 늦게 도착해 다른 피드 댓글을
+  //     덮어쓰는 race condition 차단
+  //   - 페이지 이탈/언마운트 시 진행 중 fetch 강제 중단으로 setState-after-unmount 경고 제거
+  // 장점:
+  //   - useRef 기반이라 리렌더 트리거 없이 관리 가능
+  //   - openCommentModal/closeCommentModal/언마운트 3개 경로에서 일관 처리
+  //   - AbortController는 표준 API라 추가 의존성 0
+  // ────────────────────────────────────────────────────────────────────
+  const abortRef = useRef(null);
   const sentinelRef = useCallback(
     (node) => {
       if (loadingMore) return;
@@ -117,6 +133,34 @@ function FeedPage({ currentUser }) {
     },
     [fetchFeeds, hasMore, loadingMore, nextCursor],
   );
+
+  // ────────────────────────────────────────────────────────────────────
+  // [수정 2026-05-11] 프론트 누수 #1 — IntersectionObserver 언마운트 정리
+  // ────────────────────────────────────────────────────────────────────
+  // 오류 번호: 신규 #19 (프론트 누수 3종 중 #1)
+  // 날짜: 2026-05-11
+  // 기대효과:
+  //   - sentinelRef 콜백은 새 노드가 attach 될 때만 disconnect 하므로
+  //     언마운트(라우팅 이동)로 노드가 사라지면 observer 가 그대로 살아남았다
+  //   - 페이지 이동 후에도 callback 클로저가 fetchFeeds/setFeedPosts 를 잡고 있어
+  //     장시간 SPA 사용 시 누적 누수가 발생함
+  //   - 본 useEffect 가 cleanup 단계에서 강제 disconnect 하여 누수 차단
+  // 장점:
+  //   - sentinelRef 의 기존 동작을 변경하지 않으므로 회귀 위험 0
+  //   - 함께 추가한 abortRef 도 같은 cleanup 에서 정리해 일관성 확보
+  // ────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+    };
+  }, []);
 
   // 모달 열릴 때 배경 스크롤 방지
   useEffect(() => {
@@ -187,12 +231,23 @@ function FeedPage({ currentUser }) {
     setSelectedPostId(feed_id);
     setCommentInput("");
 
+    // [수정 2026-05-11 #19-3] 이전 페치가 있다면 중단 후 새 컨트롤러 발급
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const res = await fetch(`${EXPRESS_URL}/comment/${feed_id}`, {
         credentials: "include",
+        signal: controller.signal,
       });
       const data = await res.json();
       if (!data.success) return;
+
+      // [수정 2026-05-11 #19-3] 응답 도착 사이에 다른 모달로 전환되었다면 무시
+      if (abortRef.current !== controller) return;
 
       setFeedPosts((prev) =>
         prev.map((post) =>
@@ -202,12 +257,23 @@ function FeedPage({ currentUser }) {
         ),
       );
     } catch (error) {
+      // [수정 2026-05-11 #19-3] AbortError 는 정상 흐름이므로 로그 제외
+      if (error?.name === "AbortError") return;
       console.error("댓글 조회 실패:", error);
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     }
   };
 
   /** closeCommentModal - 댓글 모달 닫기, 선택 상태 및 입력값 초기화 */
   const closeCommentModal = () => {
+    // [수정 2026-05-11 #19-3] 모달 닫기 시 진행 중인 댓글 페치도 중단
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     setSelectedPostId(null);
     setCommentInput("");
   };

@@ -41,6 +41,21 @@
 #     에서는 삭제된 루틴의 인증 기록이 그대로 표시되어야 하므로
 #     해당 라우터들은 routines 의 deleted_at 을 필터링하지 않는다.
 # ─────────────────────────────────────────────────────────────────
+#
+# ────────────────────────────────────────────────────────────────────
+# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
+# 날짜: 2026-05-11
+# 기대효과:
+#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
+#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
+#   - 루틴 생성/삭제(Soft Delete UPDATE)의 트랜잭션 누수 차단
+# 장점:
+#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
+#   - SELECT-only 라우터에서도 동일 패턴으로 미래 INSERT 추가에 안전
+#   - 7개 라우터 일괄 패턴화로 유지보수 비용 최소
+# ────────────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -103,6 +118,11 @@ def create_routine(body: RoutineCreate):
         conn.commit()  # INSERT 완료 후 트랜잭션 커밋
         return {"success": True}
     except Exception as e:
+        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리 — 풀 반환 시 다음 요청 오염 차단
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -145,6 +165,11 @@ def get_routines(user_id: str):
             routines = cursor.fetchall()  # DictCursor → dict 배열 반환 (없으면 빈 리스트)
         return routines
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -215,6 +240,11 @@ def delete_routine(
 
         return {"success": True}
     except Exception as e:
+        # [수정 2026-05-11 #18] Soft Delete UPDATE 도 트랜잭션 정리
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:

@@ -24,6 +24,8 @@ const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const {
     createFeed,
     addFeedImage,
+    // [추가 2026-05-11 #16] 단일 트랜잭션 통합 호출
+    createFeedWithImages,
     getFeeds,
     getFeedDetail,
     deleteFeed,
@@ -96,29 +98,92 @@ async function deleteS3Object(key) {
     }
 }
 
+// ────────────────────────────────────────────────────────────────────
+// [수정 2026-05-11] 신규 #17 — S3 URL 검증 강화
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: 신규 #17 (S3 URL 검증이 호스트네임 suffix 만 체크)
+// 날짜: 2026-05-11
+// 기대효과:
+//   - 임의 버킷의 객체 삭제 차단 (".amazonaws.com" suffix 만 통과하던 기존 약점 해소)
+//   - "..": "feed/../../etc/passwd" 류 path traversal 시도 reject
+//   - 화이트리스트 prefix(`feed/`, `profile/`) 외 키는 삭제 대상에서 제외
+//     → 향후 클라이언트가 file_url 을 직접 보내도 임의 객체 삭제 불가
+// 장점:
+//   - 환경변수 AWS_S3_BUCKET / AWS_REGION 의 정확한 조합과만 매칭 → 다른 버킷 보호
+//   - 단일 함수에 집중된 검증 → IAM 정책과 별개로 코드 레벨 방어 추가
+//   - 화이트리스트 미스 시 null 반환 → 호출자(deleteFeed) 의 cleanup 흐름 그대로 유지
+// ────────────────────────────────────────────────────────────────────
+
+// multer-s3 의 key 생성 규칙(`feed/<timestamp>-...`)과 일치.
+// 향후 프로필 사진 등이 추가되면 prefix 만 늘리면 됨.
+const ALLOWED_S3_KEY_PREFIXES = ["feed/", "profile/"];
+
 /**
- * S3 퍼블릭 URL 에서 객체 키만 추출.
- *   입력: https://my-bucket.s3.ap-northeast-2.amazonaws.com/feed/123-456.jpg
+ * S3 퍼블릭 URL 에서 객체 키만 추출 (강화된 검증).
+ *
+ *   입력: https://${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/feed/123-456.jpg
  *   반환: feed/123-456.jpg
  *
- * 실패 시 null. 비-S3 URL 이거나 형식이 맞지 않으면 삭제 대상에서 제외.
+ * 다음 중 하나라도 어긋나면 null 반환 → 호출자가 삭제 대상에서 제외:
+ *   1) URL 파싱 실패
+ *   2) hostname 이 정확히 "${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com" 가 아님
+ *   3) 추출된 key 가 비어 있음 / "/" 만으로 구성됨
+ *   4) key 에 ".." 시퀀스 또는 백슬래시 포함 (path traversal 방어)
+ *   5) key 가 ALLOWED_S3_KEY_PREFIXES 중 어느 것으로도 시작하지 않음
  */
 function extractS3Key(fileUrl) {
     if (!fileUrl || typeof fileUrl !== "string") return null;
+
+    // 환경변수가 없으면 정확 매칭 자체가 불가능 → 보수적으로 null
+    if (!AWS_S3_BUCKET || !AWS_REGION) return null;
+
+    let parsed;
     try {
-        const u = new URL(fileUrl);
-        // 호스트는 "<bucket>.s3.<region>.amazonaws.com" 또는 "s3.<region>.amazonaws.com/<bucket>/..."
-        // 이 코드는 Virtual-hosted-style (multer-s3 기본) 만 처리.
-        if (!u.hostname.endsWith(".amazonaws.com")) return null;
-        // pathname 은 "/feed/123-456.jpg" 형태 → 앞 슬래시 제거
-        return u.pathname.startsWith("/") ? u.pathname.slice(1) : u.pathname;
+        parsed = new URL(fileUrl);
     } catch {
         return null;
     }
+
+    // (2) hostname 정확 매칭 — Virtual-hosted-style 만 허용
+    const expectedHost = `${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com`;
+    if (parsed.hostname !== expectedHost) return null;
+
+    // (3) pathname → key 변환
+    const key = parsed.pathname.startsWith("/")
+        ? parsed.pathname.slice(1)
+        : parsed.pathname;
+    if (!key) return null;
+
+    // (4) path traversal 시퀀스 방어
+    //     S3 키 자체는 ".." 를 허용하지만, 우리 코드 흐름에선 정상 키에 ".." 가 들어올 일이
+    //     없으므로 거부하는 편이 안전. 백슬래시(\\) 도 비표준 인코딩 시도로 간주하고 차단.
+    if (key.includes("..") || key.includes("\\")) return null;
+
+    // (5) 화이트리스트 prefix 강제
+    if (!ALLOWED_S3_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+        return null;
+    }
+
+    return key;
 }
 
 // ── 피드 생성 (POST /feed) ───────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────
+// [수정 2026-05-11] 신규 #16 — 분산 트랜잭션 단일 호출 통합
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: 신규 #16 (Express ↔ FastAPI 분산 트랜잭션 부재)
+// 날짜: 2026-05-11
+// 기대효과:
+//   - 기존: createFeed → addFeedImage × N 회 호출 → 중간 실패 시 feeds orphan 가능
+//   - 신규: createFeedWithImages 단일 호출 → FastAPI 가 한 트랜잭션에서 INSERT 후 부분
+//     실패 시 ROLLBACK → orphan 피드 행 제거
+//   - HTTP 라운드트립 (1 + N) → 1 로 축소
+// 장점:
+//   - DB 레벨 트랜잭션으로 정합성 보장 (기존 best-effort cleanup 보다 강함)
+//   - Express 분기 단순화: "성공이면 끝, 실패면 S3 cleanup" 두 갈래만 남음
+//   - 기존 createFeed / addFeedImage 함수는 유지 → 미사용 시 향후 제거 가능
+// ────────────────────────────────────────────────────────────────────
 /**
  * POST /feed
  *
@@ -133,9 +198,9 @@ function extractS3Key(fileUrl) {
  *   1. 세션 인증 → user_id (requireAuth 가 req.user 주입)
  *   2. 검증 실패 / FastAPI 실패 시 cleanupS3Objects() 로 업로드된 S3 객체 정리
  *      → "고아 객체"(DB 레코드 없는 S3 파일) 누적 방지
- *   3. createFeed() 로 feeds 행 INSERT → feed_id 획득
- *   4. 각 파일마다 addFeedImage() 로 feed_images 행 INSERT
- *      file_url 에는 S3 퍼블릭 URL 전체 저장 (프론트는 URL 그대로 <img src=>)
+ *   3. createFeedWithImages() 로 FastAPI 에 단일 호출
+ *      → feeds + feed_images 가 동일 트랜잭션에서 INSERT
+ *      → 부분 실패 시 FastAPI 측에서 자동 ROLLBACK
  */
 router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, next) => {
     const { routine_id, completion_id, content } = req.body;
@@ -161,15 +226,22 @@ router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, ne
     }
 
     try {
-        // 1. 피드 레코드 생성
-        const feedResult = await createFeed({
+        // [수정 2026-05-11 #16] 단일 트랜잭션 호출로 통합
+        //   - feeds + feed_images N건이 FastAPI 측 단일 트랜잭션에서 처리됨
+        //   - 어느 INSERT 라도 실패하면 FastAPI 가 ROLLBACK → orphan 행 없음
+        const result = await createFeedWithImages({
             user_id: req.user.user_id,
             routine_id,
             completion_id,
             content: content || "",
+            images: uploadedFiles.map((f) => ({
+                file_url: f.location,   // S3 퍼블릭 URL
+                file_type: f.mimetype,
+            })),
         });
 
-        if (!feedResult.success) {
+        if (!result?.success) {
+            // FastAPI 가 200 OK 인데 success=false 인 경우는 현재 없으나 방어 코드
             await cleanupS3Objects();
             return res.status(500).json({
                 success: false,
@@ -177,22 +249,10 @@ router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, ne
             });
         }
 
-        const feed_id = feedResult.feed_id;
-
-        // 2. 각 업로드 파일에 대해 feed_images 행 생성 (S3 URL 그대로 저장)
-        for (const file of uploadedFiles) {
-            await addFeedImage({
-                feed_id,
-                file_url: file.location, // S3 퍼블릭 URL
-                file_type: file.mimetype,
-            });
-        }
-
-        return res.json({ success: true, feed_id });
+        return res.json({ success: true, feed_id: result.feed_id });
     } catch (error) {
-        // FastApiError / 네트워크 오류 / addFeedImage 실패 모두 진입.
-        // DB 부분 성공 시 일부 image 행은 남을 수 있지만, 사용자에겐 "실패" 이므로
-        // S3 객체는 일괄 정리해 누적 차단. (정합성 점검 배치는 추후 과제)
+        // FastApiError(403/500) / 네트워크 오류 모두 진입.
+        // 이 시점엔 FastAPI 측이 ROLLBACK 했으므로 DB 행은 없음 → S3 객체만 정리.
         await cleanupS3Objects();
         return next(error);
     }

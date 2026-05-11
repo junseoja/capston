@@ -13,6 +13,21 @@
 #   repeat_cycle 이 현재 자유 문자열("매일", "월, 수" 등)이므로 요일 스케줄을
 #   DB에서 안전하게 정규화하기 전까지는 "활성 루틴 전체 × 기간 일수"를 목표량으로 계산한다.
 # ============================================================
+#
+# ────────────────────────────────────────────────────────────────────
+# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
+# 날짜: 2026-05-11
+# 기대효과:
+#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
+#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
+#   - SELECT-only 라우터지만 풀 반환 시 깨끗한 트랜잭션 상태 보장
+# 장점:
+#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
+#   - 미래 통계 캐시 INSERT/UPDATE 도입에 안전
+#   - 7개 라우터 일괄 패턴화로 유지보수 비용 최소
+# ────────────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -219,8 +234,18 @@ def get_stats(
             "latest_streak": streaks["latest_streak"],
         }
     except HTTPException:
+        # [수정 2026-05-11 #18] 400 등도 트랜잭션 정리 후 재전파
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:

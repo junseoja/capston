@@ -3028,7 +3028,7 @@ React → Express → FastAPI 왕복이 3회에서 1회로 줄어든다.
 | 종합 리뷰 | 백엔드/프론트/인프라 3축 진단, 잘 된 부분과 개선 항목 분리 |
 | **P0 발견 + 처리** | `.env` git 추적 제거 + `.env.example` 신설 + PR #1 → dev 머지 |
 | 신규 부채 | #16 분산 트랜잭션 / #17 S3 URL 검증 / #18 라우터 트랜잭션 정합성 / #19 비번 정책 |
-| 프론트 누수/race 3종 | IntersectionObserver cleanup / blob URL revoke / 댓글 모달 fetch race |
+| 프론트 누수/race 3종 | IntersectionObserver cleanup / blob URL revoke / 댓글 모달 fetch race (모두 2026-05-11 완료) |
 
 ---
 
@@ -3123,13 +3123,17 @@ git **history** 에는 여전히 `.env` 가 존재 — 예: `https://raw.githubu
 | 기대 효과 | 운영 오류로 평문이 들어와도 INSERT 차단 |
 | 문제점 | 정상 흐름엔 영향 없음. 단순 추가 작업 |
 
-#### 3-3. 프론트엔드 누수/race 3종
+#### 3-3. 프론트엔드 누수/race 3종 ✅ 2026-05-11 완료 (#19)
 
-작은 PR 로 묶기 좋음:
+원래 작은 PR 로 묶기 좋다고 분류했으나, 5/11 단일 세션에서 일괄 적용:
 
-- `src/frontend/FeedPage.jsx` — IntersectionObserver 언마운트 cleanup 누락 → 페이지 이동 시 observer 잔존
-- `src/frontend/HomePage.jsx` — `proofFiles` 재선택 시 이전 blob URL `URL.revokeObjectURL` 누락 → 인증 모달 여닫을 때마다 누적
-- `src/frontend/FeedPage.jsx` — 댓글 모달 빠른 클릭 시 fetch race (5/3 README 본인 인지 사항) → `AbortController` 도입
+| 항목 | 파일 | 적용 내용 |
+|---|---|---|
+| ① IntersectionObserver 언마운트 cleanup 누락 | `src/frontend/FeedPage.jsx` | `useEffect(() => () => { observerRef.current?.disconnect(); abortRef.current?.abort(); }, [])` 추가. sentinelRef 콜백은 새 노드 attach 시에만 disconnect 하므로 라우팅 이동 시 observer 가 잔존하던 문제 차단 |
+| ② `proofFiles` blob URL 누적 누수 | `src/frontend/HomePage.jsx` | `handleDetailSubmit` 성공 후 `selectedFiles.url` 일괄 `URL.revokeObjectURL` + `objectUrlsRef` 동시 정리. 기존엔 언마운트 전까지 누적되어 인증 반복 시 메모리 선형 증가 |
+| ③ 댓글 모달 fetch race | `src/frontend/FeedPage.jsx` | `abortRef` 도입 → `openCommentModal` 진입 시 이전 페치 abort + 새 `AbortController.signal` 부착, `closeCommentModal` 도 abort. 응답 도착 직전 다른 모달로 전환되어도 stale 응답으로 덮어쓰는 일 없음. `AbortError` 는 정상 흐름이라 로그 제외 |
+
+3건 모두 4항목 주석(오류번호 #19 / 날짜 / 기대효과 / 장점) 헤더 부여 완료.
 
 #### 3-4. 600줄 이상 단일 컴포넌트 분할 권장
 
@@ -3173,7 +3177,115 @@ PR #1 (커밋 `37ee79b`) → dev 머지 완료.
 
 ---
 
-### 6. 기타 — 웹뷰 앱화 단계 검토 (정보 공유)
+### 6. 신규 #18 라우터 트랜잭션 정합성 일괄 점검 — 같은 날 후속 처리
+
+5/11 종합 리뷰에서 발견한 **신규 #18** 을 같은 세션 안에서 즉시 처리. 5/2 `like.py` 가 단독으로 적용했던 rollback 패턴을 나머지 7개 라우터에도 일괄 확장.
+
+#### 6-1. 영향 범위
+
+| 파일 | except 블록 수 | 비고 |
+|---|---|---|
+| `src/python_api/routers/feed.py` | 5 | `create_feed`/`get_feed_detail` 은 HTTPException 분기까지 포함 |
+| `src/python_api/routers/completion.py` | 4 | `create_completion` HTTPException 분기 포함 |
+| `src/python_api/routers/comment.py` | 3 | INSERT/SELECT/DELETE 1개씩 |
+| `src/python_api/routers/user.py` | 8 | `signup` IntegrityError 특수 케이스 + 세션/Lazy migration UPDATE 포함 |
+| `src/python_api/routers/routine.py` | 3 | INSERT/SELECT/Soft Delete UPDATE |
+| `src/python_api/routers/mypage.py` | 3 | SELECT-only 지만 일관 패턴 적용 |
+| `src/python_api/routers/stats.py` | 1 | SELECT-only 지만 일관 패턴 적용 |
+| **합계** | **27** | (HTTPException 분기 포함) |
+
+#### 6-2. 4단 분석
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `like.py` 만 `conn.rollback()` 패턴 적용. 다른 7개 라우터는 `except` 에서 바로 `print + raise` → 풀(2026-05-10 도입) 환경에서 미정리 트랜잭션이 그대로 풀에 반환되어 다음 요청에 오염 가능 |
+| 수정 후 방식 | 모든 `except` 블록 (HTTPException / IntegrityError / Exception 분기) 에 `try: conn.rollback() except Exception: pass` + 짧은 `[수정 2026-05-11 #18]` 마커 주석. 파일 상단에는 4항목(오류번호/날짜/기대효과/장점) 헤더 블록 prepend |
+| 기대 효과 | 풀 반환 시 깨끗한 트랜잭션 상태 보장. 5/2 `like.py` 1205 락 타임아웃 패턴이 다른 라우터에서 재발하지 않음. 신규 #16 분산 트랜잭션 도입 전 사전 정리 완료 |
+| 문제점 | SELECT-only 라우터(`mypage.py`/`stats.py`/일부 GET)에는 사실상 no-op 이지만 일관 패턴을 위해 동일 적용 → 추후 INSERT/UPDATE 추가 시 자동 안전. PR 변경 폭이 크지만 로직 변경 제로 |
+
+#### 6-3. 검증
+
+- 7개 파일 모두 `python3 -m py_compile` 통과
+- `like.py` 의 기존 패턴과 100% 동일한 형태로 통일 → 미래 리뷰어가 한 곳만 보면 됨
+- 모든 `except` 마커에 `[수정 2026-05-11 #18]` prefix → grep 으로 일괄 확인/롤백 가능
+
+#### 6-4. 주석 규칙 (앞으로 모든 코드 수정 적용)
+
+이번 세션부터 모든 코드 수정에 다음 4항목 주석을 의무화:
+
+- **오류 번호** — README/메모리의 부채 번호 (예: 신규 #18, README #9)
+- **날짜** — 수정 일자 (YYYY-MM-DD 절대 표기)
+- **기대효과** — 정합성/성능/보안 등 구체적 결과
+- **장점** — 다른 방식 대비 이 방식의 이점
+
+파일 단위에는 구분선 + 4항목 헤더 블록을, 한 줄 수정에는 짧은 마커 주석을 사용. 본 #18 작업이 첫 적용 사례.
+
+---
+
+### 7. 신규 #16/#17 분산 트랜잭션 + S3 URL 검증 — 같은 날 후속 처리
+
+#18 작업 직후 같은 세션에서 신규 #16(데이터 정합성), 신규 #17(S3 검증 강화) 도 연달아 처리.
+
+#### 7-1. 신규 #16 — Express ↔ FastAPI 분산 트랜잭션 통합
+
+**기존 흐름 (다단 호출)**
+```
+Express POST /feed
+  ├─ FastAPI POST /feed/        → feeds INSERT + commit
+  └─ FastAPI POST /feed/image   ×N → 각 commit
+       (중간 실패 시 feeds 행은 orphan, S3 cleanup 만 best-effort)
+```
+
+**신규 흐름 (단일 트랜잭션)**
+```
+Express POST /feed
+  └─ FastAPI POST /feed/with-images
+       └─ 단일 트랜잭션: feeds INSERT + feed_images INSERT × N → 한 번 commit
+       └─ 어느 단계든 실패 → 모든 INSERT ROLLBACK + 503/500 반환
+       └─ Express 가 받아서 S3 객체만 cleanup
+```
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `createFeed` 호출로 commit → 각 `addFeedImage` 호출로 commit. 도중 실패 시 `feeds` 는 살고 `feed_images` 는 일부만 존재 → 화면에 본문만 있는 빈 피드 표시 |
+| 수정 후 방식 | FastAPI `POST /feed/with-images` 신설. 동일 커넥션·동일 트랜잭션에서 모든 INSERT 후 단 한 번 `conn.commit()`. 실패 시 except 블록의 `conn.rollback()` 로 일괄 무효화. Express 는 `createFeedWithImages` 단일 호출로 단순화 |
+| 기대 효과 | DB 정합성 보장, 정상 흐름 라운드트립 (1 + N) → 1 회로 축소, Express 분기 단순화 |
+| 문제점 | FastAPI 페이로드가 이미지 URL 배열만큼 커짐(최대 10건/50MB→URL 만이라 무시할 수준). 기존 `POST /feed/`/`POST /feed/image` 두 엔드포인트는 호환을 위해 유지(향후 사용처 없으면 제거) |
+
+**변경 파일 3개**
+- `src/python_api/routers/feed.py` — `FeedWithImagesCreate` 스키마 + `POST /feed/with-images` 핸들러 신설 (소유권 검증 → feeds INSERT → feed_images N건 INSERT → 단일 commit)
+- `src/backend/database.js` — `createFeedWithImages` 헬퍼 신설 + export
+- `src/backend/routes/feed.js` — `POST /feed` 라우터 본문이 `createFeed → addFeedImage × N` 루프에서 `createFeedWithImages` 단일 호출로 교체
+
+#### 7-2. 신규 #17 — `extractS3Key` 검증 강화
+
+**대상**: `src/backend/routes/feed.js` `extractS3Key()` 함수
+
+| 검증 항목 | 기존 | 수정 후 |
+|---|---|---|
+| hostname | `.amazonaws.com` suffix 만 체크 (다른 사람 버킷도 통과) | `${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com` 정확 매칭 |
+| 환경변수 누락 | 무시 | `AWS_S3_BUCKET`/`AWS_REGION` 미설정 시 `null` (보수적 fail-closed) |
+| Path traversal | 검사 없음 | key 에 `..` 또는 `\` 포함 시 `null` |
+| Key prefix | 검사 없음 | `ALLOWED_S3_KEY_PREFIXES = ["feed/", "profile/"]` 외 시작은 `null` |
+| 빈 key | 무시 | 빈 문자열은 `null` |
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `u.hostname.endsWith(".amazonaws.com")` 만 검사 — 임의 버킷·임의 객체 키 모두 통과. 현재는 클라이언트가 `file_url` 을 직접 보내지 않아 안전했지만, 향후 변경 시 임의 객체 삭제 가능 |
+| 수정 후 방식 | hostname 정확 매칭 + `..` 시퀀스 reject + key prefix 화이트리스트 강제. 어느 하나라도 어긋나면 `null` 반환 → 호출자 cleanup 흐름은 그대로 (삭제 시도하지 않고 skip) |
+| 기대 효과 | 향후 클라이언트 입력 경로가 추가되어도 임의 S3 객체 삭제 불가. 환경변수 누락 시도 fail-closed |
+| 문제점 | 새 prefix(예: `avatar/`) 추가 시 화이트리스트도 함께 갱신 필요 — 코드 한 줄이라 부담 적음. IAM 정책과 별개 방어층이라 중복 보호 |
+
+#### 7-3. 검증
+
+- `python3 -m py_compile routers/feed.py` → OK
+- `node --check routes/feed.js && node --check database.js` → OK
+- 기존 `POST /feed/` / `POST /feed/image` / `GET /feed/` / `DELETE /feed/{feed_id}` 시그니처 변경 없음 → 다른 호출자 영향 없음
+- `extractS3Key` 가 사용되는 유일한 호출 지점인 `DELETE /feed/:feed_id` 의 cleanup 루프는 그대로 — 화이트리스트 미스 시 자연스럽게 skip
+
+---
+
+### 8. 기타 — 웹뷰 앱화 단계 검토 (정보 공유)
 
 캡스톤 최종 목표인 "웹을 웹뷰로 앱 데모" 를 위한 단계 정보 공유 (실제 작업은 미시작):
 
@@ -3223,14 +3335,14 @@ PR #1 (커밋 `37ee79b`) → dev 머지 완료.
 - [x] ~~`src/python_api/.env` git 추적 제거 (RDS 자격증명 GitHub 퍼블릭 노출)~~ ✅ 2026-05-11 부분 완료 (git rm --cached + .env.example 신설, PR #1 머지). git history 정리·RDS 비번 회전은 별도 항목
 - [ ] (P0 후속) AWS RDS admin 비번 회전 — 2026-05-11 잔여 (운영 진입 전 필수)
 - [ ] git history 에서 과거 `.env` 영구 제거 (filter-repo + force push) — 2026-05-11 잔여 (사용자 결정)
-- [ ] Express ↔ FastAPI 분산 트랜잭션 통합 (`POST /feed/with-images`) — 2026-05-11 신규 #16
-- [ ] S3 URL 검증 강화 (버킷명 정확 매칭 / `..` 차단 / prefix 화이트리스트) — 2026-05-11 신규 #17
-- [ ] 라우터별 트랜잭션 정합성 일괄 점검 (`feed.py`/`completion.py`/`user.py` 등) — 2026-05-11 신규 #18
+- [x] ~~Express ↔ FastAPI 분산 트랜잭션 통합 (`POST /feed/with-images`) — 2026-05-11 신규 #16~~ ✅ 2026-05-11 완료 (단일 트랜잭션 INSERT + Express 단일 호출 전환)
+- [x] ~~S3 URL 검증 강화 (버킷명 정확 매칭 / `..` 차단 / prefix 화이트리스트) — 2026-05-11 신규 #17~~ ✅ 2026-05-11 완료 (`extractS3Key` hostname 정확 매칭 + `..`/`\` reject + `feed/`/`profile/` 화이트리스트)
+- [x] ~~라우터별 트랜잭션 정합성 일괄 점검 (`feed.py`/`completion.py`/`user.py` 등) — 2026-05-11 신규 #18~~ ✅ 2026-05-11 완료 (7개 라우터 26개 except 블록에 rollback 패턴 일괄 적용)
 - [ ] 회원가입 비밀번호 정책 (Pydantic `field_validator`) — 2026-05-11 신규 #19
 - [ ] 600줄+ 단일 컴포넌트 분할 (FeedPage / SignupPage / HomePage) — 2026-05-11 신규
-- [ ] FeedPage IntersectionObserver 언마운트 cleanup — 2026-05-11 신규
-- [ ] HomePage `proofFiles` blob URL 재선택 시 revoke — 2026-05-11 신규
-- [ ] FeedPage 댓글 모달 fetch race (`AbortController`) — 2026-05-11 신규
+- [x] ~~FeedPage IntersectionObserver 언마운트 cleanup — 2026-05-11 신규~~ ✅ 2026-05-11 완료 (`useEffect` cleanup 으로 `observerRef.disconnect()` 강제 호출 + `abortRef` 정리)
+- [x] ~~HomePage `proofFiles` blob URL 재선택 시 revoke — 2026-05-11 신규~~ ✅ 2026-05-11 완료 (제출 성공 직후 `selectedFiles.url` 일괄 revoke + `objectUrlsRef` 동시 정리)
+- [x] ~~FeedPage 댓글 모달 fetch race (`AbortController`) — 2026-05-11 신규~~ ✅ 2026-05-11 완료 (openCommentModal `signal` 부착 + closeCommentModal/언마운트 abort 일관 처리)
 - [ ] `build-output.txt` git 추적 제거 — 2026-05-11 신규 (Minor)
 - [ ] `src/backend/package.json` 에 `dev`/`start` 스크립트 추가 — 2026-05-11 신규 (Minor)
 - [ ] `login.js` `/check-duplicate` 의 `fetchJson` 헬퍼 통일 — 2026-05-11 신규 (Minor)

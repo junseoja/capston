@@ -15,6 +15,21 @@
 #   Express 의 requireAuth 를 거쳐 세션 user_id 로만 호출되며,
 #   FastAPI 전역 X-Internal-Api-Key 미들웨어가 직접 호출을 1차 차단한다.
 # ============================================================
+#
+# ────────────────────────────────────────────────────────────────────
+# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
+# 날짜: 2026-05-11
+# 기대효과:
+#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
+#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
+#   - SELECT-only 라우터지만 풀 반환 시 깨끗한 트랜잭션 상태 보장
+# 장점:
+#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
+#   - 미래 INSERT/UPDATE 추가에 안전 (마이페이지에 통계 저장 등 확장 가능)
+#   - 7개 라우터 일괄 패턴화로 유지보수 비용 최소
+# ────────────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -182,8 +197,18 @@ def get_mypage_overview(
                 "gallery": _load_gallery(cursor, user_id, gallery_limit),
             }
     except HTTPException:
+        # [수정 2026-05-11 #18] 404 등도 트랜잭션 정리 후 재전파
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -211,6 +236,11 @@ def get_mypage_summary(user_id: str):
         with conn.cursor() as cursor:
             return _load_summary(cursor, user_id)
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -239,6 +269,11 @@ def get_mypage_gallery(
         with conn.cursor() as cursor:
             return {"items": _load_gallery(cursor, user_id, limit)}
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:

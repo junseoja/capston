@@ -36,6 +36,21 @@
 #                                        (CASCADE 가 더 이상 트리거되지 않으므로
 #                                         연결된 피드/이미지/댓글/좋아요는 보존)
 # ─────────────────────────────────────────────────────────────────
+#
+# ────────────────────────────────────────────────────────────────────
+# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
+# 날짜: 2026-05-11
+# 기대효과:
+#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
+#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
+#   - 완료/취소가 빈번한 라우트라 자기 데드락 위험이 가장 큼 → 우선 보강
+# 장점:
+#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
+#   - 풀 반환 시 깨끗한 트랜잭션 상태 보장
+#   - 7개 라우터 일괄 패턴화로 유지보수 비용 최소
+# ────────────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -117,8 +132,18 @@ def create_completion(body: CompletionCreate):
         # completion_id를 반환해야 피드 생성 시 FK로 사용 가능
         return {"success": True, "completion_id": new_uuid}
     except HTTPException:
+        # [수정 2026-05-11 #18] 403 등도 트랜잭션 정리 후 재전파
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     except Exception as e:
+        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리 — 풀 반환 시 다음 요청 오염 차단
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -170,6 +195,11 @@ def get_today_completions(user_id: str):
             completions = cursor.fetchall()  # 오늘 완료 기록 전체 (없으면 빈 리스트)
         return completions
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -237,6 +267,11 @@ def delete_completion(
 
         return {"success": True}
     except Exception as e:
+        # [수정 2026-05-11 #18] UPDATE 도 INSERT 와 동일하게 트랜잭션 정리
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -301,6 +336,11 @@ def get_completion_history(user_id: str):
             history = cursor.fetchall()
         return history
     except Exception as e:
+        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
