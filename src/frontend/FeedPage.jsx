@@ -444,11 +444,14 @@ function FeedPage({ currentUser }) {
                           src={getImageUrl(currentMedia.file_url)}
                           alt="루틴 인증 이미지"
                           className="instagram-feed-media"
+                          loading="lazy"
+                          decoding="async"
                         />
                       ) : (
                         <video
                           src={getImageUrl(currentMedia.file_url)}
                           controls
+                          preload="metadata"
                           className="instagram-feed-media"
                         />
                       )}
@@ -570,11 +573,14 @@ function FeedPage({ currentUser }) {
                       src={getImageUrl(selectedPostMedia.file_url)}
                       alt="루틴 인증 이미지"
                       className="feed-modal-media"
+                      loading="lazy"
+                      decoding="async"
                     />
                   ) : (
                     <video
                       src={getImageUrl(selectedPostMedia.file_url)}
                       controls
+                      preload="metadata"
                       className="feed-modal-media"
                     />
                   )}

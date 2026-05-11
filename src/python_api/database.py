@@ -3,74 +3,209 @@
 # ============================================================
 # 역할:
 #   - .env 파일에서 MySQL 접속 정보를 읽어 커넥션 생성
-#   - 각 라우터 함수에서 호출하여 요청마다 새로운 커넥션 사용 후 반드시 close()
+#   - FastAPI 라우터가 get_connection() 으로 DB 커넥션을 빌려 쓰고 close() 로 반환
 #
-# 주의사항:
-#   - 현재는 요청마다 커넥션을 새로 열고 닫는 방식 (Connection per request)
-#   - 트래픽이 늘어날 경우 커넥션 풀(SQLAlchemy, aiomysql 등) 적용 권장
-#   - .env 파일은 절대 Git에 커밋하지 말 것 (DB 접속 정보 포함)
+# [수정 2026-05-10] 요청마다 새 연결 → 간단한 PyMySQL 커넥션 풀로 전환
+# 이유:
+#   React → Express → FastAPI → MySQL 구조를 유지하면서 성능을 높이려면
+#   FastAPI 내부에서 매 요청마다 MySQL 연결을 새로 여는 비용을 줄이는 것이 가장 효과적이다.
+#   RDS 연결 생성은 TCP 연결/인증/세션 초기화 비용이 있고, 트래픽이 늘면 연결 수 한도에도 빨리 닿는다.
+#
+# 설명:
+#   - 기존 라우터 코드의 try/finally conn.close() 패턴은 그대로 유지한다.
+#   - get_connection() 은 풀에서 연결을 빌려온 PooledConnection 래퍼를 반환한다.
+#   - conn.close() 는 실제 종료가 아니라 풀 반환으로 동작한다.
+#   - 끊긴 연결은 ping(reconnect=True) 로 복구한 뒤 사용한다.
+#   - 쿼리 시간이 SLOW_QUERY_MS 이상이면 로그를 남겨 병목 쿼리를 찾는다.
 # ============================================================
 
+import os
+import queue
+import threading
+import time
 import pymysql
 import pymysql.cursors
 from dotenv import load_dotenv
-import os
 
-# .env 파일 로드 → os.getenv()로 환경변수 읽기 가능
-# 필요한 환경변수: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT
 load_dotenv()
 
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "8"))
+DB_POOL_MAX_OVERFLOW = int(os.getenv("DB_POOL_MAX_OVERFLOW", "4"))
+SLOW_QUERY_MS = int(os.getenv("SLOW_QUERY_MS", "200"))
+
+
+def _connection_kwargs():
+    """PyMySQL 커넥션 공통 옵션.
+
+    [유지 2026-05-10]
+    이유:
+        기존 KST 타임존 보정 정책을 커넥션 풀에서도 동일하게 유지하기 위함.
+    """
+    return {
+        "host": os.getenv("DB_HOST"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "database": os.getenv("DB_NAME"),
+        "port": int(os.getenv("DB_PORT", 3306)),
+        "charset": "utf8mb4",
+        "cursorclass": pymysql.cursors.DictCursor,
+        "init_command": "SET time_zone = '+09:00'",
+        "autocommit": False,
+    }
+
+
+class TimedCursor:
+    """쿼리 실행 시간을 측정하는 cursor 래퍼."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, args=None):
+        started_at = time.perf_counter()
+        try:
+            return self._cursor.execute(query, args)
+        finally:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            if elapsed_ms >= SLOW_QUERY_MS:
+                compact_query = " ".join(str(query).split())
+                print(f"🐢 [slow-sql] {elapsed_ms:.1f}ms {compact_query[:240]}")
+
+    def executemany(self, query, args):
+        started_at = time.perf_counter()
+        try:
+            return self._cursor.executemany(query, args)
+        finally:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            if elapsed_ms >= SLOW_QUERY_MS:
+                compact_query = " ".join(str(query).split())
+                print(f"🐢 [slow-sql-many] {elapsed_ms:.1f}ms {compact_query[:240]}")
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+    def __enter__(self):
+        self._cursor.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._cursor.__exit__(exc_type, exc, tb)
+
+
+class PooledConnection:
+    """라우터가 기존 pymysql.Connection 처럼 쓰는 풀 커넥션 래퍼."""
+
+    def __init__(self, pool, raw_connection, overflow=False):
+        self._pool = pool
+        self._raw = raw_connection
+        self._overflow = overflow
+        self._closed = False
+
+    def cursor(self, *args, **kwargs):
+        return TimedCursor(self._raw.cursor(*args, **kwargs))
+
+    def commit(self):
+        return self._raw.commit()
+
+    def rollback(self):
+        return self._raw.rollback()
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        self._pool.release(self._raw, overflow=self._overflow)
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+
+class MysqlConnectionPool:
+    """의존성 추가 없이 PyMySQL 연결을 재사용하는 작은 커넥션 풀."""
+
+    def __init__(self, size, max_overflow):
+        self.size = size
+        self.max_overflow = max_overflow
+        self._queue = queue.LifoQueue(maxsize=size)
+        self._overflow_count = 0
+        self._lock = threading.Lock()
+
+        for _ in range(size):
+            self._queue.put(self._create_connection())
+
+    def _create_connection(self):
+        return pymysql.connect(**_connection_kwargs())
+
+    def acquire(self):
+        try:
+            raw = self._queue.get(block=False)
+            overflow = False
+        except queue.Empty:
+            with self._lock:
+                can_overflow = self._overflow_count < self.max_overflow
+                if can_overflow:
+                    self._overflow_count += 1
+
+            if can_overflow:
+                raw = self._create_connection()
+                overflow = True
+            else:
+                raw = self._queue.get(block=True, timeout=5)
+                overflow = False
+
+        try:
+            raw.ping(reconnect=True)
+        except Exception:
+            try:
+                raw.close()
+            except Exception:
+                pass
+            raw = self._create_connection()
+
+        return PooledConnection(self, raw, overflow=overflow)
+
+    def release(self, raw, overflow=False):
+        try:
+            raw.rollback()
+        except Exception:
+            pass
+
+        if overflow:
+            try:
+                raw.close()
+            finally:
+                with self._lock:
+                    self._overflow_count = max(0, self._overflow_count - 1)
+            return
+
+        try:
+            self._queue.put(raw, block=False)
+        except queue.Full:
+            raw.close()
+
+
+_pool = None
+
+
 def get_connection():
-    """MySQL 커넥션 생성 및 반환
+    """MySQL 커넥션 풀에서 연결을 빌려 반환.
 
-    Returns:
-        pymysql.Connection: 열린 DB 커넥션 객체
-            - 사용 후 반드시 conn.close() 호출 (try/finally 패턴 권장)
-            - DictCursor 사용으로 결과가 dict 형태로 반환됨
-            예: {"user_id": "uuid...", "login_id": "hong123"}
-
-    사용 예시:
+    사용 예시는 기존과 동일:
         conn = get_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM users WHERE login_id = %s", (login_id,))
-                user = cursor.fetchone()
-            return user
+                cursor.execute("SELECT 1")
         finally:
-            conn.close()  # 항상 커넥션 반환
+            conn.close()
+
+    [수정 2026-05-10]
+    결과:
+        라우터 코드는 그대로 두고, close() 시 실제 종료 대신 풀 반환을 수행한다.
     """
-    # ────────────────────────────────────────────────────────────────────
-    # [수정 2026-04-29] 타임존 KST(+09:00) 강제 설정
-    # ────────────────────────────────────────────────────────────────────
-    # 배경:
-    #   AWS RDS MySQL은 기본적으로 UTC 타임존으로 동작하므로, KST와 9시간 차이 발생.
-    #   이로 인해 completion.py 의 `DATE(completed_at) = CURDATE()` 비교 시
-    #   KST 기준 자정~오전 09:00 사이에 완료한 루틴이 "어제 기록"으로 분류되는
-    #   타임존 버그가 발생하고 있었음.
-    #
-    # 예시:
-    #   - KST 2026-04-30 02:00 완료  →  UTC 2026-04-29 17:00 저장
-    #     → CURDATE() (UTC) = 2026-04-29  → 새로고침 시 오늘 목록에서 사라짐
-    #
-    # 해결책 (옵션 A — 가장 깔끔):
-    #   커넥션을 열 때마다 init_command 로 세션 타임존을 +09:00 으로 설정하면
-    #   해당 커넥션에서 실행되는 모든 NOW() / CURDATE() / CURRENT_TIMESTAMP /
-    #   DATE(컬럼) 계산이 KST 기준으로 동작.
-    #
-    # 주의:
-    #   - 글로벌 타임존을 바꾸는 것이 아니라 "현재 세션 타임존"만 바꿈
-    #   - 따라서 RDS 인스턴스 설정 변경 권한이 없어도 적용 가능
-    #   - DB에 저장되는 DATETIME 값(UTC 원본) 자체는 바뀌지 않으며, 비교/표시
-    #     시점에서만 KST로 해석됨 → 기존 데이터 마이그레이션 불필요
-    # ────────────────────────────────────────────────────────────────────
-    return pymysql.connect(
-        host=os.getenv("DB_HOST"),              # AWS RDS 엔드포인트 (예: xxx.rds.amazonaws.com)
-        user=os.getenv("DB_USER"),              # DB 사용자명 (예: admin)
-        password=os.getenv("DB_PASSWORD"),      # DB 비밀번호
-        database=os.getenv("DB_NAME"),          # 데이터베이스명 (예: capston)
-        port=int(os.getenv("DB_PORT", 3306)),   # 포트 (기본값: MySQL 표준 포트 3306)
-        charset="utf8mb4",                      # 한글 + 이모지까지 지원하는 인코딩
-        cursorclass=pymysql.cursors.DictCursor, # SELECT 결과를 dict 형태로 반환
-        # [추가 2026-04-29] 세션 타임존을 KST(+09:00)로 고정 — 위 주석 참조
-        init_command="SET time_zone = '+09:00'",
-    )
+    global _pool
+    if _pool is None:
+        _pool = MysqlConnectionPool(DB_POOL_SIZE, DB_POOL_MAX_OVERFLOW)
+        print(
+            f"✅ MySQL 커넥션 풀 초기화: size={DB_POOL_SIZE}, "
+            f"max_overflow={DB_POOL_MAX_OVERFLOW}, slow_query_ms={SLOW_QUERY_MS}"
+        )
+    return _pool.acquire()

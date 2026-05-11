@@ -350,11 +350,28 @@ function App() {
                         }
                     }
 
-                    await fetch(`${EXPRESS_URL}/feed`, {
+                    // [수정 2026-05-10] 피드 업로드 응답 검증 추가.
+                    //
+                    // 이유:
+                    //   fetch() 는 HTTP 400/500 응답에서도 throw 하지 않는다.
+                    //   기존 코드는 POST /feed 요청만 보내고 응답을 확인하지 않아,
+                    //   S3 업로드/FastAPI 검증/DB 저장이 실패해도 사용자에게 성공처럼 보였다.
+                    //
+                    // 동작:
+                    //   응답 JSON 의 success 와 HTTP status 를 모두 확인하고, 실패 시 catch 로 보내
+                    //   "루틴 완료는 저장되었지만 피드 업로드는 실패" 안내를 띄운다.
+                    //
+                    // 결과:
+                    //   완료 기록과 피드 업로드의 부분 성공 상태가 사용자에게 명확히 전달된다.
+                    const feedRes = await fetch(`${EXPRESS_URL}/feed`, {
                         method: "POST",
                         credentials: "include",
                         body: formData, // multipart/form-data (Content-Type 자동 설정)
                     });
+                    const feedData = await feedRes.json();
+                    if (!feedRes.ok || !feedData.success) {
+                        throw new Error(feedData.message || "피드 업로드에 실패했습니다.");
+                    }
                 } catch (feedError) {
                     console.error("피드 업로드 실패:", feedError);
                     // 피드 업로드 실패해도 루틴 완료 자체는 성공이므로 alert만 표시

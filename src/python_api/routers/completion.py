@@ -78,6 +78,33 @@ def create_completion(body: CompletionCreate):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # ────────────────────────────────────────────────────────────
+            # [추가 2026-05-10] 완료 생성 전 루틴 소유권 검증.
+            # ────────────────────────────────────────────────────────────
+            # 이유:
+            #   Express 는 세션에서 user_id 를 주입하지만, routine_id 는 프론트가 보낸
+            #   입력값이다. FastAPI 가 이를 그대로 믿으면 사용자가 타인의 routine_id 를
+            #   넣어 완료 기록을 만들 수 있고, 이후 MyPage/Stats 통계까지 오염된다.
+            #
+            # 동작:
+            #   routine_id 가 body.user_id 소유의 "활성 루틴(deleted_at IS NULL)"인지
+            #   먼저 확인한다. 결과가 없으면 INSERT 하지 않고 403으로 거부한다.
+            #
+            # 결과:
+            #   Express 인증을 우회하거나 잘못된 routine_id 를 보내도 완료 기록이 생성되지 않는다.
+            # ────────────────────────────────────────────────────────────
+            cursor.execute(
+                """SELECT routine_id
+                FROM routines
+                WHERE routine_id = %s
+                    AND user_id = %s
+                    AND deleted_at IS NULL""",
+                (body.routine_id, body.user_id)
+            )
+            routine = cursor.fetchone()
+            if not routine:
+                raise HTTPException(status_code=403, detail="본인 소유의 활성 루틴만 완료할 수 있습니다.")
+
             new_uuid = uuid7str()  # 완료 기록 고유 ID 생성
             cursor.execute(
                 """INSERT INTO routine_completions
@@ -89,6 +116,8 @@ def create_completion(body: CompletionCreate):
         conn.commit()
         # completion_id를 반환해야 피드 생성 시 FK로 사용 가능
         return {"success": True, "completion_id": new_uuid}
+    except HTTPException:
+        raise
     except Exception as e:
         print("🔴 오류:", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -133,8 +162,8 @@ def get_today_completions(user_id: str):
             cursor.execute(
                 """SELECT * FROM routine_completions
                 WHERE user_id = %s
-                  AND deleted_at IS NULL
-                  AND DATE(completed_at) = CURDATE()
+                    AND deleted_at IS NULL
+                    AND DATE(completed_at) = CURDATE()
                 ORDER BY completed_at DESC""",
                 (user_id,)
             )
@@ -190,10 +219,10 @@ def delete_completion(
             #   AND deleted_at IS NULL        : 이미 취소된 기록은 다시 처리하지 않음
             cursor.execute(
                 """UPDATE routine_completions
-                   SET deleted_at = NOW()
-                 WHERE completion_id = %s
-                   AND user_id = %s
-                   AND deleted_at IS NULL""",
+                    SET deleted_at = NOW()
+                    WHERE completion_id = %s
+                    AND user_id = %s
+                    AND deleted_at IS NULL""",
                 (completion_id, user_id)
             )
             affected = cursor.rowcount
@@ -258,13 +287,13 @@ def get_completion_history(user_id: str):
             #   부작용 방지.
             cursor.execute(
                 """SELECT rc.*,
-                          COALESCE(r.title, '(삭제된 루틴)') AS title,
-                          r.category,
-                          r.routine_mode
+                        COALESCE(r.title, '(삭제된 루틴)') AS title,
+                        r.category,
+                        r.routine_mode
                 FROM routine_completions rc
                 LEFT JOIN routines r ON rc.routine_id = r.routine_id
                 WHERE rc.user_id = %s
-                  AND rc.deleted_at IS NULL
+                    AND rc.deleted_at IS NULL
                 ORDER BY rc.completed_at DESC
                 LIMIT 20""",
                 (user_id,)

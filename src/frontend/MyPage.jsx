@@ -9,10 +9,7 @@
 //   - "상세 분석" 버튼 → /stats 페이지 이동
 //
 // 데이터 fetch 구조:
-//   GET /me                   → 유저 정보 (nickname, profile_img 등)
-//   GET /routine              → 루틴 목록 (개수만 사용)
-//   GET /completion/history   → 최근 완료 이력 (최신 20건)
-//   Promise.all로 병렬 fetch (성능 최적화)
+//   GET /mypage               → 유저 정보 + 오늘 달성률 + 갤러리 통합 조회
 //
 // 디자인 기준:
 //   2026-05-02 frontend 브랜치 UI 통합 (갓생 지수 + 갤러리 추가)
@@ -28,11 +25,13 @@ function MyPage() {
     // 로그인한 유저 정보 (GET /me 응답)
     const [user, setUser] = useState(null);
 
-    // 총 루틴 수 (GET /routine 응답 배열의 length)
-    const [routineCount, setRoutineCount] = useState(0);
+    // [추가 2026-05-10] 마이페이지 실제 요약 지표.
+    // 이유: 기존 mock 달성률/연속 달성/인증 게시글 수를 DB 기반 API 응답으로 대체.
+    const [summary, setSummary] = useState(null);
 
-    // 완료 이력 (GET /completion/history 응답: 최신 20건 배열)
-    const [completionHistory, setCompletionHistory] = useState([]);
+    // [추가 2026-05-10] 내 인증 갤러리 실제 항목.
+    // 이유: Unsplash placeholder 대신 feeds/feed_images 에 저장된 실제 업로드 파일 표시.
+    const [galleryItems, setGalleryItems] = useState([]);
 
     // 데이터 로딩 중 여부
     const [loading, setLoading] = useState(true);
@@ -43,21 +42,19 @@ function MyPage() {
 
     const fetchMyInfo = async () => {
         try {
-            const [userRes, routineRes, historyRes] = await Promise.all([
-                fetch(`${EXPRESS_URL}/me`, { credentials: "include" }),
-                fetch(`${EXPRESS_URL}/routine`, { credentials: "include" }),
-                fetch(`${EXPRESS_URL}/completion/history`, { credentials: "include" }),
-            ]);
+            // [수정 2026-05-10] 마이페이지 통합 API 사용.
+            // 이유: /me + /mypage/summary + /mypage/gallery 3회 호출을 1회 호출로 줄여
+            // React → Express → FastAPI 왕복 비용과 로딩 조각을 줄이기 위함.
+            const res = await fetch(`${EXPRESS_URL}/mypage?gallery_limit=9`, {
+                credentials: "include",
+            });
+            const data = await res.json();
 
-            const [userData, routineData, historyData] = await Promise.all([
-                userRes.json(),
-                routineRes.json(),
-                historyRes.json(),
-            ]);
-
-            if (userData.success) setUser(userData.user);
-            if (routineData.success) setRoutineCount(routineData.routines.length);
-            if (historyData.success) setCompletionHistory(historyData.history);
+            if (data.success) {
+                setUser(data.user);
+                setSummary(data.summary);
+                setGalleryItems(data.gallery || []);
+            }
         } catch (error) {
             console.error("마이페이지 데이터 로딩 실패:", error);
         } finally {
@@ -68,23 +65,16 @@ function MyPage() {
     if (loading) return <div className="mypage">로딩 중...</div>;
     if (!user) return <div className="mypage">유저 정보를 불러올 수 없습니다.</div>;
 
-    // ── 통계 계산 (현재는 mock 비율; 추후 GET /stats API 연결 예정) ───────
-    const morningRate = 100;
-    const lunchRate = 45;
-    const eveningRate = 0;
-    const totalRate = Math.floor((morningRate + lunchRate + eveningRate) / 3);
-    const continuousDays = 12;
+    const totalRate = summary?.today?.total_rate || 0;
+    const continuousDays = summary?.current_streak || 0;
+    const routineCount = summary?.routine_count || 0;
+    const feedCount = summary?.feed_count || 0;
 
-    // ── 갤러리 데이터 (피드 이미지 미연동 시 플레이스홀더) ────────────────
-    // TODO: GET /feed?user_id=me 또는 별도 인증 이미지 API 연결
-    const galleryItems = [
-        { id: "ex1", files: [{ url: "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=300" }] },
-        { id: "ex2", files: [{ url: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=300" }] },
-        { id: "ex3", files: [{ url: "https://images.unsplash.com/photo-1506784983877-45594efa4cbe?w=300" }] },
-        { id: "ex4", files: [{ url: "https://images.unsplash.com/photo-1552674605-db6ffd4facb5?w=300" }] },
-        { id: "ex5", files: [{ url: "https://images.unsplash.com/photo-1594882645126-14020914d58d?w=300" }] },
-        { id: "ex6", files: [{ url: "https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=300" }] },
-    ];
+    const getFileUrl = (fileUrl) => {
+        if (!fileUrl) return "";
+        if (fileUrl.startsWith("http")) return fileUrl;
+        return `${EXPRESS_URL}${fileUrl}`;
+    };
 
     const fontStyle = {
         fontFamily:
@@ -221,11 +211,11 @@ function MyPage() {
                 className="mypage-stats"
                 style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", padding: "0 24px" }}
             >
-                {[
-                    { label: "총 루틴 수", value: routineCount, unit: "개", color: "#4f46e5" },
-                    { label: "연속 달성", value: continuousDays, unit: "일", color: "#ef4444" },
-                    { label: "인증 게시글", value: completionHistory.length || "0", unit: "개", color: "#f59e0b" },
-                ].map((stat, idx) => (
+                    {[
+                        { label: "총 루틴 수", value: routineCount, unit: "개", color: "#4f46e5" },
+                        { label: "연속 달성", value: continuousDays, unit: "일", color: "#ef4444" },
+                        { label: "인증 게시글", value: feedCount, unit: "개", color: "#f59e0b" },
+                    ].map((stat, idx) => (
                     <div
                         key={idx}
                         style={{
@@ -261,10 +251,26 @@ function MyPage() {
                     </span>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
-                    {galleryItems.map((post) => (
+                {galleryItems.length === 0 ? (
+                    <div
+                        style={{
+                            background: "white",
+                            border: "1px solid #f3f4f6",
+                            borderRadius: "20px",
+                            padding: "28px 16px",
+                            color: "#6b7280",
+                            fontSize: "14px",
+                            fontWeight: "800",
+                            textAlign: "center",
+                        }}
+                    >
+                        아직 인증 갤러리에 표시할 파일이 없어요.
+                    </div>
+                ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
+                    {galleryItems.map((item) => (
                         <div
-                            key={post.id}
+                            key={item.image_id}
                             onClick={() => navigate("/feed")}
                             style={{
                                 position: "relative",
@@ -285,21 +291,41 @@ function MyPage() {
                                 e.currentTarget.style.boxShadow = "none";
                             }}
                         >
-                            <img
-                                src={post.files[0]?.url || post.files[0]}
-                                alt="인증샷"
-                                style={{
-                                    position: "absolute",
-                                    top: 0,
-                                    left: 0,
-                                    width: "100%",
-                                    height: "100%",
-                                    objectFit: "cover",
-                                }}
-                            />
+                            {item.file_type?.startsWith("video/") ? (
+                                <video
+                                    src={getFileUrl(item.file_url)}
+                                    muted
+                                    playsInline
+                                    preload="metadata"
+                                    style={{
+                                        position: "absolute",
+                                        top: 0,
+                                        left: 0,
+                                        width: "100%",
+                                        height: "100%",
+                                        objectFit: "cover",
+                                    }}
+                                />
+                            ) : (
+                                <img
+                                    src={getFileUrl(item.file_url)}
+                                    alt="인증샷"
+                                    loading="lazy"
+                                    decoding="async"
+                                    style={{
+                                        position: "absolute",
+                                        top: 0,
+                                        left: 0,
+                                        width: "100%",
+                                        height: "100%",
+                                        objectFit: "cover",
+                                    }}
+                                />
+                            )}
                         </div>
                     ))}
-                </div>
+                    </div>
+                )}
             </div>
         </div>
     );
