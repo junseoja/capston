@@ -2,83 +2,27 @@
    Routine Mate - Modern UI App.css
    최신 frontend 코드 기준 / JSX 수정 없이 App.css만 교체
    ========================================================= */
-/* ===============================
-   반응형
-================================ */
-
-@media (max-width: 768px) {
-
-  .home-routine-card {
-    flex-direction: column;
-    gap: 18px;
-    padding: 18px;
-  }
-
-  .home-routine-card-right {
-    width: 100%;
-    justify-content: stretch;
-  }
-
-  .home-detail-action {
-    width: 100%;
-  }
-
-  .routine-check-btn,
-  .home-action-btn {
-    width: 100%;
-  }
-}
-
-@media (max-width: 768px) {
-
-  .week {
-    gap: 6px;
-    padding: 10px;
-  }
-
-  .day {
-    min-height: 58px;
-    padding: 6px 4px;
-  }
-
-  .day p:first-child {
-    font-size: 11px;
-  }
-
-  .day p:last-child {
-    font-size: 15px;
-  }
-}
-
-@media (max-width: 768px) {
-
-  .instagram-feed-list {
-    gap: 18px;
-  }
-
-  .instagram-feed-card {
-    border-radius: 18px;
-  }
-
-  .instagram-feed-routine-title {
-    font-size: 18px;
-  }
-
-  .instagram-feed-caption {
-    font-size: 14px;
-    line-height: 1.6;
-  }
-}
-
 /* =========================================================
-   추가 반응형 최종 보정
+   반응형 (Tablet / Mobile)
 ========================================================= */
 
 @media (max-width: 768px) {
 
-  /* 전체 */
+  /* ===============================
+     전체 공통
+  ============================== */
+
   body {
     overflow-x: hidden;
+  }
+
+  * {
+    min-width: 0;
+  }
+
+  img,
+  video {
+    max-width: 100%;
   }
 
   .page-container,
@@ -90,10 +34,22 @@
     overflow-x: hidden;
   }
 
-  /* 상단바 */
+  /* ===============================
+     상단바
+  ============================== */
+
   .topbar {
-    position: static;
+    position: static !important;
+    top: auto !important;
+
+    width: calc(100% - 20px);
+
+    padding: 14px;
     border-radius: 22px;
+
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
   }
 
   .logo {
@@ -101,17 +57,28 @@
   }
 
   .nav {
-    gap: 6px;
+    width: 100%;
+
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+
+    gap: 8px;
   }
 
   .nav button {
+    width: 100%;
+
     font-size: 13px;
     padding: 10px 6px;
   }
 
-  /* 홈 */
+  /* ===============================
+     홈
+  ============================== */
+
   .routine-content {
     padding: 18px;
+    border-radius: 22px;
   }
 
   .home-section-title {
@@ -120,14 +87,26 @@
   }
 
   .home-routine-card {
-    padding: 16px;
-    border-radius: 20px;
+    flex-direction: column;
+
     gap: 16px;
+    padding: 16px;
+
+    border-radius: 20px;
   }
 
   .home-routine-card-top {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .home-routine-card-right {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .home-detail-action {
+    width: 100%;
   }
 
   .home-routine-card h3 {
@@ -149,7 +128,10 @@
     padding: 6px 10px;
   }
 
-  /* 버튼 */
+  /* ===============================
+     버튼
+  ============================== */
+
   .routine-check-btn,
   .home-action-btn,
   .proof-save-btn,
@@ -157,19 +139,54 @@
   .routine-add-btn {
     width: 100%;
     min-width: 0;
+
     font-size: 14px;
     padding: 14px;
   }
 
-  /* 루틴 페이지 */
+  /* ===============================
+     달력
+  ============================== */
+
+  .week {
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .day {
+    min-height: 52px;
+    padding: 4px;
+  }
+
+  .day p:first-child {
+    font-size: 10px;
+  }
+
+  .day p:last-child {
+    font-size: 13px;
+  }
+
+  /* ===============================
+     루틴 페이지
+  ============================== */
+
   .routine-card {
+    flex-direction: column;
+
+    gap: 16px;
     padding: 18px;
+
     border-radius: 20px;
   }
 
   .routine-card-top {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .routine-card-right {
+    width: 100%;
+    justify-content: stretch;
   }
 
   .routine-card h3 {
@@ -189,9 +206,13 @@
     width: 100%;
   }
 
-  /* 루틴 추가 */
+  /* ===============================
+     루틴 추가
+  ============================== */
+
   .routine-form-box {
     padding: 20px;
+    overflow-x: auto;
   }
 
   .repeat-day-list {
@@ -200,14 +221,19 @@
 
   .repeat-day-btn {
     flex: 1 1 calc(33.333% - 8px);
+
     justify-content: center;
     text-align: center;
   }
 
-  /* 로그인 회원가입 */
+  /* ===============================
+     로그인 / 회원가입
+  ============================== */
+
   .login-card,
   .signup-box {
     padding: 28px 18px;
+    border-radius: 24px;
   }
 
   .login-title,
@@ -219,7 +245,14 @@
     font-size: 14px;
   }
 
-  /* 피드 */
+  /* ===============================
+     피드
+  ============================== */
+
+  .instagram-feed-list {
+    gap: 18px;
+  }
+
   .instagram-feed-card {
     border-radius: 20px;
   }
@@ -243,43 +276,42 @@
 
   .instagram-feed-caption {
     font-size: 14px;
+    line-height: 1.6;
   }
 
-  /* 달력 */
-  .week {
-    gap: 4px;
-    padding: 6px;
+  /* ===============================
+     마이페이지
+  ============================== */
+
+  .mypage-stats {
+    grid-template-columns: 1fr !important;
   }
 
-  .day {
-    min-height: 52px;
-    padding: 4px;
+  .mypage-gallery {
+    padding: 0 16px 32px 16px !important;
   }
 
-  .day p:first-child {
-    font-size: 10px;
-  }
+  /* ===============================
+     관리자 페이지
+  ============================== */
 
-  .day p:last-child {
-    font-size: 13px;
-  }
-
-  /* 관리자 페이지 */
   table {
     min-width: 600px;
   }
 
-  .routine-form-box {
-    overflow-x: auto;
-  }
+  /* ===============================
+     파일 업로드
+  ============================== */
 
-  /* 파일 업로드 */
   .proof-preview-item {
     width: 88px;
     height: 88px;
   }
 
-  /* 긴 글 방지 */
+  /* ===============================
+     긴 글 방지
+  ============================== */
+
   h1,
   h2,
   h3,
@@ -291,7 +323,10 @@
 }
 
 
-/* 초소형 모바일 */
+/* =========================================================
+   초소형 모바일
+========================================================= */
+
 @media (max-width: 480px) {
 
   .topbar {
@@ -329,26 +364,6 @@
   .proof-preview-item {
     width: 72px;
     height: 72px;
-  }
-}
-
-img,
-video {
-  max-width: 100%;
-}
-
-* {
-  min-width: 0;
-}
-
-@media (max-width: 768px) {
-
-  .mypage-stats {
-    grid-template-columns: 1fr !important;
-  }
-
-  .mypage-gallery {
-    padding: 0 16px 32px 16px !important;
   }
 }
 
