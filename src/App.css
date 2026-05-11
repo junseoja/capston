@@ -28,6 +28,7 @@
     width: 100%;
   }
 }
+
 @media (max-width: 768px) {
 
   .week {
@@ -48,6 +49,7 @@
     font-size: 15px;
   }
 }
+
 @media (max-width: 768px) {
 
   .instagram-feed-list {
@@ -67,6 +69,7 @@
     line-height: 1.6;
   }
 }
+
 /* =========================================================
    추가 반응형 최종 보정
 ========================================================= */
@@ -328,6 +331,27 @@
     height: 72px;
   }
 }
+
+img,
+video {
+  max-width: 100%;
+}
+
+* {
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+
+  .mypage-stats {
+    grid-template-columns: 1fr !important;
+  }
+
+  .mypage-gallery {
+    padding: 0 16px 32px 16px !important;
+  }
+}
+
 /* ===============================
    1. 디자인 시스템
 ================================ */
@@ -368,7 +392,7 @@
 
   --gradient-main: linear-gradient(135deg, #6366f1 0%, #7c3aed 48%, #ec4899 100%);
   --gradient-soft: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(236, 72, 153, 0.10));
-  --gradient-card: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.86));
+  --gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.86));
 
   --transition: 0.2s ease;
 }
@@ -853,11 +877,9 @@ textarea::placeholder {
 }
 
 .completed-btn {
-  background: linear-gradient(
-    135deg,
-    #818cf8,
-    #a855f7
-  );
+  background: linear-gradient(135deg,
+      #818cf8,
+      #a855f7);
 
   color: white;
 }
@@ -1077,11 +1099,11 @@ textarea::placeholder {
   align-items: center;
 }
 
-.signup-form > input,
-.signup-form > button,
-.signup-form > select,
-.signup-form > .input-with-button,
-.signup-form > .birth-row {
+.signup-form>input,
+.signup-form>button,
+.signup-form>select,
+.signup-form>.input-with-button,
+.signup-form>.birth-row {
   width: 100%;
 }
 
@@ -1407,6 +1429,7 @@ textarea::placeholder {
   color: white !important;
   box-shadow: 0 12px 22px rgba(99, 102, 241, 0.22);
 }
+
 .routine-card-top {
   display: flex;
   align-items: flex-start;
@@ -1472,6 +1495,7 @@ textarea::placeholder {
   font-size: 14px;
   font-weight: 700;
 }
+
 /* ===============================
    9. 피드 페이지
 ================================ */
@@ -1826,6 +1850,7 @@ textarea::placeholder {
     border-radius: 24px;
   }
 }
+
 .feed-upload-check {
   display: flex;
   align-items: center;
