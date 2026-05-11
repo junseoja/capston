@@ -3047,6 +3047,21 @@ React → Express → FastAPI 왕복이 3회에서 1회로 줄어든다.
 - [x] ~~상세 통계 페이지 mock 데이터 제거 및 실제 API 연결~~ ✅ 2026-05-10 완료 (`/stats`)
 - [ ] 현재 루틴을 추가하면 인증한 루틴 표시가 사라지는 버그 확인 필요
 - [x] ~~피드 이미지 → 현재 로컬 디스크 저장 방식, 추후 S3 등 클라우드 스토리지 전환 고려~~ ✅ 2026-05-05 완료 (multer-s3 도입)
+- [x] ~~`src/python_api/.env` git 추적 제거 (RDS 자격증명 GitHub 퍼블릭 노출)~~ ✅ 2026-05-11 부분 완료 (git rm --cached + .env.example 신설, PR #1 머지). git history 정리·RDS 비번 회전은 별도 항목
+- [ ] (P0 후속) AWS RDS admin 비번 회전 — 2026-05-11 잔여 (운영 진입 전 필수)
+- [ ] git history 에서 과거 `.env` 영구 제거 (filter-repo + force push) — 2026-05-11 잔여 (사용자 결정)
+- [ ] Express ↔ FastAPI 분산 트랜잭션 통합 (`POST /feed/with-images`) — 2026-05-11 신규 #16
+- [ ] S3 URL 검증 강화 (버킷명 정확 매칭 / `..` 차단 / prefix 화이트리스트) — 2026-05-11 신규 #17
+- [ ] 라우터별 트랜잭션 정합성 일괄 점검 (`feed.py`/`completion.py`/`user.py` 등) — 2026-05-11 신규 #18
+- [ ] 회원가입 비밀번호 정책 (Pydantic `field_validator`) — 2026-05-11 신규 #19
+- [ ] 600줄+ 단일 컴포넌트 분할 (FeedPage / SignupPage / HomePage) — 2026-05-11 신규
+- [ ] FeedPage IntersectionObserver 언마운트 cleanup — 2026-05-11 신규
+- [ ] HomePage `proofFiles` blob URL 재선택 시 revoke — 2026-05-11 신규
+- [ ] FeedPage 댓글 모달 fetch race (`AbortController`) — 2026-05-11 신규
+- [ ] `build-output.txt` git 추적 제거 — 2026-05-11 신규 (Minor)
+- [ ] `src/backend/package.json` 에 `dev`/`start` 스크립트 추가 — 2026-05-11 신규 (Minor)
+- [ ] `login.js` `/check-duplicate` 의 `fetchJson` 헬퍼 통일 — 2026-05-11 신규 (Minor)
+- [ ] 세션 비활성 타임아웃 (`last_activity` 갱신) — 2026-05-11 신규 (#13 LRU 캐시와 함께)
 ---
 
 ## 👥 팀원
