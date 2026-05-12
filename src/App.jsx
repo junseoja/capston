@@ -15,30 +15,36 @@ function App() {
   const [page, setPage] = useState("home");
   const [authPage, setAuthPage] = useState("login");
 
-  // ── [저장 로직] 로컬스토리지에서 기존 데이터 불러오기 ──
   const savedPosts = JSON.parse(localStorage.getItem("feedPosts") || "[]");
   const savedReports = JSON.parse(localStorage.getItem("reports") || "[]");
   const savedNoti = JSON.parse(localStorage.getItem("deleteNotifications") || "[]");
   const savedUsers = JSON.parse(localStorage.getItem("users") || '[{"id":1,"userId":"test123","password":"test123","nickname":"테스트","email":"demo@routine.com","gender":"female","birth":"2000-01-01"}]');
+  const savedNotices = JSON.parse(localStorage.getItem("notices") || "[]");
 
-  // ── [상태 관리] 불러온 데이터로 초기값 설정 ──
   const [feedPosts, setFeedPosts] = useState(savedPosts);
   const [reports, setReports] = useState(savedReports);
   const [deleteNotifications, setDeleteNotifications] = useState(savedNoti);
   const [users, setUsers] = useState(savedUsers);
+  const [notices, setNotices] = useState(savedNotices);
 
-  // ── [저장 로직] 데이터가 변할 때마다 자동으로 브라우저에 저장 ──
   useEffect(() => { localStorage.setItem("feedPosts", JSON.stringify(feedPosts)); }, [feedPosts]);
   useEffect(() => { localStorage.setItem("reports", JSON.stringify(reports)); }, [reports]);
   useEffect(() => { localStorage.setItem("deleteNotifications", JSON.stringify(deleteNotifications)); }, [deleteNotifications]);
   useEffect(() => { localStorage.setItem("users", JSON.stringify(users)); }, [users]);
+  useEffect(() => { localStorage.setItem("notices", JSON.stringify(notices)); }, [notices]);
 
-  // [기능] 로그인/권한 처리
   const handleLoginSuccess = (role) => {
     setUserRole(role);
     setIsLoggedIn(true);
     if (role === "ADMIN") setPage("admin");
     else setPage("home");
+  };
+
+  // 로그아웃 처리 함수
+  const handleLogout = () => {
+    sessionStorage.clear(); // 로그인 세션 중 닫았던 공지 기록을 삭제
+    setIsLoggedIn(false);
+    setPage("home");
   };
 
   const today = new Date();
@@ -49,7 +55,6 @@ function App() {
     { id: 3, title: "자기 전 독서 20분", category: "독서", goal: "20분", repeat: "매일", description: "잠들기 전 책 읽는 습관 만들기", time: "dinner", routineMode: "detail", completed: false, completedAt: "", proofText: "", proofFiles: [] }
   ]);
 
-  // [기능] 신고 접수 로직
   const handleReportPost = (post, reason) => {
     setReports((prev) => {
       const existing = prev.find((r) => r.feedId === post.id);
@@ -62,14 +67,12 @@ function App() {
     alert("신고가 접수되었습니다.");
   };
 
-  // [기능] 관리자 삭제 로직
   const handleAdminDelete = (reportId, feedId, targetNickname, reasonText) => {
     setFeedPosts((prev) => prev.filter((p) => p.id !== feedId));
     setReports((prev) => prev.map((r) => r.id === reportId ? { ...r, status: "completed", adminComment: reasonText } : r));
     setDeleteNotifications((prev) => [...prev, { id: Date.now(), nickname: targetNickname, routineTitle: reports.find((r) => r.id === reportId)?.postContent.title, reason: reasonText }]);
   };
 
-  // 루틴 핸들러 (원본 로직 그대로 유지)
   const addRoutine = (newRoutine) => { setRoutines((prev) => [...prev, { id: Date.now(), ...newRoutine, completed: false, completedAt: "", proofText: "", proofFiles: [] }]); };
   const completeCheckRoutine = (id) => { const now = new Date(); const timeText = now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }); setRoutines((prev) => prev.map((routine) => routine.id === id ? { ...routine, completed: true, completedAt: timeText } : routine )); };
   
@@ -89,13 +92,13 @@ function App() {
   const handleSignup = (newUser) => { setUsers((prev) => [...prev, { id: Date.now(), ...newUser }]); alert(`${newUser.nickname}님, 회원가입이 완료되었습니다.`); setAuthPage("login"); };
 
   const renderPage = () => {
-    if (page === "admin") return <AdminPage reports={reports} onDeleteConfirm={handleAdminDelete} />;
-    if (page === "home") return <HomePage routines={routines} onCompleteCheck={completeCheckRoutine} onCompleteDetail={completeDetailRoutine} onCancelComplete={cancelRoutineCompletion} deleteNotifications={deleteNotifications} setDeleteNotifications={setDeleteNotifications} currentUser={users[0]} />;
+    if (page === "admin") return <AdminPage reports={reports} onDeleteConfirm={handleAdminDelete} notices={notices} setNotices={setNotices} />;
+    if (page === "home") return <HomePage routines={routines} onCompleteCheck={completeCheckRoutine} onCompleteDetail={completeDetailRoutine} onCancelComplete={cancelRoutineCompletion} deleteNotifications={deleteNotifications} setDeleteNotifications={setDeleteNotifications} currentUser={users[0]} notices={notices} />;
     if (page === "routine") return <RoutinePage routines={routines} onAddRoutine={addRoutine} onDeleteRoutine={deleteRoutine} />;
     if (page === "feed") return <FeedPage feedPosts={feedPosts} setFeedPosts={setFeedPosts} onReportPost={handleReportPost} currentUser={users[0]} />;
     if (page === "mypage") return <MyPage feedPosts={feedPosts} setPage={setPage} currentUser={users[0]} />;
     if (page === "stats") return <StatsPage setPage={setPage} />;
-    return <HomePage routines={routines} onCompleteCheck={completeCheckRoutine} onCompleteDetail={completeDetailRoutine} onCancelComplete={cancelRoutineCompletion} />;
+    return <HomePage routines={routines} onCompleteCheck={completeCheckRoutine} onCompleteDetail={completeDetailRoutine} onCancelComplete={cancelRoutineCompletion} notices={notices} />;
   };
 
   if (!isLoggedIn) {
@@ -110,7 +113,7 @@ function App() {
   }
 
   if (userRole === "ADMIN") {
-    return <AdminPage reports={reports} onDeleteConfirm={handleAdminDelete} />;
+    return <AdminPage reports={reports} onDeleteConfirm={handleAdminDelete} notices={notices} setNotices={setNotices} />;
   }
 
   return (
@@ -123,7 +126,7 @@ function App() {
           <button onClick={() => setPage("routine")}>루틴</button>
           <button onClick={() => setPage("feed")}>피드</button>
           <button onClick={() => setPage("mypage")}>마이페이지</button>
-          <button onClick={() => setIsLoggedIn(false)}>로그아웃</button>
+          <button onClick={handleLogout}>로그아웃</button>
         </nav>
       </header>
       <main className="page-container">{renderPage()}</main>
