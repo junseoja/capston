@@ -39,6 +39,12 @@ import StatsPage from "./StatsPage";
 // 기대효과: /challenge 라우트에서 ChallengePage 렌더링 가능.
 // 장점: 챌린지 기능을 독립 페이지로 분리 → 코드 응집도↑, 라우팅 일관성 유지.
 import ChallengePage from "./ChallengePage";
+// [추가 2026-05-12 / frontend 머지 7/7]
+// 출처: origin/frontend commits 8c9c6a2 / 62d5017 / f387027 / 56bc7cc
+// 사유: 1단계에서 추가한 관리자 페이지 컴포넌트를 라우트 등록 및 권한 가드 적용.
+// 기대효과: 로그인 시 id="admin" 이면 /admin 으로 진입, 일반 유저는 접근 차단.
+// 장점: 다른 보호 라우트와 동일한 isLoggedIn 가드 패턴 + 추가 관리자 권한 가드 한 줄로 처리.
+import AdminPage from "./AdminPage";
 
 function App() {
     // useNavigate: URL 이동을 프로그래밍적으로 처리 (예: 로그인 후 "/" 로 이동)
@@ -60,6 +66,42 @@ function App() {
     // [추가] 앱 시작 시 세션 복구(/me) 여부가 확인되기 전에는
     // 라우트 리다이렉트를 바로 수행하지 않기 위한 플래그
     const [authChecked, setAuthChecked] = useState(false);
+
+    // ── [추가 2026-05-12 / frontend 머지 7/7] 관리자/신고/제재 알림 상태 ──
+    // 출처: origin/frontend src/App.jsx (commits f387027, 56bc7cc, 8c9c6a2)
+    // 사유:
+    //   1) FeedPage 의 onReportPost / AdminPage 의 reports props 가 공유할
+    //      신고 데이터 저장소가 필요.
+    //   2) HomePage 의 deleteNotifications props 가 받을 제재 알림 큐.
+    //   3) LoginPage 가 6단계에서 role 시그널을 보내므로 관리자 권한 플래그 추가.
+    // 기대효과:
+    //   - FeedPage 신고 → reports 누적 → AdminPage 리스트 표시.
+    //   - AdminPage 제재 → deleteNotifications 추가 → HomePage 모달 표시.
+    //   - 로그인 ID 가 "admin" 이면 isAdmin=true → /admin 라우트 접근 허용.
+    // 장점:
+    //   - 단일 진실 공급원(SSOT) 패턴 유지 — 데이터 흐름이 App.jsx 한 곳에 모임.
+    //   - deleteNotifications 는 localStorage 영속화 → 새로고침/재로그인 후에도 알림 유지.
+    const [reports, setReports] = useState([]);
+    const [deleteNotifications, setDeleteNotifications] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem("deleteNotifications") || "[]");
+        } catch {
+            return [];
+        }
+    });
+    const [isAdmin, setIsAdmin] = useState(false);
+
+    // deleteNotifications 변경 시 localStorage 동기화 (새로고침 후에도 모달 유지)
+    useEffect(() => {
+        try {
+            localStorage.setItem(
+                "deleteNotifications",
+                JSON.stringify(deleteNotifications),
+            );
+        } catch {
+            // 브라우저 저장소 미지원/쿼터 초과 시 무시 (UX 영향 없음)
+        }
+    }, [deleteNotifications]);
 
     // 상단바에 표시할 현재 월 (예: "6월")
     const today = new Date();
@@ -210,11 +252,19 @@ function App() {
      *   3. 루틴 목록 fetch
      *   4. 홈("/")으로 이동
      */
-    const handleLogin = async () => {
+    // [수정 2026-05-12 / frontend 머지 7/7]
+    // 출처: origin/frontend 의 onLogin("ADMIN" | "USER") 분기
+    // 사유: 6단계에서 LoginPage 가 role 인자를 전달하므로, App 의 handleLogin 도 그것을 받아 라우팅 분기.
+    // 기대효과: role==="ADMIN" → setIsAdmin(true) + navigate("/admin"); 일반 → navigate("/").
+    // 장점:
+    //   - 기본값 "USER" 처리로 기존 onLogin() 무인자 호출(있다면) 도 호환.
+    //   - 관리자 권한 자체는 isAdmin 상태로 보관 → 어디서든 가드 조건으로 활용.
+    const handleLogin = async (role = "USER") => {
         setIsLoggedIn(true);
+        setIsAdmin(role === "ADMIN");
         await fetchCurrentUser(); // 로그인한 유저 정보 fetch (닉네임 등)
         await fetchRoutines();    // 루틴 데이터 fetch (홈 화면 표시용)
-        navigate("/");
+        navigate(role === "ADMIN" ? "/admin" : "/");
     };
 
     // ── 루틴 완료 처리 (체크 모드) ────────────────────────────────────────────
@@ -456,6 +506,95 @@ function App() {
         }
     };
 
+    // ── [추가 2026-05-12 / frontend 머지 7/7] 신고/제재 처리 ──────────────────
+    /**
+     * handleReportPost - FeedPage 의 onReportPost 콜백.
+     * 출처: origin/frontend src/App.jsx (commit f387027)
+     * 사유: 사용자가 신고한 게시물을 reports 큐에 누적 → AdminPage 에 노출.
+     * 기대효과: 한 사람이 같은 게시물을 여러 번 신고하면 reporters 배열에 누적 +
+     *           reportCount 증가, 새 게시물이면 새 항목 생성.
+     * 장점:
+     *   - 백엔드 신고 API 가 없어도 프론트 단독으로 신고 흐름 완결.
+     *   - 백엔드 API 가 추가되면 fetch 호출 한 줄만 더하면 됨.
+     */
+    const handleReportPost = (post, reason) => {
+        if (!post || !reason) return;
+        const reporterEntry = {
+            user: currentUser?.nickname || "익명",
+            user_id: currentUser?.user_id,
+            reason,
+            reportedAt: new Date().toISOString(),
+        };
+        setReports((prev) => {
+            const existing = prev.find((r) => r.feedId === post.feed_id);
+            if (existing) {
+                // 이미 신고된 게시물 → 신고자/사유 추가 + 카운트 증가
+                return prev.map((r) =>
+                    r.feedId === post.feed_id
+                        ? {
+                              ...r,
+                              reporters: [...r.reporters, reporterEntry],
+                              reportCount: r.reportCount + 1,
+                          }
+                        : r,
+                );
+            }
+            // 신규 신고 항목 생성
+            return [
+                ...prev,
+                {
+                    id: Date.now(),
+                    feedId: post.feed_id,
+                    user: post.nickname || post.userName || "알수없음",
+                    postContent: {
+                        title: post.routine_title || post.routineTitle || "(루틴 제목 없음)",
+                        text: post.content || "",
+                    },
+                    status: "pending",
+                    reporters: [reporterEntry],
+                    reportCount: 1,
+                    createdAt: new Date().toISOString(),
+                },
+            ];
+        });
+    };
+
+    /**
+     * handleDeleteConfirm - AdminPage 의 onDeleteConfirm 콜백.
+     * 출처: origin/frontend src/App.jsx handleConfirmDelete (commit 62d5017)
+     * 사유: 관리자가 신고를 처리하면 (1) 신고 상태를 "completed" 로 전환,
+     *       (2) 해당 게시물 작성자에게 deleteNotifications 알림 추가.
+     * 기대효과: HomePage 에 모달 표시 + AdminPage 에서 처리 완료 탭으로 이동.
+     * 장점: dev 의 DELETE /feed/:feed_id 백엔드 호출도 함께 트리거하여
+     *       실제 게시물도 제거 (실패해도 알림은 보냄).
+     */
+    const handleDeleteConfirm = async (reportId, feedId, targetNickname, reasonText) => {
+        const report = reports.find((r) => r.id === reportId);
+        // 1) 백엔드 게시물 삭제 (실패해도 신고 처리는 진행 — 이미 삭제됐을 수도 있어서)
+        try {
+            await fetch(`${EXPRESS_URL}/feed/${feedId}`, {
+                method: "DELETE",
+                credentials: "include",
+            });
+        } catch (error) {
+            console.error("관리자 게시물 삭제 실패(무시하고 계속):", error);
+        }
+        // 2) 신고 상태 업데이트 (pending → completed)
+        setReports((prev) =>
+            prev.map((r) => (r.id === reportId ? { ...r, status: "completed" } : r)),
+        );
+        // 3) 작성자에게 제재 알림 큐잉
+        setDeleteNotifications((prev) => [
+            ...prev,
+            {
+                id: Date.now(),
+                nickname: targetNickname,
+                routineTitle: report?.postContent?.title || "(제목 없음)",
+                reason: reasonText,
+            },
+        ]);
+    };
+
     // ── 로그아웃 처리 ─────────────────────────────────────────────────────────
 
     /**
@@ -485,6 +624,12 @@ function App() {
         setRoutines([]);
         setCurrentUser(null);
         setAuthChecked(true);
+        // [추가 2026-05-12 / frontend 머지 7/7]
+        // 사유: 로그아웃 시 관리자 권한/신고 임시 상태도 함께 초기화.
+        // 기대효과: 같은 브라우저에서 다른 계정으로 로그인해도 이전 관리자 권한이 남지 않음.
+        // 장점: deleteNotifications 는 의도적으로 보존(영구화) → 알림은 다음 접속 시에도 확인 가능.
+        setIsAdmin(false);
+        setReports([]);
         navigate("/login");
     };
 
@@ -514,6 +659,13 @@ function App() {
                             기대효과: 상단 네비게이션에서 /challenge 즉시 이동 가능.
                             장점: 사용자 동선 단축, 다른 메뉴들과 통일된 진입 방식 제공. */}
                         <button onClick={() => navigate("/challenge")}>챌린지</button>
+                        {/* [추가 2026-05-12 / frontend 머지 7/7 - 관리자 메뉴]
+                            사유: 관리자만 보이는 상단 네비 진입점.
+                            기대효과: isAdmin 일 때만 표시 → 일반 유저는 깔끔한 메뉴 유지.
+                            장점: 조건부 렌더라 권한 없는 사람에게는 메뉴 노출 0. */}
+                        {isAdmin && (
+                            <button onClick={() => navigate("/admin")}>관리자</button>
+                        )}
                         <button onClick={handleLogout}>로그아웃</button>
                     </nav>
                 </header>
@@ -555,6 +707,11 @@ function App() {
                                     onCompleteCheck={completeCheckRoutine}    // 체크 루틴 완료 핸들러
                                     onCompleteDetail={completeDetailRoutine}  // 상세 루틴 완료 핸들러
                                     onCancelComplete={cancelRoutineCompletion} // 완료 취소 핸들러
+                                    // [추가 2026-05-12 / frontend 머지 7/7]
+                                    // 사유: 3단계 HomePage 의 관리자 제재 알림 모달 props 주입.
+                                    // 기대효과: AdminPage 에서 제재 → 작성자가 홈 진입 시 모달로 안내.
+                                    deleteNotifications={deleteNotifications}
+                                    setDeleteNotifications={setDeleteNotifications}
                                 />
                                 : <Navigate to="/login" />
                         }
@@ -576,8 +733,36 @@ function App() {
                         path="/feed"
                         element={
                             isLoggedIn
-                                ? <FeedPage currentUser={currentUser} />
+                                ? <FeedPage
+                                    currentUser={currentUser}
+                                    // [추가 2026-05-12 / frontend 머지 7/7]
+                                    // 사유: 2단계 FeedPage 의 신고 콜백 주입.
+                                    // 기대효과: 🚩 신고 버튼 클릭 → reports 큐 누적 → AdminPage 노출.
+                                    onReportPost={handleReportPost}
+                                />
                                 : <Navigate to="/login" />
+                        }
+                    />
+
+                    {/* [추가 2026-05-12 / frontend 머지 7/7 - 관리자 페이지 라우트]
+                        사유: 1단계에서 추가한 AdminPage 컴포넌트를 라우트에 등록.
+                        가드: 로그인 + 관리자(isAdmin) 동시 만족 필요.
+                        기대효과:
+                          - 비로그인 → /login
+                          - 일반 유저 → / (홈으로 차단)
+                          - 관리자 → AdminPage(reports, onDeleteConfirm 주입)
+                        장점: 다른 보호 라우트와 같은 패턴 + 권한 가드 1줄 추가만 차이. */}
+                    <Route
+                        path="/admin"
+                        element={
+                            !isLoggedIn
+                                ? <Navigate to="/login" />
+                                : isAdmin
+                                    ? <AdminPage
+                                        reports={reports}
+                                        onDeleteConfirm={handleDeleteConfirm}
+                                    />
+                                    : <Navigate to="/" />
                         }
                     />
 
