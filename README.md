@@ -3302,6 +3302,203 @@ Express POST /feed
 
 ---
 
+## 🔧 2026-05-12 작업 내역
+
+### 1. 이번 세션 개요
+
+다른 브런치에 흩어진 UI 신기능을 dev 로 통합한 머지 세션. **두 개의 별개 머지**를 단계별로 진행:
+
+| 머지 | 대상 브런치 | 신기능 | 커밋 수 |
+|---|---|---|---|
+| #1 | `frontend-cy` | 챌린지 페이지 (`/challenge`) | 1 |
+| #2 | `frontend` (unrelated histories) | 관리자 페이지 + 신고/제재 시스템 + 갤러리 모달 | 7 (단계별) |
+
+원칙: **dev 의 백엔드 연결 코드(EXPRESS_URL, fetch, /completion, /feed, /like, /comment 등)는 한 줄도 손대지 않음**. 다른 브런치의 UI 의도만 추출해서 dev 의 정규화된 데이터 구조에 맞춰 통합. 모든 변경 블록에 메모리 규칙(사유/기대효과/장점 4항목) 주석 부착.
+
+| 결과물 | 내용 |
+|---|---|
+| 머지 #1 커밋 | `a586040` (frontend-cy → dev) |
+| 머지 #2 커밋 | `9875b90` → `9989a0f` → `55a5d36` → `8b0bd29` → `c897022` → `d2bf751` → `4fc80bf` (7단계) |
+| 총 변경량 | **+2,734 / −146** (거의 순수 추가, dev 백엔드 100% 보존) |
+| 백업 브런치 | `dev-backup-before-frontend-cy-merge`, `dev-backup-before-frontend-merge` |
+
+---
+
+### 2. 머지 #1 — `frontend-cy` 챌린지 페이지
+
+#### 2-1. 배경
+
+`frontend-cy` 의 최신 커밋 `45d00d8` 에 `ChallengePage.jsx` 신규(906줄) + `App.css` 스타일 추가 + `App.jsx` 라우팅 추가가 묶여 있었음.
+
+#### 2-2. 충돌과 안전 머지 전략
+
+자동 `cherry-pick -n` 결과: `App.css` / `ChallengePage.jsx` 는 자동 머지 성공, **`App.jsx` 에서 충돌 1블록 (246줄 범위)** 발생. 자동 머지가 정상 완료된 부분도 +560/−311 줄로 큼 → dev 의 `completeDetailRoutine` / `cancelRoutineCompletion` / `handleLogout` 등 핵심 로직이 frontend-cy 의 옛 버전으로 덮일 위험 확인.
+
+→ `App.jsx` 는 **dev HEAD 로 완전 복원** 후, ChallengePage 활성화에 꼭 필요한 **3가지만 수동 패치**:
+1. `import ChallengePage from "./ChallengePage";`
+2. 상단 네비게이션에 "챌린지" 버튼
+3. `/challenge` Route 등록
+
+`ChallengePage.jsx` 와 `App.css` 추가분(+650)은 그대로 적용. `README.md` 변경은 요청 범위 외라 제외.
+
+#### 2-3. 검증
+
+| 항목 | 결과 |
+|---|---|
+| 괄호 균형 (App.jsx) | open 362 = close 362 ✓ |
+| dev 핵심 함수 보존 | `completeDetailRoutine` / `cancelRoutineCompletion` / `handleLogout` / `setRoutines` 호출 7곳 모두 유지 |
+| ChallengePage default export | 존재 |
+
+---
+
+### 3. App.jsx 구조 분석 (코드 변경 없음)
+
+머지 #1 직후 "App.jsx 수정이 너무 자주 일어난다"는 우려가 제기되어 현재 구조를 조사. 변경 없는 분석이지만, **향후 리팩터링 우선순위 결정용 기록**.
+
+#### 3-1. 현재 구조 (총 616줄)
+
+```
+라인 1-46     파일 헤더 + import (8개 페이지 컴포넌트)
+라인 48-66    전역 상태 4종: isLoggedIn, routines, currentUser, authChecked
+라인 68-173   데이터 fetch 2종: fetchRoutines, fetchCurrentUser (useCallback)
+라인 175-200  세션 부트스트랩 useEffect
+라인 213-489  액션 핸들러 5종:
+                handleLogin / completeCheckRoutine /
+                completeDetailRoutine / cancelRoutineCompletion / handleLogout
+라인 491-613  렌더링 (topbar + Routes 9개)
+```
+
+#### 3-2. 자주 수정되는 구조적 원인
+
+1. **신규 페이지 추가 시 import + nav 버튼 + Route 3곳** 동시 수정 필요.
+2. 데이터 주입 방식이 페이지마다 불일치:
+   - HomePage: props 주입
+   - RoutinePage: 콜백만 받고 자체 fetch
+   - MyPage: App 모르게 내부에서 `/me`, `/routine` 직접 호출
+   - FeedPage: currentUser props만
+   → 단일 진실 공급원 의도가 깨진 상태.
+3. 5개 액션 핸들러(약 277줄)가 App.jsx 안에 직접 박혀있어 백엔드 API 변경 영향 직격.
+4. `setRoutines` 호출 7곳 → 루틴 모델 필드 변경 시 모든 핸들러 동시 수정.
+
+#### 3-3. 권장 리팩터링 (별도 작업으로 보류)
+
+| 리팩터링 | 효과 | 비고 |
+|---|---|---|
+| `src/frontend/api/` 모듈 분리 | App.jsx 약 200줄 감소 | 백엔드 API 변경 영향 격리 |
+| `useRoutines()` 커스텀 훅 | routines 관련 코드 일괄 캡슐화 | 단일 진실 공급원 회복 |
+| `<AuthContext>` 도입 | props drilling 해소 | MyPage/FeedPage props 단순화 |
+| `navLinks` 배열 map | 신규 페이지 추가 수정 지점 3→1 | 자동화 |
+
+---
+
+### 4. 머지 #2 — `frontend` 7단계 선별 통합
+
+#### 4-1. 배경
+
+| 구분 | 내용 |
+|---|---|
+| 공통 조상 | **없음** (unrelated histories). 단순 merge 시 `--allow-unrelated-histories` 필요 |
+| 경로 구조 | frontend: `src/*.jsx`, dev: `src/frontend/*.jsx` |
+| 데이터 흐름 | frontend = mock UI, dev = 백엔드 API 연결 완료 |
+| 사용자 지정 기준점 | `e79a5be` 이후 15개 커밋이 머지 대상 |
+| frontend 측 백엔드 | **없음** (단방향 mock) → dev 백엔드 코드 머지 영향 0 |
+
+#### 4-2. 머지 원칙 (전 단계 공통)
+
+1. **dev 의 백엔드 호출은 한 줄도 손대지 않음**
+2. **frontend 의 기능 의도만 추출** → dev 의 정규화 필드(`feed_id`, `routine_title`, `image_id`)에 맞춤 재구현
+3. **dev 가 더 발전한 부분은 frontend 측을 가져오지 않음** (예: FeedPage 의 인스타 모달은 dev 가 이미 보유)
+4. 모든 추가 블록에 메모리 규칙(사유/기대효과/장점) 4항목 주석
+5. 각 단계마다 `esbuild --loader=jsx` 파서로 syntax 검증 후 단계별 커밋
+
+#### 4-3. 단계별 커밋 (7개)
+
+| 단계 | 커밋 | +/− | 신기능 |
+|---|---|---|---|
+| 1/7 | `9875b90` | +232 / 0 | `AdminPage.jsx` 컴포넌트 신규 (대시보드/신고처리/공지/지표 4메뉴) |
+| 2/7 | `9989a0f` | +63 / −2 | FeedPage 게시물 신고 (카드+모달 🚩, 본인 게시물엔 미노출) |
+| 3/7 | `55a5d36` | +123 / 0 | HomePage 관리자 제재 알림 중앙 모달 (큐 + localStorage 영속) |
+| 4/7 | `8b0bd29` | +282 / −6 | MyPage 갤러리 상세 모달 + 편집 모드 + `DELETE /feed/:id` 일괄 삭제 |
+| 5/7 | `c897022` | +127 / 0 | App.css 누락 클래스 6종 + 신고 버튼 스타일 2종 |
+| 6/7 | `d2bf751` | +16 / −2 | LoginPage 관리자 role 신호 (id="admin" → `onLogin("ADMIN")`) |
+| 7/7 | `4fc80bf` | +188 / −3 | App.jsx 라우팅/상태/핸들러 통합 (최종) |
+
+#### 4-4. 단계별 핵심 결정
+
+**단계 2 — FeedPage**
+- dev FeedPage 는 이미 인스타 스타일 카드 / 댓글 모달 / 좋아요 / 멀티미디어 슬라이더 + 백엔드 API 연결까지 frontend 보다 발전.
+- **frontend 의 유일한 미구현 신기능 = 게시물 신고** 만 선별 머지 (4지점: props + 핸들러 + 카드 버튼 + 모달 버튼).
+
+**단계 4 — MyPage**
+- frontend MyPage(595줄, mock) vs dev MyPage(334줄, 백엔드 연결) — 데이터 구조 자체가 다름.
+- frontend 의 좋아요/댓글 모달은 mock 이라 무시 (FeedPage 가 이미 백엔드 모달 보유 → 책임 분리).
+- **편집 모드 일괄 삭제**는 dev 백엔드의 `DELETE /feed/{feed_id}` API 가 이미 존재하므로 그대로 활용.
+- `Promise.allSettled` 로 부분 성공 허용, Set 변환으로 중복 호출 방지.
+
+**단계 5 — App.css**
+- dev App.css(2467줄) 가 frontend App.css(1890줄) 보다 큼 → 대부분 흡수된 상태.
+- 셀렉터 차집합 분석: frontend 에만 있는 클래스 6개는 모두 **dev JSX 가 참조하지만 dev CSS 에 정의가 빠져 있던 클래스** → 그것만 보충.
+- frontend 의 `@media (max-width: 768px / 480px)` 는 dev 의 기존 `@media (1024 / 640 / 860 / 520px)` 와 브레이크포인트가 달라 충돌 위험 → 의도적으로 머지 제외.
+
+**단계 6 — LoginPage**
+- frontend 는 `if (id === "admin" && pw === "1234")` 하드코딩 → 보안 취약.
+- dev 의 백엔드 `/login` 검증을 그대로 거치도록 두고, **로그인 성공 후에만** id 가 `admin` 인지로 role 판별 → DB 의 admin 계정+비밀번호가 일치해야만 통과.
+
+#### 4-5. 완성된 데이터 폐쇄 루프
+
+```
+로그인(id=admin) ─► isAdmin=true ─► /admin 접근 허용
+사용자 신고(🚩) ─► handleReportPost ─► reports 큐 누적
+                                              │
+                                              ▼
+관리자 처리 ─► handleDeleteConfirm ─► DELETE /feed/:id (백엔드)
+              ├► reports.status: pending → completed
+              └► deleteNotifications 알림 추가 (localStorage 영속)
+                                              │
+                                              ▼
+작성자 홈 진입 ─► 모달로 제재 사유 안내 ─► 확인 ─► 큐에서 제거
+```
+
+---
+
+### 5. 변경 파일 목록 (이번 세션 전체, 8개)
+
+| 파일 | +줄 | −줄 | 단계 |
+|---|---|---|---|
+| `src/css/App.css` | 905 | 133 | 머지 #1 자동 머지 + 단계 5 |
+| `src/frontend/App.jsx` | 207 | 3 | 머지 #1 수동 패치 + 단계 7 |
+| `src/frontend/ChallengePage.jsx` | 906 | 0 | 머지 #1 (신규) |
+| `src/frontend/AdminPage.jsx` | 232 | 0 | 단계 1 (신규) |
+| `src/frontend/MyPage.jsx` | 282 | 6 | 단계 4 |
+| `src/frontend/HomePage.jsx` | 123 | 0 | 단계 3 |
+| `src/frontend/FeedPage.jsx` | 63 | 2 | 단계 2 |
+| `src/frontend/LoginPage.jsx` | 16 | 2 | 단계 6 |
+| **합계** | **2,734** | **146** | |
+
+---
+
+### 6. 검증
+
+| 항목 | 결과 |
+|---|---|
+| 수정된 6개 JSX 파일 syntax | `esbuild --loader=jsx` 전부 OK |
+| App.css 중괄호 균형 | open 347 = close 347 (5단계 추가분 기준) |
+| 신규 CSS 클래스 사용처 매칭 | 추가한 8개 클래스 모두 JSX `className` 에서 참조 중 확인 |
+| dev 핵심 비즈니스 로직 보존 | `completeDetailRoutine` / `cancelRoutineCompletion` / `handleLogout` / `setRoutines` 호출 7곳 모두 유지 |
+| 백업 브런치 보존 | `dev-backup-before-frontend-cy-merge`, `dev-backup-before-frontend-merge` |
+
+---
+
+### 7. 알려진 한계 / 다음 단계
+
+1. **DB 에 admin 계정 필요** — 6단계의 관리자 분기 동작을 위해 `INSERT INTO users (login_id, password_hash, ...) VALUES ('admin', ...)` 별도 필요. 없으면 `/admin` 접근 불가.
+2. **신고 데이터 `reports` 는 in-memory** — 새로고침/재로그인 시 사라짐. 백엔드 신고 API 추가 시 `handleReportPost` 안에서 fetch 호출만 추가하면 됨.
+3. **프론트 반응형 정책 통일 필요** — frontend 의 `@media 768/480px` 는 의도적으로 머지 제외. dev 의 1024/640/860/520px 와 통일하는 별도 작업 권장.
+4. **App.jsx 리팩터링** — 3-3 참고. 이번 세션에서는 분석만 하고 작업 보류.
+5. **frontend 브런치는 origin 에 그대로 존재** — 정리하려면 머지 완료 확인 후 `git push origin --delete frontend` 가능. 다만 백업용으로 당분간 보존 권장.
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
