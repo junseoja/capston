@@ -8,12 +8,15 @@ import MyPage from "./MyPage";
 import SignupPage from "./SignupPage";
 import StatsPage from "./StatsPage";
 import AdminPage from "./AdminPage"; 
+import NoticeList from "./NoticeList";
+import NoticeDetail from "./NoticeDetail"; // 상세 페이지 임포트
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState("USER"); 
   const [page, setPage] = useState("home");
   const [authPage, setAuthPage] = useState("login");
+  const [selectedNotice, setSelectedNotice] = useState(null); // [추가] 선택된 공지 데이터 저장
 
   const savedPosts = JSON.parse(localStorage.getItem("feedPosts") || "[]");
   const savedReports = JSON.parse(localStorage.getItem("reports") || "[]");
@@ -40,9 +43,8 @@ function App() {
     else setPage("home");
   };
 
-  // 로그아웃 처리 함수
   const handleLogout = () => {
-    sessionStorage.clear(); // 로그인 세션 중 닫았던 공지 기록을 삭제
+    sessionStorage.clear(); 
     setIsLoggedIn(false);
     setPage("home");
   };
@@ -98,6 +100,12 @@ function App() {
     if (page === "feed") return <FeedPage feedPosts={feedPosts} setFeedPosts={setFeedPosts} onReportPost={handleReportPost} currentUser={users[0]} />;
     if (page === "mypage") return <MyPage feedPosts={feedPosts} setPage={setPage} currentUser={users[0]} />;
     if (page === "stats") return <StatsPage setPage={setPage} />;
+    
+    // [공지사항 목록]
+    if (page === "notice_list") return <NoticeList notices={notices} setPage={setPage} setSelectedNotice={setSelectedNotice} />;
+    // [공지사항 상세]
+    if (page === "notice_detail") return <NoticeDetail notice={selectedNotice} setPage={setPage} />;
+
     return <HomePage routines={routines} onCompleteCheck={completeCheckRoutine} onCompleteDetail={completeDetailRoutine} onCancelComplete={cancelRoutineCompletion} notices={notices} />;
   };
 
@@ -112,24 +120,29 @@ function App() {
     );
   }
 
-  if (userRole === "ADMIN") {
-    return <AdminPage reports={reports} onDeleteConfirm={handleAdminDelete} notices={notices} setNotices={setNotices} />;
-  }
-
   return (
     <div className="app">
       <header className="topbar">
         <div className="logo" onClick={() => setPage("home")} style={{cursor: "pointer"}}>Routine Mate 🌙 {month}월</div>
         <nav className="nav">
           <h4>{users[0]?.nickname || "사용자"}님</h4>
-          <button onClick={() => setPage("home")}>홈</button>
-          <button onClick={() => setPage("routine")}>루틴</button>
-          <button onClick={() => setPage("feed")}>피드</button>
-          <button onClick={() => setPage("mypage")}>마이페이지</button>
+          <button onClick={() => setPage("home")} className={page === "home" ? "active-time-tab" : ""}>홈</button>
+          <button onClick={() => setPage("routine")} className={page === "routine" ? "active-time-tab" : ""}>루틴</button>
+          <button onClick={() => setPage("feed")} className={page === "feed" ? "active-time-tab" : ""}>피드</button>
+          <button onClick={() => setPage("mypage")} className={page === "mypage" ? "active-time-tab" : ""}>마이페이지</button>
+          
+          <button 
+            onClick={() => setPage("notice_list")} 
+            className={page === "notice_list" || page === "notice_detail" ? "active-time-tab" : ""}
+          >
+            공지사항
+          </button>
+          
           <button onClick={handleLogout}>로그아웃</button>
         </nav>
       </header>
       <main className="page-container">{renderPage()}</main>
+      <style>{`.active-time-tab { background-color: var(--primary) !important; color: white !important; border-radius: 8px; }`}</style>
     </div>
   );
 }

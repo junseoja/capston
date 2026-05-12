@@ -2,6 +2,7 @@
    Routine Mate - Modern UI App.css
    최신 frontend 코드 기준 / JSX 수정 없이 App.css만 교체
    ========================================================= */
+
 /* =========================================================
    반응형 (Tablet / Mobile)
 ========================================================= */
@@ -9,7 +10,7 @@
 @media (max-width: 768px) {
 
   /* ===============================
-     전체 공통
+      전체 공통
   ============================== */
 
   body {
@@ -35,7 +36,7 @@
   }
 
   /* ===============================
-     상단바
+      상단바
   ============================== */
 
   .topbar {
@@ -73,7 +74,7 @@
   }
 
   /* ===============================
-     홈
+      홈
   ============================== */
 
   .routine-content {
@@ -129,7 +130,7 @@
   }
 
   /* ===============================
-     버튼
+      버튼
   ============================== */
 
   .routine-check-btn,
@@ -145,7 +146,7 @@
   }
 
   /* ===============================
-     달력
+      달력
   ============================== */
 
   .week {
@@ -167,7 +168,7 @@
   }
 
   /* ===============================
-     루틴 페이지
+      루틴 페이지
   ============================== */
 
   .routine-card {
@@ -207,7 +208,7 @@
   }
 
   /* ===============================
-     루틴 추가
+      루틴 추가
   ============================== */
 
   .routine-form-box {
@@ -227,7 +228,7 @@
   }
 
   /* ===============================
-     로그인 / 회원가입
+      로그인 / 회원가입
   ============================== */
 
   .login-card,
@@ -246,7 +247,7 @@
   }
 
   /* ===============================
-     피드
+      피드
   ============================== */
 
   .instagram-feed-list {
@@ -280,7 +281,7 @@
   }
 
   /* ===============================
-     마이페이지
+      마이페이지
   ============================== */
 
   .mypage-stats {
@@ -292,7 +293,7 @@
   }
 
   /* ===============================
-     관리자 페이지
+      관리자 페이지
   ============================== */
 
   table {
@@ -300,7 +301,23 @@
   }
 
   /* ===============================
-     파일 업로드
+      공지사항 모바일 보정 (추가)
+  ============================== */
+  .notice-item-right {
+    display: none; /* 모바일에서는 날짜/관리자 텍스트 숨김 */
+  }
+  
+  .notice-search-area {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .notice-search-select {
+    width: 100%;
+  }
+
+  /* ===============================
+      파일 업로드
   ============================== */
 
   .proof-preview-item {
@@ -309,7 +326,7 @@
   }
 
   /* ===============================
-     긴 글 방지
+      긴 글 방지
   ============================== */
 
   h1,
@@ -1888,4 +1905,163 @@ textarea::placeholder {
   color: #111827;
 
   cursor: pointer;
+}
+
+/* ===============================
+   13. 공지사항 (Notice) 스타일 통합
+================================ */
+
+/* 검색 바 영역 */
+.notice-search-area {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 30px;
+  padding-bottom: 25px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+
+.notice-search-select {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: white;
+  font-weight: 600;
+  outline: none;
+  width: 140px;
+}
+
+.notice-search-input-wrapper {
+  position: relative;
+  flex: 1;
+}
+
+.notice-search-input {
+  width: 100%;
+  padding: 12px 45px 12px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  outline: none;
+  font-size: 15px;
+}
+
+.notice-search-btn {
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--primary);
+  font-size: 18px;
+  background: none;
+  border: none;
+}
+
+/* 목록 스타일 */
+.notice-list-wrap {
+  border-top: 2px solid var(--text-main);
+  background: white;
+  border-radius: 12px 12px 0 0;
+}
+
+.notice-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 24px 15px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.notice-item-row:hover {
+  background-color: #fafaff;
+}
+
+.notice-item-left {
+  display: flex;
+  gap: 20px;
+  flex: 1;
+}
+
+.notice-check-icon {
+  font-size: 18px;
+  margin-top: 2px;
+  font-weight: bold;
+}
+
+.unread-check { color: var(--primary); }
+.read-check { color: #ddd; }
+
+.notice-info-content {
+  flex: 1;
+}
+
+.notice-title-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.notice-badge-tag {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.badge-normal { background: var(--primary-light); color: var(--primary); }
+.badge-emergency { background: var(--danger-light); color: var(--danger); }
+
+.notice-main-title {
+  font-size: 17px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.unread-title { color: var(--text-main); font-weight: 800; }
+.read-title { color: var(--text-light); font-weight: 500; }
+
+.notice-sub-preview {
+  font-size: 14px;
+  color: var(--text-sub);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.notice-item-right {
+  text-align: right;
+  min-width: 160px;
+  font-size: 13px;
+  color: var(--text-light);
+  padding-top: 5px;
+}
+
+/* 페이지네이션 */
+.notice-pagination-box {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 40px;
+  align-items: center;
+}
+
+.page-num-btn {
+  border: none;
+  background: none;
+  font-size: 16px;
+  padding: 5px 10px;
+  color: var(--text-light);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.page-num-btn.active {
+  color: var(--primary);
+  font-weight: 900;
+  border-bottom: 2px solid var(--primary);
 }
