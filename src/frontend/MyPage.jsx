@@ -36,6 +36,23 @@ function MyPage() {
     // 데이터 로딩 중 여부
     const [loading, setLoading] = useState(true);
 
+    // [추가 2026-05-12 / frontend 머지 4/7]
+    // 출처: origin/frontend commits a2c8b03/ba6ac25 "마이페이지 갤러리 클릭 시 상세 게시글 모달 연동"
+    //                          832d3bf "반응형 1차, 마이페이지 피드 삭제 관리"
+    // 사유: 갤러리 클릭 시 큰 이미지 모달 + 편집 모드(다중 선택 삭제) 신기능 통합.
+    // 기대효과:
+    //   1) 갤러리 썸네일 클릭 → 같은 페이지에서 큰 이미지 확인 (피드로 이탈 안 함)
+    //   2) "관리" 토글 → 다중 선택 → "선택 삭제" → DELETE /feed/:feed_id 일괄 호출 → 갤러리 갱신
+    // 장점:
+    //   - selectedItem 은 클릭한 한 갤러리 항목만 보관 → 메모리 효율↑
+    //   - selectedFeedIds 는 feed_id 단위로 누적 → 한 게시물의 여러 이미지가 같은 feed_id 면
+    //     중복 선택돼도 한 번만 삭제 호출됨 (Set 변환)
+    //   - dev 기존 백엔드 응답(galleryItems 의 feed_id/image_id) 그대로 활용
+    const [selectedItem, setSelectedItem] = useState(null);
+    const [isEditMode, setIsEditMode] = useState(false);
+    const [selectedFeedIds, setSelectedFeedIds] = useState([]);
+    const [deleting, setDeleting] = useState(false);
+
     useEffect(() => {
         fetchMyInfo();
     }, []);
@@ -59,6 +76,79 @@ function MyPage() {
             console.error("마이페이지 데이터 로딩 실패:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    // ── 편집 모드 / 일괄 삭제 핸들러 ─────────────────────────────────────────
+    /**
+     * [추가 2026-05-12 / frontend 머지 4/7]
+     * 출처: origin/frontend commit 832d3bf "마이페이지 피드 삭제 관리"
+     * 사유: 다중 선택된 갤러리 게시물을 DELETE /feed/:feed_id 로 일괄 삭제.
+     * 기대효과: 사용자가 옛 인증 게시물을 한 번에 정리 가능.
+     * 장점:
+     *   - dev 의 백엔드 DELETE /feed/{feed_id} 를 그대로 활용(추가 API 작업 0).
+     *   - Promise.allSettled 로 일부 실패해도 나머지는 진행 → 부분 성공 허용.
+     *   - 삭제 후 galleryItems 를 prev.filter 로 즉시 갱신해 재조회 없이 UI 반영.
+     */
+    const handleToggleEditMode = () => {
+        // 편집 모드를 끌 때 누적된 선택을 초기화하여 다음 진입 시 깨끗한 상태 보장
+        setIsEditMode((prev) => {
+            if (prev) setSelectedFeedIds([]);
+            return !prev;
+        });
+    };
+
+    const handleToggleSelect = (feedId) => {
+        setSelectedFeedIds((prev) =>
+            prev.includes(feedId)
+                ? prev.filter((id) => id !== feedId)
+                : [...prev, feedId],
+        );
+    };
+
+    const handleDeleteSelected = async () => {
+        if (selectedFeedIds.length === 0) {
+            alert("삭제할 게시물을 먼저 선택해주세요.");
+            return;
+        }
+        if (!window.confirm(`선택한 ${selectedFeedIds.length}개의 게시물을 삭제할까요?`)) return;
+
+        setDeleting(true);
+        try {
+            // Set 으로 변환하여 같은 feed_id 의 중복 호출 방지
+            const uniqueFeedIds = Array.from(new Set(selectedFeedIds));
+            const results = await Promise.allSettled(
+                uniqueFeedIds.map((fid) =>
+                    fetch(`${EXPRESS_URL}/feed/${fid}`, {
+                        method: "DELETE",
+                        credentials: "include",
+                    }).then((res) => res.json().then((d) => ({ fid, ok: res.ok && d.success, d }))),
+                ),
+            );
+
+            const succeeded = results
+                .filter((r) => r.status === "fulfilled" && r.value.ok)
+                .map((r) => r.value.fid);
+
+            if (succeeded.length > 0) {
+                // 갤러리에서 삭제된 게시물의 이미지들 제거
+                setGalleryItems((prev) => prev.filter((item) => !succeeded.includes(item.feed_id)));
+            }
+
+            const failed = uniqueFeedIds.length - succeeded.length;
+            if (failed > 0) {
+                alert(`${succeeded.length}개 삭제 성공 / ${failed}개 실패. 잠시 후 다시 시도해주세요.`);
+            } else {
+                alert("선택한 게시물을 모두 삭제했습니다.");
+            }
+
+            setSelectedFeedIds([]);
+            setIsEditMode(false);
+        } catch (error) {
+            console.error("피드 일괄 삭제 실패:", error);
+            alert("삭제 중 오류가 발생했습니다.");
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -246,9 +336,53 @@ function MyPage() {
                     <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "900", color: "#111827" }}>
                         📸 내 인증 갤러리
                     </h2>
-                    <span style={{ color: "#6b7280", fontSize: "14px", fontWeight: "800" }}>
-                        총 {galleryItems.length}개
-                    </span>
+                    {/* [추가 2026-05-12 / frontend 머지 4/7 - 편집 토글 + 선택 삭제]
+                        사유: 갤러리에서 직접 게시물을 정리할 수 있는 UI 진입점.
+                        기대효과: "관리" → 다중 선택 → "선택 삭제" 흐름으로 1탭 안에서 완결.
+                        장점: 편집 모드 OFF 시에는 카운트만 보여 깔끔. */}
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <span style={{ color: "#6b7280", fontSize: "14px", fontWeight: "800" }}>
+                            총 {galleryItems.length}개
+                        </span>
+                        {galleryItems.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={handleToggleEditMode}
+                                style={{
+                                    border: "1px solid #e5e7eb",
+                                    background: isEditMode ? "#4f46e5" : "white",
+                                    color: isEditMode ? "white" : "#374151",
+                                    padding: "6px 12px",
+                                    borderRadius: "8px",
+                                    fontSize: "13px",
+                                    fontWeight: "700",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                {isEditMode ? "완료" : "관리"}
+                            </button>
+                        )}
+                        {isEditMode && selectedFeedIds.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={handleDeleteSelected}
+                                disabled={deleting}
+                                style={{
+                                    border: "none",
+                                    background: "#ef4444",
+                                    color: "white",
+                                    padding: "6px 12px",
+                                    borderRadius: "8px",
+                                    fontSize: "13px",
+                                    fontWeight: "700",
+                                    cursor: deleting ? "not-allowed" : "pointer",
+                                    opacity: deleting ? 0.6 : 1,
+                                }}
+                            >
+                                {deleting ? "삭제 중..." : `선택 삭제 (${new Set(selectedFeedIds).size})`}
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {galleryItems.length === 0 ? (
@@ -268,10 +402,23 @@ function MyPage() {
                     </div>
                 ) : (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
-                    {galleryItems.map((item) => (
+                    {/* === 갤러리 상세 모달은 grid 닫은 뒤에 렌더 (아래) === */}
+                    {galleryItems.map((item) => {
+                        // [추가 2026-05-12 / frontend 머지 4/7 - 클릭 분기 + 선택 표시]
+                        // 사유: 편집 모드면 선택 토글, 평시면 상세 모달 오픈.
+                        // 기대효과: 같은 썸네일이 모드에 따라 두 가지 동작 제공 → 화면 추가 없음.
+                        // 장점: 선택된 항목은 ✓ 오버레이 + 외곽선으로 즉시 식별 가능.
+                        const isSelected = selectedFeedIds.includes(item.feed_id);
+                        return (
                         <div
                             key={item.image_id}
-                            onClick={() => navigate("/feed")}
+                            onClick={() => {
+                                if (isEditMode) {
+                                    handleToggleSelect(item.feed_id);
+                                } else {
+                                    setSelectedItem(item);
+                                }
+                            }}
                             style={{
                                 position: "relative",
                                 width: "100%",
@@ -281,6 +428,8 @@ function MyPage() {
                                 cursor: "pointer",
                                 backgroundColor: "#e5e7eb",
                                 transition: "all 0.2s ease",
+                                outline: isSelected ? "3px solid #4f46e5" : "none",
+                                outlineOffset: isSelected ? "-3px" : 0,
                             }}
                             onMouseEnter={(e) => {
                                 e.currentTarget.style.transform = "scale(0.95)";
@@ -322,11 +471,138 @@ function MyPage() {
                                     }}
                                 />
                             )}
+                            {/* 편집 모드일 때만 선택 체크 오버레이 표시 */}
+                            {isEditMode && (
+                                <div
+                                    style={{
+                                        position: "absolute",
+                                        top: "8px",
+                                        right: "8px",
+                                        width: "26px",
+                                        height: "26px",
+                                        borderRadius: "50%",
+                                        background: isSelected ? "#4f46e5" : "rgba(255,255,255,0.85)",
+                                        color: isSelected ? "white" : "#111827",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: "14px",
+                                        fontWeight: 900,
+                                        boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+                                    }}
+                                >
+                                    {isSelected ? "✓" : ""}
+                                </div>
+                            )}
                         </div>
-                    ))}
+                        );
+                    })}
                     </div>
                 )}
             </div>
+
+            {/* ── [추가 2026-05-12 / frontend 머지 4/7 - 갤러리 상세 이미지 모달] ──
+                출처: origin/frontend commits a2c8b03, ba6ac25.
+                사유: 썸네일 클릭 시 풀스크린에 가까운 큰 이미지로 즉시 확인.
+                기대효과:
+                  - 좌측 배경 클릭 또는 우상단 × 버튼으로 닫기.
+                  - "피드에서 보기" 버튼으로 해당 게시물 페이지로 점프(기존 navigate 동작 흡수).
+                장점:
+                  - 댓글/좋아요는 FeedPage 모달이 더 풍부하므로 중복 구현하지 않음 → 책임 분리.
+                  - 인라인 스타일 자체완결 → 5단계 App.css 전에도 동작. */}
+            {selectedItem && (
+                <div
+                    style={{
+                        position: "fixed",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: "100%",
+                        background: "rgba(0,0,0,0.85)",
+                        zIndex: 2000,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "24px",
+                    }}
+                    onClick={() => setSelectedItem(null)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            position: "relative",
+                            maxWidth: "min(900px, 100%)",
+                            maxHeight: "100%",
+                            background: "#000",
+                            borderRadius: "12px",
+                            overflow: "hidden",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                        }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setSelectedItem(null)}
+                            aria-label="모달 닫기"
+                            style={{
+                                position: "absolute",
+                                top: "10px",
+                                right: "10px",
+                                width: "36px",
+                                height: "36px",
+                                borderRadius: "50%",
+                                border: "none",
+                                background: "rgba(0,0,0,0.55)",
+                                color: "white",
+                                fontSize: "22px",
+                                lineHeight: 1,
+                                cursor: "pointer",
+                                zIndex: 1,
+                            }}
+                        >
+                            ×
+                        </button>
+
+                        {selectedItem.file_type?.startsWith("video/") ? (
+                            <video
+                                src={getFileUrl(selectedItem.file_url)}
+                                controls
+                                preload="metadata"
+                                style={{ maxWidth: "100%", maxHeight: "80vh", display: "block" }}
+                            />
+                        ) : (
+                            <img
+                                src={getFileUrl(selectedItem.file_url)}
+                                alt="갤러리 상세"
+                                style={{ maxWidth: "100%", maxHeight: "80vh", display: "block" }}
+                            />
+                        )}
+
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSelectedItem(null);
+                                navigate("/feed");
+                            }}
+                            style={{
+                                marginTop: "12px",
+                                marginBottom: "16px",
+                                padding: "10px 18px",
+                                border: "none",
+                                borderRadius: "10px",
+                                background: "#4f46e5",
+                                color: "white",
+                                fontWeight: 800,
+                                fontSize: "14px",
+                                cursor: "pointer",
+                            }}
+                        >
+                            피드에서 보기 →
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
