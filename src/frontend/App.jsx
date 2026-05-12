@@ -34,6 +34,11 @@ import FeedPage from "./FeedPage";
 import MyPage from "./MyPage";
 import SignupPage from "./SignupPage";
 import StatsPage from "./StatsPage";
+// [추가 2026-05-12 / frontend-cy 머지 (45d00d8)]
+// 사유: 챌린지 페이지 컴포넌트 신규 추가에 따른 import.
+// 기대효과: /challenge 라우트에서 ChallengePage 렌더링 가능.
+// 장점: 챌린지 기능을 독립 페이지로 분리 → 코드 응집도↑, 라우팅 일관성 유지.
+import ChallengePage from "./ChallengePage";
 
 function App() {
     // useNavigate: URL 이동을 프로그래밍적으로 처리 (예: 로그인 후 "/" 로 이동)
@@ -504,6 +509,11 @@ function App() {
                         <button onClick={() => navigate("/routine")}>루틴</button>
                         <button onClick={() => navigate("/feed")}>피드</button>
                         <button onClick={() => navigate("/mypage")}>마이페이지</button>
+                        {/* [추가 2026-05-12 / frontend-cy 머지 (45d00d8)]
+                            사유: 챌린지 페이지 진입 버튼.
+                            기대효과: 상단 네비게이션에서 /challenge 즉시 이동 가능.
+                            장점: 사용자 동선 단축, 다른 메뉴들과 통일된 진입 방식 제공. */}
+                        <button onClick={() => navigate("/challenge")}>챌린지</button>
                         <button onClick={handleLogout}>로그아웃</button>
                     </nav>
                 </header>
@@ -581,6 +591,15 @@ function App() {
                     <Route
                         path="/stats"
                         element={isLoggedIn ? <StatsPage /> : <Navigate to="/login" />}
+                    />
+
+                    {/* [추가 2026-05-12 / frontend-cy 머지 (45d00d8)]
+                        사유: 신규 챌린지 페이지 라우트 등록.
+                        기대효과: 비로그인 시 /login 으로 가드, 로그인 시 ChallengePage 렌더.
+                        장점: 다른 보호 라우트와 동일한 isLoggedIn 가드 패턴 사용 → 일관성↑. */}
+                    <Route
+                        path="/challenge"
+                        element={isLoggedIn ? <ChallengePage /> : <Navigate to="/login" />}
                     />
 
                     {/* 정의되지 않은 URL 접근 시 상태에 따라 홈 또는 로그인으로 리다이렉트 */}
