@@ -18,7 +18,13 @@ import { EXPRESS_URL } from "./config";
 // [수정 2026-05-03] 한 번에 가져올 페이지 크기 — FastAPI Query(limit) 와 동일한 의미
 const PAGE_SIZE = 20;
 
-function FeedPage({ currentUser }) {
+// [추가 2026-05-12 / frontend 머지 2/7]
+// 출처: origin/frontend commit c261988 "feat(Feed): 인스타그램 스타일 상세 모달 및 실시간 댓글 연동"
+// 사유: 게시물 신고 기능을 dev FeedPage 에 추가. dev 는 이미 인스타 스타일/모달/댓글/좋아요/멀티미디어 슬라이더가
+//        구현된 상태였고, frontend 신기능 중 미구현이었던 신고 기능만 선별 머지.
+// 기대효과: 카드 및 모달에서 🚩 신고 버튼 클릭 → 사유 입력 → 상위 onReportPost 콜백으로 전달.
+// 장점: dev 의 백엔드 API 연결(POST /like, /comment 등)을 100% 보존하면서 UX 통일성 유지.
+function FeedPage({ currentUser, onReportPost }) {
   // 피드 목록 (DB에서 조회, 최신순) — 페이지가 로드될 때마다 누적
   const [feedPosts, setFeedPosts] = useState([]);
 
@@ -374,6 +380,32 @@ function FeedPage({ currentUser }) {
     }
   };
 
+  // ── 게시물 신고 ───────────────────────────────────────────────────────────
+  /**
+   * [추가 2026-05-12 / frontend 머지 2/7]
+   * 출처: origin/frontend commit c261988
+   * 사유: 사용자가 부적절 게시물을 신고 → 관리자 페이지 신고 목록에 누적되도록 함.
+   * 기대효과: window.prompt 로 사유 입력 후 상위 onReportPost(post, reason) 콜백 호출.
+   *           App.jsx 의 reports 상태에 누적되어 AdminPage 에 표시됨.
+   * 장점: 신고 UI 와 데이터 관리를 분리 → FeedPage 는 UI 만 담당, App 이 단일 신고 데이터 저장소.
+   *        백엔드 API 가 아직 없어도 프론트만으로 신고 흐름 시연 가능.
+   *        (백엔드 신고 API 가 추가되면 onReportPost 안에서 fetch 만 호출하면 됨)
+   */
+  const handleReportClick = (post) => {
+    if (typeof onReportPost !== "function") {
+      // App.jsx 통합 전(또는 prop 미주입 시) 보호 로직
+      alert("신고 기능이 아직 초기화되지 않았습니다.");
+      return;
+    }
+    const reason = window.prompt(
+      "신고 사유를 입력해주세요.\n(예: 부적절한 홍보, 욕설, 도용 등)",
+    );
+    if (reason && reason.trim()) {
+      onReportPost(post, reason.trim());
+      alert("신고가 접수되었습니다. 관리자가 검토 후 처리합니다.");
+    }
+  };
+
   // ── 유틸리티 ──────────────────────────────────────────────────────────────
 
   /**
@@ -483,7 +515,7 @@ function FeedPage({ currentUser }) {
 
             return (
               <article key={post.feed_id} className="instagram-feed-card">
-                {/* 상단: 닉네임 + 루틴 제목 + 카테고리 */}
+                {/* 상단: 닉네임 + 루틴 제목 + 카테고리 + (추가) 신고 버튼 */}
                 <div className="instagram-feed-top">
                   <div className="instagram-feed-info-row">
                     <span className="instagram-feed-author">
@@ -499,6 +531,21 @@ function FeedPage({ currentUser }) {
                       </span>
                     )}
                   </div>
+                  {/* [추가 2026-05-12 / frontend 머지 2/7 - 신고 버튼(카드)]
+                      사유: 게시물 우측 상단에 신고 진입점 노출.
+                      기대효과: 본문 열지 않아도 즉시 신고 가능.
+                      장점: 본인 게시물에는 노출하지 않아 자기신고 차단(UX).
+                      스타일: 5단계 App.css 에서 .feed-report-button 클래스 정의 예정. */}
+                  {post.user_id !== currentUser?.user_id && (
+                    <button
+                      type="button"
+                      className="feed-report-button"
+                      onClick={() => handleReportClick(post)}
+                      aria-label="이 게시물 신고"
+                    >
+                      🚩 신고
+                    </button>
+                  )}
                 </div>
 
                 {/* 이미지/영상: 현재 인덱스의 미디어 1개만 표시 */}
@@ -709,6 +756,20 @@ function FeedPage({ currentUser }) {
                   <span className="feed-modal-category">
                     {selectedPost.category}
                   </span>
+                  {/* [추가 2026-05-12 / frontend 머지 2/7 - 신고 버튼(모달)]
+                      사유: 모달 헤더 우측에서도 신고 가능하도록 카드와 동일 진입점 제공.
+                      기대효과: 사진 확대해서 본 뒤 그대로 신고 흐름으로 연결.
+                      장점: 카드와 같은 핸들러 재사용 → 신고 동작 일관성 보장. */}
+                  {selectedPost.user_id !== currentUser?.user_id && (
+                    <button
+                      type="button"
+                      className="feed-modal-report-button"
+                      onClick={() => handleReportClick(selectedPost)}
+                      aria-label="이 게시물 신고"
+                    >
+                      🚩 신고
+                    </button>
+                  )}
                 </div>
 
                 <p className="feed-modal-proof-text">
