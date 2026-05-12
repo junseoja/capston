@@ -50,9 +50,23 @@ function LoginPage({ onLogin, onGoSignup }) {
 
             if (result.success) {
                 alert("로그인 성공");
+                // [추가 2026-05-12 / frontend 머지 6/7]
+                // 출처: origin/frontend src/LoginPage.jsx (commit 8c9c6a2)
+                // 사유: 관리자 계정 로그인 시 별도 분기(/admin 라우트) 처리를 위한 role 신호 전달.
+                // 기대효과: id 가 "admin" 이면 onLogin("ADMIN") → App.jsx 가 navigate("/admin"),
+                //          일반 유저는 onLogin("USER") → 기존대로 "/".
+                // 장점:
+                //   - dev 의 백엔드 /login 검증을 그대로 거치므로 비밀번호도 DB 에 등록된 값이어야 통과
+                //     (frontend 의 하드코딩 "admin/1234" 보안 취약점 회피).
+                //   - 백엔드 응답에 result.user 가 오면 user.login_id 로도 폴백 판별.
+                //   - role 인자가 빠진 기존 호출 호환을 위해 App.jsx 의 handleLogin 도 기본값 처리 예정.
+                const role =
+                    id === "admin" || result.user?.login_id === "admin"
+                        ? "ADMIN"
+                        : "USER";
                 // App.jsx의 handleLogin 호출
-                // → setIsLoggedIn(true) + fetchCurrentUser() + fetchRoutines() + navigate("/")
-                onLogin();
+                // → setIsLoggedIn(true) + fetchCurrentUser() + fetchRoutines() + navigate(role 분기)
+                onLogin(role);
             } else {
                 // 서버에서 내려준 에러 메시지 표시 (예: "비밀번호가 틀렸습니다.")
                 alert(result.message);
