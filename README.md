@@ -3499,6 +3499,78 @@ Express POST /feed
 
 ---
 
+## 🔧 2026-05-13 작업 내역
+
+### 1. 이번 세션 개요
+
+5/12 머지 작업 종료 후, 남은 미구현 항목들을 사용자 역량/캡스톤 데모 일정에 맞춰 **3단계 Phase 로 분류**한 작업 계획 수립 세션. 실제 코드 변경은 없고 **README 의 모든 오류·개선점 트래커를 시간순으로 재정렬 + Phase 별 실행 계획 표 추가**.
+
+| 결과물 | 내용 |
+|---|---|
+| 트래커 정리 | 해결 27건 / 미해결 16건 / 5-12 부수 5건 = 총 48건 시각화 |
+| 선택 6건 + 권장 추가 4건 = 총 10건 | 데모 안정성 우선 재정렬 |
+| Phase 1 (반나절) | 5건 — 데모 직전 필수 (admin 계정, 브런치 정리, 루틴 버그, 비번 정책, RDS 회전) |
+| Phase 2 (1~2일) | 3건 — 사용성/안정성 (반응형 통일, 이미지 압축, Sentry) |
+| Phase 3 (3~5일) | 2건 — 코드 품질 (App.jsx 리팩터링, 컴포넌트 분할) |
+
+---
+
+### 2. Phase 1 — 데모 직전 필수 (반나절)
+
+| # | 항목 | 무엇을 | 어떻게 | 영향 파일 | 위험/주의 | 예상 |
+|---|---|---|---|---|---|---|
+| 1.1 | **DB admin 계정 INSERT** | `users` 테이블에 `login_id='admin'` 계정 생성 | 회원가입 API 호출 (`POST /signup` with `id="admin"`) — 6단계 LoginPage 가 `id==="admin"` 으로 판별하므로 이게 가장 간단. bcrypt 해시는 백엔드가 처리 | DB 만 (코드 변경 0) | 비밀번호는 Phase 1.4 정책 통과해야 함 | 10분 |
+| 1.2 | **frontend 브런치 정리** | 머지 완료된 원격 브런치 정리 | 3옵션 중 결정: (a) 그대로 보존 / (b) `archive/frontend-2026-05-12` 로 rename / (c) 삭제. **권장 (b)** | 원격 브런치만 | 로컬 백업 `dev-backup-before-frontend-merge` 는 보존 | 5분 |
+| 1.3 | **루틴 추가 시 인증 표시 사라지는 버그** | 재현 → 원인 → 수정 | 1) 재현 시나리오 작성 2) `fetchRoutines` 응답에 `completed`/`completion_id` 필드 살아있는지 콘솔 검증 3) 추정: 새 루틴 추가 시 RoutinePage → `onRoutineChange()` → `fetchRoutines()` 가 completion 매핑 누락 가능 | `src/frontend/App.jsx` 의 `fetchRoutines`, 또는 `src/backend/routes/routine.js` JOIN | 백엔드 응답 구조 변경 시 다른 화면 영향 점검 | 1-2시간 |
+| 1.4 | **회원가입 비번 정책** | Pydantic `field_validator` 로 강제 | `src/python_api/routers/user.py` 의 `SignupRequest` 모델에 추가: 최소 8자 + 영문+숫자 혼합 (또는 +특수문자). 프론트엔드 SignupPage 에 안내 문구 추가 | `src/python_api/routers/user.py`, `src/frontend/SignupPage.jsx` | 기존 계정은 영향 없음 (가입 시점만 검증) | 30분 |
+| 1.5 | 🚨 **RDS 비번 회전** | AWS 콘솔에서 마스터 비번 변경 | 1) AWS RDS 콘솔 → 인스턴스 → "수정" → 새 마스터 비번 (16자+ 무작위) → "즉시 적용" 2) `src/python_api/.env` 의 `DB_PASSWORD` 갱신 3) FastAPI 재시작 4) `git status` 로 .env 추적 안 되는지 재확인 | `src/python_api/.env` (로컬만, git 비추적) | 재시작 동안 짧은 다운타임. 기존 비번 잠시 백업 권장 | 30분 |
+
+---
+
+### 3. Phase 2 — 사용성/안정성 (1~2일)
+
+| # | 항목 | 무엇을 | 어떻게 | 영향 파일 | 위험/주의 | 예상 |
+|---|---|---|---|---|---|---|
+| 2.1 | **반응형 정책 통일** | 4종(1024/640/860/520) → 표준 3종(1024/768/480) | 1) 정책 결정 — 권장: `≥1024 데스크탑 / 768~1023 태블릿 / <768 모바일` 2) 기존 dev `@media` 4개를 새 브레이크포인트로 마이그레이션 3) 5/12 에 보류했던 frontend 의 768/480 콘텐츠도 통합 4) 시각 검증 (DevTools 디바이스 모드) | `src/css/App.css` 전체 미디어 쿼리 영역 | 시각 회귀 가능 → 주요 페이지 4종(Home/Feed/MyPage/Routine) × 모바일/태블릿/PC 12조합 스모크 테스트 | 1-2시간 |
+| 2.2 | **피드 이미지 압축/썸네일** | 업로드 시 원본 + 썸네일 2장 저장, 카드는 썸네일 사용 | 1) `npm install sharp` 2) `src/backend/routes/feed.js` 업로드 미들웨어에서 sharp 로 `resize(1080) + webp(quality:80)` 원본, `resize(320) + webp` 썸네일 생성 후 S3 2장 업로드 3) `feed_images` 테이블에 `thumbnail_url` 컬럼 추가 4) 마이그레이션: 기존 row 는 `thumbnail_url IS NULL` → 프론트 폴백 로직 (`thumbnail_url ?? file_url`) | `src/backend/routes/feed.js`, `src/python_api/routers/feed.py` SELECT, `feed_images` 스키마, `FeedPage.jsx` 카드 렌더 | sharp 는 OS 의존성 있음(Docker 이미지에서 이미 지원). 기존 이미지 폴백 누락 시 깨짐 | 2-3시간 |
+| 2.3 | **Sentry 도입** | 3축(프론트/Express/FastAPI) 에러 자동 보고 | 1) Sentry 계정/프로젝트 3개 생성 (React/Node/Python) — 무료 5K events/mo 2) DSN 발급 → 각 `.env` 에 `SENTRY_DSN_*` 추가 3) **프론트**: `npm i @sentry/react` + `main.jsx` 에서 `Sentry.init({dsn, integrations: [browserTracingIntegration()], tracesSampleRate: 0.1})` 4) **Express**: `npm i @sentry/node` + `app.js` 에 requestHandler/errorHandler 미들웨어 5) **FastAPI**: `pip install sentry-sdk` + `main.py` 에 `sentry_sdk.init` 6) 테스트: 각 축에서 의도 throw 로 dashboard 확인 | `src/frontend/main.jsx`, `src/backend/app.js`, `src/python_api/main.py`, 3개 `.env`, `requirements.txt`, 2개 `package.json` | DSN 을 git 에 커밋하지 않도록 주의. tracesSampleRate 너무 높으면 quota 빠르게 소진 | 1-2시간 |
+
+---
+
+### 4. Phase 3 — 코드 품질 (3~5일, 시간 되는 만큼)
+
+| # | 항목 | 무엇을 | 어떻게 (단계별) | 영향 파일 | 위험/주의 | 예상 |
+|---|---|---|---|---|---|---|
+| 3.1 | **App.jsx 리팩터링** | 616줄 → ~300줄. 데이터 흐름을 api 모듈 / 훅 / Context 로 분리 | **단계 1**: `src/frontend/api/` 디렉터리 생성 → `auth.js`(login/me/logout) / `routine.js`(fetchRoutines) / `completion.js`(체크/상세/취소) / `feed.js` 로 fetch 분리. **단계 2**: `src/frontend/hooks/useRoutines.js` — routines 상태 + 5개 핸들러 캡슐화. **단계 3**: `src/frontend/contexts/AuthContext.jsx` — `isLoggedIn` / `currentUser` / `isAdmin` / `handleLogout` 을 context 로. HomePage/MyPage/FeedPage 의 currentUser props drilling 제거. **단계 4**: 검증 + 단계별 커밋 | `src/frontend/App.jsx`, 신규 `api/*.js`, `hooks/*.js`, `contexts/*.jsx`, props 받던 모든 페이지 | 회귀 위험 높음 → 단계별 커밋 + esbuild syntax 검증 + 수동 동작 테스트 필수. 5/12 머지처럼 4-7개 커밋으로 쪼개기 | 1-2일 |
+| 3.2 | **600줄+ 컴포넌트 분할** | 거대 컴포넌트를 책임 단위로 쪼갬 | **FeedPage (804줄)** → `FeedCard.jsx` / `FeedModal.jsx` / `CommentList.jsx` / `CommentInput.jsx` / `MediaCarousel.jsx`. FeedPage 는 fetchFeeds + 무한스크롤 컨테이너로 슬림화. **HomePage** → `WeekCalendar.jsx` / `TimeTabs.jsx` / `RoutineList.jsx` / `ProofForm.jsx` / `AdminNotificationModal.jsx`. **SignupPage** → `PasswordPolicyHint.jsx` 분리 (Phase 1.4 정책 안내). **MyPage (621줄)** → `ProfileCard.jsx` / `StatCards.jsx` / `GalleryGrid.jsx` / `GalleryDetailModal.jsx`. **AdminPage (232줄)** → 이미 작아서 보류 | 위 4개 페이지 + 신규 컴포넌트 약 15개 | 분할 후 props drilling 증가 가능 → 3.1 의 AuthContext 와 함께 진행. 순서: **3.1 먼저, 3.2 나중** | 1-2일 |
+
+---
+
+### 5. 작업 진행 권장 순서
+
+```
+Day 1 오전:  1.1 → 1.4 → 1.2 → 1.5  (1.4 후 1.5 권장: 새 비번이 정책 통과해야 함)
+Day 1 오후:  1.3 (재현/수정)
+Day 2:       2.1 → 2.2
+Day 3:       2.3 (Sentry)
+Day 4~5:     3.1 (App.jsx 리팩터링 단계별)
+Day 6~7:     3.2 (컴포넌트 분할, 3.1 의 Context 활용)
+```
+
+---
+
+### 6. 검토 대기 결정 사항
+
+| 결정 | 옵션 | 권장 |
+|---|---|---|
+| 1.2 frontend 브런치 | (a) 보존 / (b) archive rename / (c) 삭제 | (b) |
+| 1.4 비번 정책 강도 | (A) 8자+영숫자 / (B) 8자+영숫자+특수 / (C) 10자+영숫자+특수+대문자 | (B) |
+| 2.1 반응형 정책 | (1024/768/480 표준) / (dev 기존 4종 유지) | 표준 |
+| 3.1 상태 관리 | Context API / Zustand 도입 | Context API |
+| 2.3 Sentry 계정 | 본인 이메일로 무료 계정 생성 | 사용자 직접 |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
