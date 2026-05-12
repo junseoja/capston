@@ -1,20 +1,20 @@
 import React, { useState, useMemo } from "react";
 
-function AdminPage({ reports, onDeleteConfirm }) {
-  const [currentMenu, setCurrentMenu] = useState("dashboard"); // 초기 메뉴: 홈(대시보드)
+function AdminPage({ reports, onDeleteConfirm, notices, setNotices }) {
+  const [currentMenu, setCurrentMenu] = useState("dashboard"); 
   const [selectedReport, setSelectedReport] = useState(null);
   const [reportTab, setReportTab] = useState("pending"); 
   const [sortOrder, setSortOrder] = useState("desc"); 
   const [deleteReasonText, setDeleteReasonText] = useState("");
 
-  // [상태 관리] 공지사항 입력을 위한 임시 상태
   const [noticeTitle, setNoticeTitle] = useState("");
   const [noticeContent, setNoticeContent] = useState("");
+  const [noticeCategory, setNoticeCategory] = useState("일반"); 
+  const [filterCategory, setFilterCategory] = useState("전체"); 
+  const [editingNoticeId, setEditingNoticeId] = useState(null); 
 
-  // [통계] 미처리 신고 수
   const pendingCount = reports.filter(r => r.status === "pending").length;
 
-  // [로직] 가장 많이 신고된 사유 추출
   const getMostFrequentReason = (reporters) => {
     if (!reporters || reporters.length === 0) return "사유 없음";
     const counts = reporters.reduce((acc, curr) => {
@@ -24,16 +24,14 @@ function AdminPage({ reports, onDeleteConfirm }) {
     return Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
   };
 
-  // [필터링] 신고 목록 정렬 및 필터링
   const filteredReports = useMemo(() => {
     let list = reports.filter(r => r.status === reportTab);
     return list.sort((a, b) => sortOrder === "desc" ? b.reportCount - a.reportCount : a.reportCount - b.reportCount);
   }, [reports, reportTab, sortOrder]);
 
-  // [기능] 게시글 제재 실행
   const handleConfirmDelete = (report) => {
     if (!deleteReasonText.trim()) {
-      alert("유저에게 보낼 제재 사유를 입력해주세요.");
+      alert("유저에게 보낼 제재 사유를 직접 입력해주세요.");
       return;
     }
     if (window.confirm(`이 게시물을 삭제하고 작성자(${report.user})에게 제재 알림을 보낼까요?`)) {
@@ -44,7 +42,58 @@ function AdminPage({ reports, onDeleteConfirm }) {
     }
   };
 
-  // [컴포넌트] 통계 카드
+  const filteredNotices = useMemo(() => {
+    if (filterCategory === "전체") return notices;
+    return notices.filter(n => n.category === filterCategory);
+  }, [notices, filterCategory]);
+
+  const handleSaveNotice = () => {
+    if (!noticeTitle.trim() || !noticeContent.trim()) {
+      alert("제목과 내용을 입력해주세요.");
+      return;
+    }
+
+    if (editingNoticeId) {
+      setNotices(notices.map(n => n.id === editingNoticeId 
+        ? { ...n, category: noticeCategory, title: noticeTitle, content: noticeContent } 
+        : n
+      ));
+      alert("공지사항이 수정되었습니다.");
+    } else {
+      const newNotice = {
+        id: Date.now(),
+        category: noticeCategory,
+        title: noticeTitle,
+        content: noticeContent,
+        date: new Date().toISOString().split('T')[0]
+      };
+      setNotices([newNotice, ...notices]);
+      alert("새 공지사항이 게시되었습니다.");
+    }
+    resetNoticeForm();
+  };
+
+  const resetNoticeForm = () => {
+    setEditingNoticeId(null);
+    setNoticeTitle("");
+    setNoticeContent("");
+    setNoticeCategory("일반");
+  };
+
+  const handleEditNotice = (notice) => {
+    setEditingNoticeId(notice.id);
+    setNoticeCategory(notice.category);
+    setNoticeTitle(notice.title);
+    setNoticeContent(notice.content);
+  };
+
+  const handleDeleteNotice = (id) => {
+    if (window.confirm("이 공지사항을 삭제하시겠습니까?")) {
+      setNotices(notices.filter(n => n.id !== id));
+      if (editingNoticeId === id) resetNoticeForm();
+    }
+  };
+
   const StatCard = ({ title, value, colorVar }) => (
     <div className="stat-card" style={{ borderTop: `4px solid var(--${colorVar})`, background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 2px 5px rgba(0,0,0,0.05)" }}>
       <h3 style={{ fontSize: "14px", color: "#666", marginBottom: "10px" }}>{title}</h3>
@@ -54,118 +103,151 @@ function AdminPage({ reports, onDeleteConfirm }) {
 
   const renderContent = () => {
     switch (currentMenu) {
-      // ── 1. 신고 처리 메뉴 (업그레이드 버전) ──
       case "reports":
         return (
           <div className="page-container" style={{ padding: "20px" }}>
-            <div className="routine-header">
-              <h2 className="routine-title">🚩 부적절 게시글 제재 관리</h2>
-              <p className="routine-subtitle">신고된 게시물을 직접 확인하고 다수의 신고 사유를 검토하세요.</p>
-            </div>
-            
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "20px" }}>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button onClick={() => setReportTab("pending")} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid var(--border)", cursor: "pointer", backgroundColor: reportTab === "pending" ? "var(--primary)" : "white", color: reportTab === "pending" ? "white" : "black" }}>미처리 ({pendingCount})</button>
-                <button onClick={() => setReportTab("completed")} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid var(--border)", cursor: "pointer", backgroundColor: reportTab === "completed" ? "var(--primary)" : "white", color: reportTab === "completed" ? "white" : "black" }}>처리 완료</button>
+            <div className="routine-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+              <div>
+                <h2 className="routine-title">🚩 부적절 게시글 제재 관리</h2>
+                <p className="routine-subtitle">신고 분류를 기반으로 우선순위를 정해 게시물을 검토하세요.</p>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ background: '#fff0f0', padding: '10px 15px', borderRadius: '10px', border: '1px solid #ffccc7' }}>
+                  <span style={{ fontSize: '12px', color: '#ff4d4f', fontWeight: '700' }}>미처리 신고</span>
+                  <div style={{ fontSize: '18px', fontWeight: '900', color: '#ff4d4f' }}>{pendingCount}건</div>
+                </div>
               </div>
             </div>
-
-            <div className="routine-form-box" style={{ padding: 0, overflow: "hidden", background: "white", borderRadius: "12px", border: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", margin: "25px 0 15px" }}>
+              <div style={{ display: "flex", gap: "8px" }}>
+                {["pending", "completed"].map(status => (
+                  <button key={status} onClick={() => setReportTab(status)} style={{ padding: "10px 20px", borderRadius: "25px", border: "none", cursor: "pointer", backgroundColor: reportTab === status ? "#4f46e5" : "#eee", color: reportTab === status ? "white" : "#666", fontWeight: '700', fontSize: '14px' }}>
+                    {status === "pending" ? "검토 대기" : "처리 완료"}
+                  </button>
+                ))}
+              </div>
+              <select onChange={(e) => setSortOrder(e.target.value)} style={{ padding: '8px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px', outline: 'none' }}>
+                <option value="desc">신고 많은 순</option>
+                <option value="asc">신고 적은 순</option>
+              </select>
+            </div>
+            <div className="routine-form-box" style={{ padding: 0, overflow: "hidden", background: "white", borderRadius: "16px", border: "1px solid #eee" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
-                <thead style={{ backgroundColor: "var(--primary-light)" }}>
-                  <tr>
-                    <th style={{ padding: "16px" }}>작성자</th>
-                    <th>가장 많이 신고된 사유</th>
-                    <th>누적 횟수</th>
-                    <th>조치</th>
+                <thead style={{ backgroundColor: "#f9fafb", borderBottom: "2px solid #eee" }}>
+                  <tr style={{ fontSize: '13px', color: '#6b7280' }}>
+                    <th style={{ padding: "16px 20px" }}>게시글 정보</th>
+                    <th>주요 신고 분류</th>
+                    <th style={{ textAlign: 'center' }}>누적 횟수</th>
+                    <th style={{ textAlign: 'center' }}>상태</th>
+                    <th style={{ padding: "16px 20px", textAlign: 'right' }}>관리</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredReports.map(report => (
-                    <tr key={report.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td style={{ padding: "16px", fontWeight: "900" }}>{report.user}</td>
-                      <td style={{ color: "var(--danger)", fontWeight: "600" }}>{getMostFrequentReason(report.reporters)}</td>
-                      <td style={{ fontWeight: "800" }}>{report.reportCount}회</td>
-                      <td><button className="check-btn" onClick={() => setSelectedReport(report)}>게시글 확인 및 처리</button></td>
+                    <tr key={report.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: "16px 20px" }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <img src={report.postContent.img} style={{ width: '40px', height: '40px', borderRadius: '6px', objectFit: 'cover', background: '#eee' }} alt="썸네일" />
+                          <div>
+                            <div style={{ fontWeight: "800", fontSize: '14px' }}>{report.user}</div>
+                            <div style={{ fontSize: '12px', color: '#9ca3af' }}>{report.postContent.title}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '800', backgroundColor: '#e6f7ff', color: '#1890ff', border: '1px solid #91d5ff' }}>
+                          {getMostFrequentReason(report.reporters).match(/\[(.*?)\]/)?.[1] || "기타"}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'center', fontWeight: "800" }}>{report.reportCount}회</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: report.status === 'pending' ? '#ff4d4f' : '#52c41a' }}></span>
+                          {report.status === 'pending' ? '대기' : '완료'}
+                        </div>
+                      </td>
+                      <td style={{ padding: "16px 20px", textAlign: 'right' }}>
+                        <button className="check-btn" onClick={() => setSelectedReport(report)} style={{ padding: '6px 12px', fontSize: '12px' }}>상세 검토</button>
+                      </td>
                     </tr>
                   ))}
-                  {filteredReports.length === 0 && (
-                    <tr><td colSpan="4" style={{ padding: "40px", textAlign: "center", color: "#999" }}>내역이 없습니다.</td></tr>
-                  )}
                 </tbody>
               </table>
             </div>
-
-            {/* 상세 검토 모달 */}
-            {selectedReport && (
-              <div className="report-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-                <div style={{ background: 'white', width: '90%', maxWidth: '1000px', height: '80vh', borderRadius: '16px', display: 'flex', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ flex: 1.2, borderRight: '1px solid #eee', display: 'flex', flexDirection: 'column', backgroundColor: '#f8f9fa' }}>
-                    <div style={{ padding: '15px 20px', background: 'white', borderBottom: '1px solid #eee', fontWeight: '900' }}>원본 게시물 확인</div>
-                    <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-                      <div style={{ background: 'white', border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden' }}>
-                        <img src={selectedReport.postContent.img} style={{ width: '100%', maxHeight: '300px', objectFit: 'cover' }} alt="증거" />
-                        <div style={{ padding: '15px' }}>
-                          <p style={{ fontWeight: '800', margin: '0 0 10px 0' }}>{selectedReport.user}님의 게시글</p>
-                          <p style={{ fontSize: '14px', lineHeight: '1.5' }}>{selectedReport.postContent.text}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ padding: '15px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: '900', color: 'red' }}>🚩 누적 신고 상세 ({selectedReport.reportCount})</span>
-                      <button onClick={() => setSelectedReport(null)} style={{ border: 'none', background: 'none', fontSize: '24px', cursor: 'pointer' }}>×</button>
-                    </div>
-                    <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-                      {selectedReport.reporters.map((rep, idx) => (
-                        <div key={idx} style={{ marginBottom: '10px', padding: '10px', background: '#fff5f5', borderRadius: '8px', border: '1px solid #ffccc7' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-                            <span style={{ fontWeight: '800' }}>신고자: {rep.user}</span>
-                            <span style={{ color: '#999' }}>{rep.date}</span>
-                          </div>
-                          <p style={{ margin: 0, fontSize: '13px' }}>사유: {rep.reason}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ padding: '20px', borderTop: '1px solid #eee', background: '#f9fafb' }}>
-                      {selectedReport.status === "pending" ? (
-                        <>
-                          <textarea value={deleteReasonText} onChange={(e) => setDeleteReasonText(e.target.value)} placeholder="제재 사유 입력..." style={{ width: '100%', height: '80px', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', resize: 'none', marginBottom: '10px' }} />
-                          <button className="routine-delete-btn" style={{ width: '100%', padding: '12px' }} onClick={() => handleConfirmDelete(selectedReport)}>게시글 삭제 및 제재 알림 발송</button>
-                        </>
-                      ) : (
-                        <div style={{ padding: '15px', background: '#e6f7ff', borderRadius: '8px', border: '1px solid #91d5ff' }}>
-                          <p style={{ margin: 0, fontWeight: '800', color: '#0050b3' }}>✅ 조치 완료 (사유: {selectedReport.adminComment})</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         );
 
-      // ── 2. 공지사항 메뉴 (유지) ──
       case "notice":
         return (
           <div className="page-container" style={{ padding: "20px" }}>
             <div className="routine-header">
-              <h2 className="routine-title">📢 시스템 공지사항 등록</h2>
-              <p className="routine-subtitle">사용자 홈 화면 배너와 공지 목록에 게시될 소식을 등록합니다.</p>
+              <h2 className="routine-title">📢 공지사항 통합 관리</h2>
+              <p className="routine-subtitle">사용자들에게 노출될 카테고리별 공지를 작성하고 관리하세요.</p>
             </div>
-            <div className="routine-form-box" style={{ marginTop: "20px", background: "white", padding: "25px", borderRadius: "12px" }}>
-              <div className="routine-form" style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
-                <input type="text" value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} placeholder="공지 제목" style={{ width: "100%", padding: "14px", borderRadius: "12px", border: "1px solid var(--border)" }} />
-                <textarea value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} placeholder="공지 상세 내용" style={{ width: "100%", minHeight: "200px", padding: "16px", borderRadius: "12px", border: "1px solid var(--border)" }} />
-                <button className="routine-save-btn" onClick={() => {alert("공지가 등록되었습니다."); setNoticeTitle(""); setNoticeContent("");}}>공지사항 게시하기</button>
+
+            <div style={{ display: 'flex', gap: '25px', marginTop: '25px', alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, background: "white", padding: "24px", borderRadius: "16px", border: editingNoticeId ? "2px solid #4f46e5" : "1px solid #eee", boxShadow: "0 4px 12px rgba(0,0,0,0.05)" }}>
+                <h3 style={{ fontSize: '15px', fontWeight: '900', marginBottom: '16px', color: editingNoticeId ? '#4f46e5' : '#111' }}>
+                  {editingNoticeId ? "📝 공지사항 수정" : "➕ 새 공지 등록"}
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{ width: '100px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: '700', color: '#999', display: 'block', marginBottom: '4px' }}>분류</label>
+                      <select value={noticeCategory} onChange={(e) => setNoticeCategory(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', background: '#f9f9f9', fontWeight: '700', fontSize: '13px' }}>
+                        <option value="일반">일반</option>
+                        <option value="이벤트">이벤트</option>
+                        <option value="점검">점검</option>
+                        <option value="업데이트">업데이트</option>
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: '11px', fontWeight: '700', color: '#999', display: 'block', marginBottom: '4px' }}>제목</label>
+                      <input type="text" value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} placeholder="공지 제목을 입력하세요" style={{ width: '100%', padding: "10px", borderRadius: "8px", border: "1px solid #ddd", fontSize: '13px', outline: 'none' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: '700', color: '#999', display: 'block', marginBottom: '4px' }}>내용</label>
+                    <textarea value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} placeholder="상세 내용을 입력하세요..." style={{ width: "100%", minHeight: "200px", padding: "14px", borderRadius: "8px", border: "1px solid #ddd", fontSize: '13px', lineHeight: '1.6', outline: 'none', resize: 'none' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={handleSaveNotice} className="routine-save-btn" style={{ flex: 2, padding: '12px', fontSize: '14px' }}>{editingNoticeId ? "수정 완료" : "공지 게시"}</button>
+                    {editingNoticeId && <button onClick={resetNoticeForm} style={{ flex: 1, background: '#eee', border: 'none', borderRadius: '8px', fontWeight: '800', cursor: 'pointer', fontSize: '13px' }}>취소</button>}
+                  </div>
+                </div>
+              </div>
+              <div style={{ flex: 1, background: "white", padding: "24px", borderRadius: "16px", border: "1px solid #eee" }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '900' }}>📃 게시 내역</h3>
+                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    {["전체", "일반", "이벤트", "점검", "업데이트"].map(cat => (
+                      <button key={cat} onClick={() => setFilterCategory(cat)} style={{ padding: '4px 8px', fontSize: '10px', borderRadius: '15px', cursor: 'pointer', border: '1px solid #ddd', background: filterCategory === cat ? '#4f46e5' : 'white', color: filterCategory === cat ? 'white' : '#666', fontWeight: '700' }}>{cat}</button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ maxHeight: '520px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '5px' }}>
+                  {filteredNotices.length === 0 ? <div style={{ textAlign: 'center', color: '#ccc', padding: '60px 0', fontSize: '13px' }}>해당 카테고리의 공지가 없습니다.</div> : filteredNotices.map(notice => (
+                    <div key={notice.id} style={{ padding: '12px', border: '1px solid #f3f4f6', borderRadius: '10px', background: editingNoticeId === notice.id ? '#f5f7ff' : '#fff' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', fontWeight: '800', background: notice.category === '점검' ? '#fff1f0' : '#f0f5ff', color: notice.category === '점검' ? '#ff4d4f' : '#4f46e5' }}>{notice.category}</span>
+                          <span style={{ fontSize: '10px', color: '#bbb' }}>{notice.date}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button onClick={() => handleEditNotice(notice)} style={{ border: 'none', background: 'none', color: '#4f46e5', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }}>수정</button>
+                          <button onClick={() => handleDeleteNotice(notice.id)} style={{ border: 'none', background: 'none', color: '#ff4d4f', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }}>삭제</button>
+                        </div>
+                      </div>
+                      <div style={{ fontWeight: '800', fontSize: '13px', marginBottom: '4px', color: '#333' }}>{notice.title}</div>
+                      <div style={{ fontSize: '12px', color: '#777', lineHeight: '1.4', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical' }}>{notice.content}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
         );
 
-      // ── 3. 서비스 지표 메뉴 (유지) ──
       case "metrics":
         return (
           <div className="page-container" style={{ padding: "20px" }}>
@@ -181,7 +263,6 @@ function AdminPage({ reports, onDeleteConfirm }) {
           </div>
         );
 
-      // ── 4. 관리자 홈/대시보드 (유지) ──
       default:
         return (
           <div className="page-container" style={{ padding: "20px" }}>
@@ -216,6 +297,10 @@ function AdminPage({ reports, onDeleteConfirm }) {
         .check-btn { background-color: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 800; padding: 8px 12px; }
         .routine-save-btn { background-color: var(--primary); color: white; border: none; padding: 15px; border-radius: 12px; cursor: pointer; font-weight: 800; }
         .active-time-tab { background-color: var(--primary) !important; color: white !important; }
+        .report-row:hover { background-color: #fafafa; }
+        div::-webkit-scrollbar { width: 5px; }
+        div::-webkit-scrollbar-track { background: transparent; }
+        div::-webkit-scrollbar-thumb { background: #ddd; border-radius: 10px; }
       `}</style>
     </div>
   );
