@@ -3,10 +3,7 @@ import React, { useState, useEffect } from "react";
 function NoticeList({ notices, setPage, setSelectedNotice }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchCategory, setSearchCategory] = useState("제목");
-  
-  // 1. 현재 선택된 공지 분류(카테고리) 상태
   const [activeCategory, setActiveCategory] = useState("전체");
-  
   const [readNotices, setReadNotices] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const postsPerPage = 8;
@@ -16,7 +13,6 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
     setReadNotices(savedRead.map(id => String(id)));
   }, []);
 
-  // 2. 분류(카테고리)나 검색어가 변경되면 무조건 1페이지로 돌아가게 설정
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, activeCategory]);
@@ -31,21 +27,17 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
       setReadNotices(updatedRead);
     }
 
+    // App.js에서 관리하는 setSelectedNotice를 통해 상세 내용을 넘겨줌
     setSelectedNotice(notice);
     setPage("notice_detail");
   };
 
-  // 3. 분류 필터링 로직: 선택된 카테고리에 맞는 공지만 걸러냄
   const filteredNotices = notices.filter((n) => {
-    // 카테고리 매칭 (전체일 경우 모두 통과)
     const matchesCategory = activeCategory === "전체" || n.category === activeCategory;
-    
-    // 검색어 매칭
     const value = searchTerm.toLowerCase();
     const matchesSearch = searchCategory === "제목" 
       ? n.title.toLowerCase().includes(value)
       : n.content.toLowerCase().includes(value);
-      
     return matchesCategory && matchesSearch;
   });
 
@@ -54,7 +46,6 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
   const currentNotices = filteredNotices.slice(indexOfFirstPost, indexOfLastPost);
   const totalPages = Math.ceil(filteredNotices.length / postsPerPage);
 
-  // 사용할 카테고리 목록
   const categories = ["전체", "일반", "이벤트", "점검", "업데이트"];
 
   return (
@@ -64,7 +55,6 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
         <p className="routine-subtitle">분류별로 원하는 소식을 빠르게 찾아보세요.</p>
       </div>
 
-      {/* 검색 바 */}
       <div className="notice-search-area">
         <select className="notice-search-select" value={searchCategory} onChange={(e) => setSearchCategory(e.target.value)}>
           <option value="제목">제목</option>
@@ -76,7 +66,6 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
         </div>
       </div>
 
-      {/* 4. 분류(카테고리) 선택 버튼 영역 */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "25px", flexWrap: "wrap" }}>
         {categories.map((cat) => (
           <button
@@ -99,7 +88,6 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
         ))}
       </div>
 
-      {/* 공지사항 목록 */}
       <div className="notice-list-wrap">
         {currentNotices.length === 0 ? (
           <div style={{ textAlign: "center", padding: "80px", color: "#bbb" }}>
@@ -118,7 +106,6 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
                       <span style={{ color: "#eee", fontSize: "18px" }}>·</span>
                     )}
                   </div>
-                  
                   <div className="notice-info-content">
                     <div className="notice-title-line">
                       <span className={`notice-badge-tag ${notice.category === '점검' ? 'badge-emergency' : 'badge-normal'}`}>
@@ -131,7 +118,6 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
                     <p className="notice-sub-preview">{notice.content}</p>
                   </div>
                 </div>
-
                 <div className="notice-item-right">
                   <span>{notice.date}</span>
                   <span style={{ margin: "0 10px", color: "#eee" }}>|</span>
@@ -143,7 +129,6 @@ function NoticeList({ notices, setPage, setSelectedNotice }) {
         )}
       </div>
 
-      {/* 페이지네이션 */}
       {totalPages > 0 && (
         <div className="notice-pagination-box">
           <button className="page-num-btn" onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage === 1}>〈</button>

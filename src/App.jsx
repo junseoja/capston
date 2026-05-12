@@ -9,14 +9,16 @@ import SignupPage from "./SignupPage";
 import StatsPage from "./StatsPage";
 import AdminPage from "./AdminPage"; 
 import NoticeList from "./NoticeList";
-import NoticeDetail from "./NoticeDetail"; // 상세 페이지 임포트
+import NoticeDetail from "./NoticeDetail";
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState("USER"); 
   const [page, setPage] = useState("home");
   const [authPage, setAuthPage] = useState("login");
-  const [selectedNotice, setSelectedNotice] = useState(null); // [추가] 선택된 공지 데이터 저장
+
+  // 상세 페이지용 선택된 공지사항 상태
+  const [selectedNotice, setSelectedNotice] = useState(null);
 
   const savedPosts = JSON.parse(localStorage.getItem("feedPosts") || "[]");
   const savedReports = JSON.parse(localStorage.getItem("reports") || "[]");
@@ -75,6 +77,23 @@ function App() {
     setDeleteNotifications((prev) => [...prev, { id: Date.now(), nickname: targetNickname, routineTitle: reports.find((r) => r.id === reportId)?.postContent.title, reason: reasonText }]);
   };
 
+  // 공지사항 등록 시 알림 연동
+  const handleSetNotices = (updatedNotices) => {
+    if (updatedNotices.length > notices.length) {
+      const newNotice = updatedNotices[0];
+      setDeleteNotifications(prev => [
+        { 
+          id: Date.now(), 
+          nickname: "전체사용자", 
+          routineTitle: "새 공지사항", 
+          reason: `[${newNotice.category}] ${newNotice.title} 공지가 등록되었습니다.` 
+        }, 
+        ...prev
+      ]);
+    }
+    setNotices(updatedNotices);
+  };
+
   const addRoutine = (newRoutine) => { setRoutines((prev) => [...prev, { id: Date.now(), ...newRoutine, completed: false, completedAt: "", proofText: "", proofFiles: [] }]); };
   const completeCheckRoutine = (id) => { const now = new Date(); const timeText = now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }); setRoutines((prev) => prev.map((routine) => routine.id === id ? { ...routine, completed: true, completedAt: timeText } : routine )); };
   
@@ -94,18 +113,17 @@ function App() {
   const handleSignup = (newUser) => { setUsers((prev) => [...prev, { id: Date.now(), ...newUser }]); alert(`${newUser.nickname}님, 회원가입이 완료되었습니다.`); setAuthPage("login"); };
 
   const renderPage = () => {
-    if (page === "admin") return <AdminPage reports={reports} onDeleteConfirm={handleAdminDelete} notices={notices} setNotices={setNotices} />;
+    if (page === "admin") return <AdminPage reports={reports} onDeleteConfirm={handleAdminDelete} notices={notices} setNotices={handleSetNotices} />;
     if (page === "home") return <HomePage routines={routines} onCompleteCheck={completeCheckRoutine} onCompleteDetail={completeDetailRoutine} onCancelComplete={cancelRoutineCompletion} deleteNotifications={deleteNotifications} setDeleteNotifications={setDeleteNotifications} currentUser={users[0]} notices={notices} />;
     if (page === "routine") return <RoutinePage routines={routines} onAddRoutine={addRoutine} onDeleteRoutine={deleteRoutine} />;
     if (page === "feed") return <FeedPage feedPosts={feedPosts} setFeedPosts={setFeedPosts} onReportPost={handleReportPost} currentUser={users[0]} />;
     if (page === "mypage") return <MyPage feedPosts={feedPosts} setPage={setPage} currentUser={users[0]} />;
     if (page === "stats") return <StatsPage setPage={setPage} />;
     
-    // [공지사항 목록]
+    // 공지사항 페이지 렌더링
     if (page === "notice_list") return <NoticeList notices={notices} setPage={setPage} setSelectedNotice={setSelectedNotice} />;
-    // [공지사항 상세]
     if (page === "notice_detail") return <NoticeDetail notice={selectedNotice} setPage={setPage} />;
-
+    
     return <HomePage routines={routines} onCompleteCheck={completeCheckRoutine} onCompleteDetail={completeDetailRoutine} onCancelComplete={cancelRoutineCompletion} notices={notices} />;
   };
 
@@ -120,20 +138,26 @@ function App() {
     );
   }
 
+  // 관리자 모드 헤더 분리 시
+  if (userRole === "ADMIN") {
+    return <AdminPage reports={reports} onDeleteConfirm={handleAdminDelete} notices={notices} setNotices={handleSetNotices} />;
+  }
+
   return (
     <div className="app">
       <header className="topbar">
         <div className="logo" onClick={() => setPage("home")} style={{cursor: "pointer"}}>Routine Mate 🌙 {month}월</div>
         <nav className="nav">
           <h4>{users[0]?.nickname || "사용자"}님</h4>
-          <button onClick={() => setPage("home")} className={page === "home" ? "active-time-tab" : ""}>홈</button>
-          <button onClick={() => setPage("routine")} className={page === "routine" ? "active-time-tab" : ""}>루틴</button>
-          <button onClick={() => setPage("feed")} className={page === "feed" ? "active-time-tab" : ""}>피드</button>
-          <button onClick={() => setPage("mypage")} className={page === "mypage" ? "active-time-tab" : ""}>마이페이지</button>
+          <button onClick={() => setPage("home")} className={page === "home" ? "active" : ""}>홈</button>
+          <button onClick={() => setPage("routine")} className={page === "routine" ? "active" : ""}>루틴</button>
+          <button onClick={() => setPage("feed")} className={page === "feed" ? "active" : ""}>피드</button>
+          <button onClick={() => setPage("mypage")} className={page === "mypage" ? "active" : ""}>마이페이지</button>
           
+          {/* [수정] 공지사항 버튼 디자인 통일 - 다른 버튼과 같은 클래스 구조 사용 */}
           <button 
             onClick={() => setPage("notice_list")} 
-            className={page === "notice_list" || page === "notice_detail" ? "active-time-tab" : ""}
+            className={page === "notice_list" || page === "notice_detail" ? "active" : ""}
           >
             공지사항
           </button>
@@ -142,7 +166,6 @@ function App() {
         </nav>
       </header>
       <main className="page-container">{renderPage()}</main>
-      <style>{`.active-time-tab { background-color: var(--primary) !important; color: white !important; border-radius: 8px; }`}</style>
     </div>
   );
 }
