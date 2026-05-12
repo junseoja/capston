@@ -22,11 +22,20 @@
 
 import { useState, useEffect, useRef } from "react";
 
+// [추가 2026-05-12 / frontend 머지 3/7]
+// 출처: origin/frontend commit 56bc7cc "feat(Home): 관리자 제재 알림 중앙 모달 및 공지사항 배너 추가"
+// 사유: 관리자가 신고 처리(게시글 제재)하면 해당 유저에게 알림을 띄워주기 위한 props 추가.
+// 기대효과: AdminPage 에서 제재 실행 → App.jsx 의 deleteNotifications 상태 갱신 →
+//          HomePage 가 모달로 즉시 노출 → 유저가 "내용 확인" 버튼을 눌러야만 모달 종료.
+// 장점: 데이터 흐름이 한 방향(App → HomePage)으로 명확. dev 기존 루틴/인증/사진 로직과 분리되어 안전.
 function HomePage({
   routines,
   onCompleteCheck,
   onCompleteDetail,
   onCancelComplete,
+  // [추가 2026-05-12] 관리자 제재 알림 연동용 props (미주입 시 기본값으로 안전)
+  deleteNotifications = [],
+  setDeleteNotifications,
 }) {
   // ── 날짜 계산 ─────────────────────────────────────────────────────────────
 
@@ -304,12 +313,126 @@ function HomePage({
     }
   };
 
+  // ── 관리자 제재 알림 닫기 ─────────────────────────────────────────────────
+  /**
+   * [추가 2026-05-12 / frontend 머지 3/7]
+   * 출처: origin/frontend commit 56bc7cc
+   * 사유: 모달 하단의 "내용을 확인했습니다" 버튼 클릭 시 해당 알림 제거.
+   * 기대효과: 알림이 큐(deleteNotifications)에서 하나씩 빠지며, 더 이상 없으면 모달 자체가 닫힘.
+   * 장점: 함수 시그니처(상위 setter 호출)가 단순해 App.jsx 와 결합도 최소.
+   *        setDeleteNotifications 미주입 시 noop 처리하여 단독 렌더에도 안전.
+   */
+  const handleCloseNoti = (id) => {
+    if (typeof setDeleteNotifications !== "function") return;
+    setDeleteNotifications((prev) => prev.filter((noti) => noti.id !== id));
+  };
+
   const currentSection = getTimeTitle();
 
   // ── 렌더링 ────────────────────────────────────────────────────────────────
 
   return (
     <div className="home">
+      {/* ── [추가 2026-05-12 / frontend 머지 3/7 - 관리자 제재 알림 중앙 모달] ──
+          출처: origin/frontend commit 56bc7cc.
+          사유: 관리자가 신고된 게시글을 삭제(제재)하면, 작성자가 다음 접속 시 모달로 안내받음.
+          기대효과: 큐의 첫 알림만 노출 → 사용자가 확인 시 다음 알림으로 자동 이동.
+          장점:
+            - 인라인 스타일로 자체 완결 (App.css 의존 없음) → 5단계 전에도 즉시 동작.
+            - z-index 9999 로 다른 모든 UI 위에 표시.
+            - 본문 외 위치에 두어 dev 의 기존 week/time-tabs 레이아웃과 충돌 없음. */}
+      {deleteNotifications && deleteNotifications.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0,0,0,0.7)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              padding: "30px",
+              borderRadius: "20px",
+              width: "90%",
+              maxWidth: "400px",
+              textAlign: "center",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div style={{ fontSize: "50px", marginBottom: "20px" }}>⚠️</div>
+            <h2
+              style={{
+                fontSize: "20px",
+                fontWeight: "900",
+                color: "#333",
+                marginBottom: "15px",
+              }}
+            >
+              게시글 제재 안내
+            </h2>
+            <p
+              style={{
+                fontSize: "15px",
+                color: "#666",
+                lineHeight: "1.6",
+                marginBottom: "20px",
+              }}
+            >
+              회원님의 게시글이<br />
+              <strong>커뮤니티 가이드 위반</strong>으로 삭제되었습니다.
+            </p>
+            <div
+              style={{
+                background: "#f8f9fa",
+                padding: "15px",
+                borderRadius: "10px",
+                marginBottom: "25px",
+                textAlign: "left",
+              }}
+            >
+              <p style={{ margin: 0, fontSize: "13px", color: "#888" }}>
+                삭제 대상: {deleteNotifications[0].routineTitle}
+              </p>
+              <p
+                style={{
+                  margin: "5px 0 0 0",
+                  fontSize: "14px",
+                  color: "#ef4444",
+                  fontWeight: "700",
+                }}
+              >
+                사유: {deleteNotifications[0].reason}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleCloseNoti(deleteNotifications[0].id)}
+              style={{
+                width: "100%",
+                padding: "15px",
+                border: "none",
+                borderRadius: "12px",
+                backgroundColor: "#4f46e5",
+                color: "white",
+                fontWeight: "800",
+                cursor: "pointer",
+                fontSize: "16px",
+              }}
+            >
+              내용을 확인했습니다
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── 이번 주 날짜 캘린더 ── */}
       <div className="week">
         {weekDates.map((weekDate, index) => (
