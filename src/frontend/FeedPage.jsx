@@ -53,6 +53,14 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
   // 피드별 현재 보고 있는 미디어 인덱스
   const [currentMediaIndexes, setCurrentMediaIndexes] = useState({});
 
+  // [추가 2026-05-13 / frontend 머지 Stage 2-5] 신고 모달 상태 3종
+  // 출처: origin/frontend FeedPage
+  // 사유: 기존 window.prompt 신고를 카테고리+상세 사유 모달로 고도화하기 위한 상태.
+  // 기대효과: 사용자가 분류 선택 → 상세 입력 → 신고하기 → onReportPost 호출.
+  const [reportModalPost, setReportModalPost] = useState(null);
+  const [reportCategory, setReportCategory] = useState("");
+  const [reportDetail, setReportDetail] = useState("");
+
   // 현재 선택된 피드 객체
   // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
   // 사유: 챌린지 mock 피드(extraMockPosts) + 자체 백엔드 피드(feedPosts) 합쳐 최신순 정렬.
@@ -408,19 +416,34 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
    *        백엔드 API 가 아직 없어도 프론트만으로 신고 흐름 시연 가능.
    *        (백엔드 신고 API 가 추가되면 onReportPost 안에서 fetch 만 호출하면 됨)
    */
+  // [수정 2026-05-13 / frontend 머지 Stage 2-5]
+  // 출처: origin/frontend FeedPage (commit 98693c1 등)
+  // 사유: 기존 window.prompt 단일 입력 → 카테고리 드롭다운 + 상세 사유 분리한 신고 모달로 UX 개선.
+  // 기대효과:
+  //   - 신고 분류(부적절한 홍보/욕설/도용/스팸/기타 등) 통계화 가능.
+  //   - 상세 사유 별도 입력으로 분류 통일성 + 자유 서술 동시 확보.
+  // 장점: dev 의 onReportPost 콜백 시그니처 변경 없음 (combinedReason 으로 묶어 전달).
   const handleReportClick = (post) => {
     if (typeof onReportPost !== "function") {
-      // App.jsx 통합 전(또는 prop 미주입 시) 보호 로직
       alert("신고 기능이 아직 초기화되지 않았습니다.");
       return;
     }
-    const reason = window.prompt(
-      "신고 사유를 입력해주세요.\n(예: 부적절한 홍보, 욕설, 도용 등)",
-    );
-    if (reason && reason.trim()) {
-      onReportPost(post, reason.trim());
-      alert("신고가 접수되었습니다. 관리자가 검토 후 처리합니다.");
+    // 모달을 띄움 — 실제 신고 전송은 handleFinalReport 가 담당.
+    setReportModalPost(post);
+  };
+
+  // 모달의 "신고하기" 버튼 → 카테고리 + 상세 사유 결합 → 상위 onReportPost 호출.
+  const handleFinalReport = () => {
+    if (!reportCategory) {
+      alert("신고 분류를 선택해주세요.");
+      return;
     }
+    const combinedReason = `[${reportCategory}] ${reportDetail.trim() || "(상세 사유 미입력)"}`;
+    onReportPost(reportModalPost, combinedReason);
+    alert("신고가 접수되었습니다. 관리자가 검토 후 처리합니다.");
+    setReportModalPost(null);
+    setReportCategory("");
+    setReportDetail("");
   };
 
   // ── 유틸리티 ──────────────────────────────────────────────────────────────
@@ -903,6 +926,133 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
                   <button type="submit">게시</button>
                 </form>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── [추가 2026-05-13 / frontend 머지 Stage 2-5] 신고 모달 ──
+          출처: origin/frontend FeedPage (commit 98693c1)
+          사유: 기존 window.prompt 단일 입력을 카테고리 + 상세 사유로 분리한 모달로 교체.
+          기대효과: 분류된 신고 데이터 누적 → AdminPage 통계화 가능.
+          장점: dev 의 onReportPost 콜백 시그니처(post, reason) 그대로 유지 — combinedReason 으로 묶어 전달. */}
+      {reportModalPost && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0,0,0,0.6)",
+            zIndex: 2200,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backdropFilter: "blur(4px)",
+          }}
+          onClick={() => {
+            setReportModalPost(null);
+            setReportCategory("");
+            setReportDetail("");
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "white",
+              borderRadius: "16px",
+              width: "90%",
+              maxWidth: "440px",
+              padding: "28px",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 18px", fontSize: "18px", fontWeight: 900, color: "#111" }}>
+              게시물 신고
+            </h3>
+            <p style={{ margin: "0 0 8px", fontSize: "13px", color: "#6b7280", fontWeight: 700 }}>
+              신고 분류 *
+            </p>
+            <select
+              value={reportCategory}
+              onChange={(e) => setReportCategory(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: "10px",
+                border: "1px solid #e5e7eb",
+                fontSize: "14px",
+                marginBottom: "16px",
+                background: "white",
+              }}
+            >
+              <option value="">분류를 선택하세요</option>
+              <option value="부적절한 홍보">부적절한 홍보</option>
+              <option value="욕설/비방">욕설/비방</option>
+              <option value="도용/저작권">도용/저작권</option>
+              <option value="스팸/도배">스팸/도배</option>
+              <option value="음란/혐오">음란/혐오</option>
+              <option value="기타">기타</option>
+            </select>
+
+            <p style={{ margin: "0 0 8px", fontSize: "13px", color: "#6b7280", fontWeight: 700 }}>
+              상세 사유
+            </p>
+            <textarea
+              value={reportDetail}
+              onChange={(e) => setReportDetail(e.target.value)}
+              placeholder="구체적인 신고 사유를 입력해주세요 (선택)"
+              rows={4}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: "10px",
+                border: "1px solid #e5e7eb",
+                fontSize: "14px",
+                resize: "vertical",
+                fontFamily: "inherit",
+              }}
+            />
+
+            <div style={{ display: "flex", gap: "8px", marginTop: "20px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setReportModalPost(null);
+                  setReportCategory("");
+                  setReportDetail("");
+                }}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  border: "1px solid #e5e7eb",
+                  background: "white",
+                  borderRadius: "10px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleFinalReport}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  border: "none",
+                  background: "#ef4444",
+                  color: "white",
+                  borderRadius: "10px",
+                  fontSize: "14px",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                신고하기
+              </button>
             </div>
           </div>
         </div>
