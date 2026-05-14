@@ -161,7 +161,7 @@ const calculateProgressRate = (completedDays, totalDays) => {
   return Math.round((completedDays / totalDays) * 100);
 };
 
-function ChallengePage() {
+function ChallengePage({ onUploadChallengeFeed }) {
   const [allChallenges, setAllChallenges] = useState([]);
   const [joinedChallenges, setJoinedChallenges] = useState([]);
   const [selectedChallengeId, setSelectedChallengeId] = useState(null);
@@ -171,6 +171,8 @@ function ChallengePage() {
   const [challengeProofText, setChallengeProofText] = useState("");
   const [challengeProofFiles, setChallengeProofFiles] = useState([]);
   const [challengeProofs, setChallengeProofs] = useState([]);
+  // 챌린지 인증을 피드에도 올릴지 여부
+  const [challengeUploadToFeed, setChallengeUploadToFeed] = useState(false);
 
   // draft 미리보기 URL 정리용 ref
   const challengeProofObjectUrlsRef = useRef([]);
@@ -323,16 +325,25 @@ function ChallengePage() {
     setSelectedChallengeId(challenge.id);
   };
 
+  // 미리보기 URL 정리 공통 헬퍼
+  const revokeChallengeProofPreviewUrl = (previewUrl) => {
+    if (!previewUrl?.startsWith("blob:")) return;
+
+    URL.revokeObjectURL(previewUrl);
+    challengeProofObjectUrlsRef.current =
+      challengeProofObjectUrlsRef.current.filter((url) => url !== previewUrl);
+  };
+
+  // 파일 배열에 들어 있는 preview URL 일괄 정리
+  const revokeChallengeProofFiles = (files = []) => {
+    files.forEach((file) => {
+      revokeChallengeProofPreviewUrl(file.previewUrl);
+    });
+  };
+
   // draft 파일만 정리하는 헬퍼
   const clearChallengeProofDraftFiles = () => {
-    challengeProofFiles.forEach((file) => {
-      URL.revokeObjectURL(file.previewUrl);
-      challengeProofObjectUrlsRef.current =
-        challengeProofObjectUrlsRef.current.filter(
-          (url) => url !== file.previewUrl,
-        );
-    });
-
+    revokeChallengeProofFiles(challengeProofFiles);
     setChallengeProofFiles([]);
   };
 
@@ -345,13 +356,36 @@ function ChallengePage() {
     // 챌린지 페이지 내부에서만 인증 업로드 UI를 열도록 처리
     setSelectedProofChallenge(challenge);
     setChallengeProofText("");
+    setChallengeUploadToFeed(false);
     clearChallengeProofDraftFiles();
   };
 
   const handleCloseChallengeProof = () => {
     clearChallengeProofDraftFiles();
     setChallengeProofText("");
+    setChallengeUploadToFeed(false);
     setSelectedProofChallenge(null);
+  };
+
+  // 홈의 완료 상태처럼 다시 눌러 오늘 인증을 취소
+  const handleCancelTodayChallengeProof = (challengeId) => {
+    const todayProof = getTodayChallengeProof(challengeId);
+
+    if (!todayProof) return;
+
+    const isConfirmed = window.confirm("오늘 챌린지 인증을 취소하시겠습니까?");
+    if (!isConfirmed) return;
+
+    // 주의:
+    // 챌린지 인증이 피드 mock 게시물과 같은 previewUrl을 공유할 수 있으므로
+    // 취소 시점에는 revokeObjectURL을 바로 호출하지 않습니다.
+    setChallengeProofs((prev) =>
+      prev.filter((proof) => proof.id !== todayProof.id),
+    );
+
+    if (selectedProofChallenge?.id === challengeId) {
+      handleCloseChallengeProof();
+    }
   };
 
   const handleChallengeProofFileChange = (event) => {
@@ -393,11 +427,7 @@ function ChallengePage() {
       const targetFile = prev.find((file) => file.id === fileId);
 
       if (targetFile) {
-        URL.revokeObjectURL(targetFile.previewUrl);
-        challengeProofObjectUrlsRef.current =
-          challengeProofObjectUrlsRef.current.filter(
-            (url) => url !== targetFile.previewUrl,
-          );
+        revokeChallengeProofPreviewUrl(targetFile.previewUrl);
       }
 
       return prev.filter((file) => file.id !== fileId);
@@ -419,6 +449,12 @@ function ChallengePage() {
       return;
     }
 
+    // 루틴 상세 인증과 동일하게, 피드 업로드를 체크했다면 미디어를 필수로 요구
+    if (challengeUploadToFeed && challengeProofFiles.length === 0) {
+      alert("피드에 업로드하려면 사진 또는 영상을 1개 이상 추가해주세요.");
+      return;
+    }
+
     const proofPayload = {
       id: Date.now(),
       challengeId: selectedProofChallenge.id,
@@ -433,8 +469,20 @@ function ChallengePage() {
       await challengeService.submitChallengeProof(proofPayload);
 
     setChallengeProofs((prev) => [savedProof, ...prev]);
+
+    // 챌린지 인증을 같은 피드 페이지에도 보여주기 위한 프론트 mock 업로드
+    if (challengeUploadToFeed && onUploadChallengeFeed) {
+      await onUploadChallengeFeed({
+        challenge: selectedProofChallenge,
+        content: challengeProofText.trim(),
+        files: challengeProofFiles,
+        createdAt: proofPayload.createdAt,
+      });
+    }
+
     setChallengeProofText("");
     setChallengeProofFiles([]);
+    setChallengeUploadToFeed(false);
     setSelectedProofChallenge(null);
   };
 
@@ -517,24 +565,33 @@ function ChallengePage() {
                     </p>
 
                     <div className="challenge-my-card-actions">
-                      {todayProof && (
-                        <p className="challenge-complete-time">
-                          완료 시간:{" "}
-                          {formatChallengeCompletedTime(todayProof.createdAt)}
-                        </p>
+                      {isProofDoneToday ? (
+                        <button
+                          type="button"
+                          className="challenge-complete-box challenge-complete-box-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleCancelTodayChallengeProof(challenge.id);
+                          }}
+                        >
+                          <span className="challenge-complete-icon">✓</span>
+                          <span className="challenge-complete-text">
+                            완료 시간:{" "}
+                            {formatChallengeCompletedTime(todayProof.createdAt)}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="challenge-button challenge-button-outline challenge-proof-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleOpenChallengeProof(challenge);
+                          }}
+                        >
+                          오늘 인증하기
+                        </button>
                       )}
-
-                      <button
-                        type="button"
-                        className="challenge-button challenge-button-outline challenge-proof-button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleOpenChallengeProof(challenge);
-                        }}
-                        disabled={isProofDoneToday}
-                      >
-                        {isProofDoneToday ? "오늘 인증 완료" : "오늘 인증하기"}
-                      </button>
                     </div>
                   </button>
                 );
@@ -647,25 +704,35 @@ function ChallengePage() {
 
                     return (
                       <div className="challenge-proof-action-group">
-                        {todayProof && (
-                          <p className="challenge-complete-time">
-                            완료 시간:{" "}
-                            {formatChallengeCompletedTime(todayProof.createdAt)}
-                          </p>
+                        {isProofDoneToday ? (
+                          <button
+                            type="button"
+                            className="challenge-complete-box challenge-complete-box-button"
+                            onClick={() =>
+                              handleCancelTodayChallengeProof(
+                                selectedChallenge.id,
+                              )
+                            }
+                          >
+                            <span className="challenge-complete-icon">✓</span>
+                            <span className="challenge-complete-text">
+                              완료 시간:{" "}
+                              {formatChallengeCompletedTime(
+                                todayProof.createdAt,
+                              )}
+                            </span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="challenge-button challenge-button-outline challenge-proof-button"
+                            onClick={() =>
+                              handleOpenChallengeProof(selectedChallenge)
+                            }
+                          >
+                            오늘 인증하기
+                          </button>
                         )}
-
-                        <button
-                          type="button"
-                          className="challenge-button challenge-button-outline challenge-proof-button"
-                          onClick={() =>
-                            handleOpenChallengeProof(selectedChallenge)
-                          }
-                          disabled={isProofDoneToday}
-                        >
-                          {isProofDoneToday
-                            ? "오늘 인증 완료"
-                            : "오늘 인증하기"}
-                        </button>
                       </div>
                     );
                   })()}
@@ -708,6 +775,17 @@ function ChallengePage() {
                       <p className="challenge-proof-help">
                         사진/영상은 최대 3개까지 업로드할 수 있습니다.
                       </p>
+
+                      <label className="feed-upload-check">
+                        <input
+                          type="checkbox"
+                          checked={challengeUploadToFeed}
+                          onChange={(event) =>
+                            setChallengeUploadToFeed(event.target.checked)
+                          }
+                        />
+                        <span>피드에도 업로드하기</span>
+                      </label>
 
                       {challengeProofFiles.length > 0 && (
                         <div className="proof-preview-list">

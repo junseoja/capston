@@ -249,6 +249,12 @@ function HomePage({
       return;
     }
 
+    // 피드 업로드를 체크했다면 사진/영상이 반드시 1개 이상 있어야 함
+    if (uploadToFeed && selectedFiles.length === 0) {
+      alert("피드에 업로드하려면 사진 또는 영상을 1개 이상 추가해주세요.");
+      return;
+    }
+
     // 유효성 검사 2: 인증 글 200자 초과 제한
     // (textarea에 maxLength={200}도 설정되어 있지만 이중 검사)
     if (proofText.length > 200) {

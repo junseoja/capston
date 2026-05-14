@@ -2148,6 +2148,41 @@ textarea::placeholder {
   gap: 8px;
 }
 
+.challenge-complete-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+}
+
+.challenge-complete-box-button {
+  width: 100%;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.challenge-complete-box-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(16, 185, 129, 0.14);
+}
+
+.challenge-complete-icon {
+  color: #059669;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.challenge-complete-text {
+  color: #047857;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .challenge-complete-time {
   margin: 0;
   font-size: 13px;
@@ -2172,7 +2207,9 @@ textarea::placeholder {
 .challenge-my-card-actions {
   margin-top: 14px;
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 .challenge-proof-panel {

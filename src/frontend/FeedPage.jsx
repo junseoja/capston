@@ -12,7 +12,10 @@
 //   currentUser - 현재 로그인한 유저 정보 ({ user_id, nickname, ... })
 // ============================================================
 
-import { useEffect, useState, useCallback, useRef } from "react";
+// [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] useMemo 추가
+// 사유: 챌린지 mock 피드(extraMockPosts)와 자체 피드(feedPosts)를 합쳐 정렬하는 mergedFeedPosts 계산용.
+// 장점: 매 렌더마다 정렬을 반복하지 않고, 두 배열 중 하나라도 바뀔 때만 재계산.
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { EXPRESS_URL } from "./config";
 
 // [수정 2026-05-03] 한 번에 가져올 페이지 크기 — FastAPI Query(limit) 와 동일한 의미
@@ -24,7 +27,12 @@ const PAGE_SIZE = 20;
 //        구현된 상태였고, frontend 신기능 중 미구현이었던 신고 기능만 선별 머지.
 // 기대효과: 카드 및 모달에서 🚩 신고 버튼 클릭 → 사유 입력 → 상위 onReportPost 콜백으로 전달.
 // 장점: dev 의 백엔드 API 연결(POST /like, /comment 등)을 100% 보존하면서 UX 통일성 유지.
-function FeedPage({ currentUser, onReportPost }) {
+// [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] extraMockPosts props 추가
+// 출처: origin/frontend-cy commit a5075ce
+// 사유: 챌린지 mock 피드 게시물을 부모(App.jsx)로부터 주입받아 자체 백엔드 피드와 합쳐 표시.
+// 기대효과: 챌린지 인증이 즉시 피드 화면에 나타남 (백엔드 챌린지 피드 API 미구현 상태에서 데모용).
+// 장점: 미주입(기본값 [])이면 기존 동작 그대로 → 후방 호환.
+function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
   // 피드 목록 (DB에서 조회, 최신순) — 페이지가 로드될 때마다 누적
   const [feedPosts, setFeedPosts] = useState([]);
 
@@ -46,8 +54,17 @@ function FeedPage({ currentUser, onReportPost }) {
   const [currentMediaIndexes, setCurrentMediaIndexes] = useState({});
 
   // 현재 선택된 피드 객체
+  // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
+  // 사유: 챌린지 mock 피드(extraMockPosts) + 자체 백엔드 피드(feedPosts) 합쳐 최신순 정렬.
+  // 장점: 두 배열 중 하나라도 바뀔 때만 재계산 → 매 렌더 정렬 부담 없음.
+  const mergedFeedPosts = useMemo(() => {
+    return [...extraMockPosts, ...feedPosts].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at),
+    );
+  }, [extraMockPosts, feedPosts]);
+
   const selectedPost =
-    feedPosts.find((post) => post.feed_id === selectedPostId) ?? null;
+    mergedFeedPosts.find((post) => post.feed_id === selectedPostId) ?? null;
 
   // ── 피드 목록 조회 ────────────────────────────────────────────────────────
 
@@ -414,7 +431,10 @@ function FeedPage({ currentUser, onReportPost }) {
    */
   const getImageUrl = (fileUrl) => {
     if (!fileUrl) return "";
-    if (fileUrl.startsWith("http")) return fileUrl;
+    // [수정 2026-05-13 / frontend-cy 머지 (a5075ce)]
+    // 사유: 챌린지 mock 피드 게시물은 file_url 이 blob: 로컬 URL → 그대로 사용해야 함.
+    // 장점: 한 함수가 백엔드 URL(/uploads/...), 절대 URL(http...), mock URL(blob:) 셋 다 처리.
+    if (fileUrl.startsWith("http") || fileUrl.startsWith("blob:")) return fileUrl;
     return `${EXPRESS_URL}${fileUrl}`;
   };
 
@@ -475,7 +495,9 @@ function FeedPage({ currentUser, onReportPost }) {
     );
   }
 
-  if (!feedPosts || feedPosts.length === 0) {
+  // [수정 2026-05-13 / frontend-cy 머지 (a5075ce)] mergedFeedPosts 기준으로 빈 상태 판정
+  // 사유: 자체 피드 0건이어도 챌린지 mock 피드가 있으면 빈 상태로 표시하면 안 됨.
+  if (!mergedFeedPosts || mergedFeedPosts.length === 0) {
     return (
       <div className="feed-page instagram-feed-page">
         <div className="feed-header">
@@ -506,7 +528,12 @@ function FeedPage({ currentUser, onReportPost }) {
         </div>
 
         <div className="instagram-feed-list">
-          {feedPosts.map((post) => {
+          {/* [수정 2026-05-13 / frontend-cy 머지 (a5075ce)] mergedFeedPosts 로 렌더링 — 챌린지 mock 피드 포함 */}
+          {mergedFeedPosts.map((post) => {
+            // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
+            // 사유: 챌린지 게시물 판별 — source_type 메타 필드로 확인.
+            // 기대효과: 챌린지 배지 표시 + 좋아요/댓글 버튼 비활성 처리에 사용.
+            const isChallengePost = post.source_type === "challenge";
             const currentMediaIndex = getCurrentMediaIndex(
               post.feed_id,
               post.images,
@@ -528,6 +555,12 @@ function FeedPage({ currentUser, onReportPost }) {
                     {post.category && (
                       <span className="instagram-feed-info-badge">
                         {post.category}
+                      </span>
+                    )}
+                    {/* [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] 챌린지 인증 배지 */}
+                    {isChallengePost && (
+                      <span className="instagram-feed-info-badge">
+                        챌린지 인증
                       </span>
                     )}
                   </div>
@@ -610,12 +643,21 @@ function FeedPage({ currentUser, onReportPost }) {
                     {post.content || "오늘 루틴 인증 완료!"}
                   </p>
 
-                  {/* 좋아요 / 댓글 버튼 */}
+                  {/* 좋아요 / 댓글 버튼
+                      [수정 2026-05-13 / frontend-cy 머지 (a5075ce)]
+                      사유: 챌린지 mock 피드는 백엔드 좋아요/댓글 API 가 없으므로 버튼 비활성화 + tooltip 안내.
+                      장점: 사용자가 클릭해서 404 응답 보지 않도록 사전 차단. */}
                   <div className="instagram-feed-action-row">
                     <button
                       type="button"
                       className={`instagram-feed-action-btn instagram-feed-like-btn ${post.liked ? "liked" : ""}`}
                       onClick={() => handleToggleLike(post.feed_id)}
+                      disabled={isChallengePost}
+                      title={
+                        isChallengePost
+                          ? "챌린지 mock 피드의 좋아요 기능은 추후 연동 예정입니다."
+                          : undefined
+                      }
                     >
                       <span className="instagram-feed-icon">
                         {post.liked ? "♥" : "♡"}
@@ -627,6 +669,12 @@ function FeedPage({ currentUser, onReportPost }) {
                       type="button"
                       className="instagram-feed-action-btn instagram-feed-comment-btn"
                       onClick={() => openCommentModal(post.feed_id)}
+                      disabled={isChallengePost}
+                      title={
+                        isChallengePost
+                          ? "챌린지 mock 피드의 댓글 기능은 추후 연동 예정입니다."
+                          : undefined
+                      }
                     >
                       <span className="instagram-feed-icon">💬</span>
                       <span>{post.comment_count || 0}</span>
@@ -655,7 +703,8 @@ function FeedPage({ currentUser, onReportPost }) {
             </p>
           )}
 
-          {!hasMore && feedPosts.length > 0 && (
+          {/* [수정 2026-05-13 / frontend-cy 머지 (a5075ce)] mergedFeedPosts 기준 (챌린지 mock 포함) */}
+          {!hasMore && mergedFeedPosts.length > 0 && (
             <p
               style={{ textAlign: "center", color: "#9ca3af", padding: "12px" }}
             >

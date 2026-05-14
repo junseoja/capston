@@ -67,6 +67,16 @@ function App() {
     // 라우트 리다이렉트를 바로 수행하지 않기 위한 플래그
     const [authChecked, setAuthChecked] = useState(false);
 
+    // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
+    // 출처: origin/frontend-cy commit a5075ce "feat: 챌린지 피드 기능 수정"
+    // 사유: 챌린지 인증을 프론트 mock 피드에 합쳐 보여주기 위한 상태.
+    //       챌린지 인증 시 "피드에 업로드" 체크 → uploadChallengeProofToFeed 가 이 배열에 추가 →
+    //       FeedPage 가 extraMockPosts 로 받아 자체 백엔드 피드와 합쳐 표시.
+    // 기대효과: 챌린지 인증 흐름의 피드 노출이 즉시 가능 (백엔드 챌린지 피드 API 미구현 상태에서 데모용).
+    // 장점: 백엔드 챌린지 피드 API 가 추가되면 이 상태 + 핸들러만 제거하면 됨 (격리됨).
+    // TODO: 추후 챌린지 피드 백엔드 API 연동 시 제거 가능
+    const [challengeMockFeedPosts, setChallengeMockFeedPosts] = useState([]);
+
     // ── [추가 2026-05-12 / frontend 머지 7/7] 관리자/신고/제재 알림 상태 ──
     // 출처: origin/frontend src/App.jsx (commits f387027, 56bc7cc, 8c9c6a2)
     // 사유:
@@ -344,6 +354,14 @@ function App() {
      * @returns {boolean} 완료 성공 여부
      */
     const completeDetailRoutine = async (id, proofText, proofFiles, uploadToFeed) => {
+        // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
+        // 사유: 피드 업로드 체크 시 파일 없으면 차단 (부모에서 한 번 더 방어).
+        // 기대효과: HomePage 검증이 어떤 이유로 우회되어도 빈 피드 게시물 생성 방지.
+        // 장점: 백엔드까지 잘못된 요청이 가는 비용 절감.
+        if (uploadToFeed && (proofFiles?.length ?? 0) === 0) {
+            alert("피드에 업로드하려면 사진 또는 영상을 1개 이상 추가해주세요.");
+            return false;
+        }
         const now = new Date();
         const timeText = now.toLocaleTimeString("ko-KR", {
             hour: "2-digit",
@@ -595,6 +613,55 @@ function App() {
         ]);
     };
 
+    // ── [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] 챌린지 인증 → 피드 업로드 (mock) ──
+    /**
+     * uploadChallengeProofToFeed - 챌린지 인증을 프론트 mock 피드 목록에 추가.
+     * 출처: origin/frontend-cy commit a5075ce
+     * 사유: ChallengePage 에서 "피드에 업로드" 체크 시 호출되어 챌린지 인증을 mock 피드로 노출.
+     * 기대효과: 백엔드 챌린지 피드 API 미구현 상태에서도 데모/시연 가능.
+     * 장점:
+     *   - 파일이 없으면 미리 차단 (alert) → 빈 피드 생성 방지.
+     *   - 게시물에 source_type: "challenge" + challenge_id/title/category 메타 첨부 →
+     *     FeedPage 가 챌린지 배지 표시 및 좋아요/댓글 비활성 처리 가능.
+     *   - mockPost.feed_id 를 `challenge-feed-${Date.now()}` 로 두어 진짜 피드와 충돌 없음.
+     * TODO: 추후 백엔드 챌린지 피드 API 추가 시 fetch 호출로 교체.
+     */
+    const uploadChallengeProofToFeed = async ({
+        challenge,
+        content,
+        files,
+        createdAt,
+    }) => {
+        if (!files || files.length === 0) {
+            alert("피드에 업로드하려면 사진 또는 영상을 1개 이상 추가해주세요.");
+            return false;
+        }
+        const mockFeedId = `challenge-feed-${Date.now()}`;
+        const mockPost = {
+            feed_id: mockFeedId,
+            nickname: currentUser?.nickname ?? "나",
+            routine_title: `[챌린지] ${challenge.title}`,
+            category: challenge.category,
+            content,
+            liked: false,
+            like_count: 0,
+            comment_count: 0,
+            comments: [],
+            created_at: createdAt,
+            images: files.map((file, index) => ({
+                image_id: `${mockFeedId}-${index}`,
+                file_url: file.previewUrl,
+                file_type: file.type,
+            })),
+            source_type: "challenge",
+            challenge_id: challenge.id,
+            challenge_title: challenge.title,
+            challenge_category: challenge.category,
+        };
+        setChallengeMockFeedPosts((prev) => [mockPost, ...prev]);
+        return true;
+    };
+
     // ── 로그아웃 처리 ─────────────────────────────────────────────────────────
 
     /**
@@ -630,6 +697,10 @@ function App() {
         // 장점: deleteNotifications 는 의도적으로 보존(영구화) → 알림은 다음 접속 시에도 확인 가능.
         setIsAdmin(false);
         setReports([]);
+        // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
+        // 사유: 로그아웃 시 챌린지 mock 피드도 함께 초기화 (다음 유저에게 이전 데이터 노출 방지).
+        // 장점: 동일 브라우저 다른 계정 로그인 시 깨끗한 챌린지 피드 상태로 시작.
+        setChallengeMockFeedPosts([]);
         navigate("/login");
     };
 
@@ -739,6 +810,10 @@ function App() {
                                     // 사유: 2단계 FeedPage 의 신고 콜백 주입.
                                     // 기대효과: 🚩 신고 버튼 클릭 → reports 큐 누적 → AdminPage 노출.
                                     onReportPost={handleReportPost}
+                                    // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
+                                    // 사유: 챌린지 mock 피드 게시물 주입 → FeedPage 가 mergedFeedPosts 로 합쳐 표시.
+                                    // 기대효과: 챌린지 인증이 피드 화면에 즉시 노출 (백엔드 미구현 상태에서 데모용).
+                                    extraMockPosts={challengeMockFeedPosts}
                                 />
                                 : <Navigate to="/login" />
                         }
@@ -784,7 +859,16 @@ function App() {
                         장점: 다른 보호 라우트와 동일한 isLoggedIn 가드 패턴 사용 → 일관성↑. */}
                     <Route
                         path="/challenge"
-                        element={isLoggedIn ? <ChallengePage /> : <Navigate to="/login" />}
+                        element={
+                            isLoggedIn
+                                ? <ChallengePage
+                                    // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
+                                    // 사유: 챌린지 인증 "피드에 업로드" 핸들러 주입.
+                                    // 기대효과: ChallengePage 가 인증 완료 시 이 콜백을 호출해 mock 피드에 추가.
+                                    onUploadChallengeFeed={uploadChallengeProofToFeed}
+                                />
+                                : <Navigate to="/login" />
+                        }
                     />
 
                     {/* 정의되지 않은 URL 접근 시 상태에 따라 홈 또는 로그인으로 리다이렉트 */}
