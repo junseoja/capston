@@ -36,6 +36,12 @@ function HomePage({
   // [추가 2026-05-12] 관리자 제재 알림 연동용 props (미주입 시 기본값으로 안전)
   deleteNotifications = [],
   setDeleteNotifications,
+  // [추가 2026-05-13 / frontend 머지 Stage 2-4]
+  // 출처: origin/frontend commits 6eaa438 / 1466600 / 576801f / adde39d / 98693c1
+  // 사유: 관리자가 작성한 공지사항을 홈 진입 시 모달로 노출.
+  // 기대효과: notices 배열 받으면 "보지 않은 공지" 중 첫 번째를 모달로 표시.
+  // 장점: 미주입 시 기본값 [] → 후방 호환.
+  notices = [],
 }) {
   // ── 날짜 계산 ─────────────────────────────────────────────────────────────
 
@@ -333,12 +339,218 @@ function HomePage({
     setDeleteNotifications((prev) => prev.filter((noti) => noti.id !== id));
   };
 
+  // ── [추가 2026-05-13 / frontend 머지 Stage 2-4] 공지사항 노출 제어 (24시간 / 세션) ──
+  // 출처: origin/frontend commits 6eaa438 / 576801f
+  // 사유:
+  //   - 관리자가 작성한 공지사항을 홈 진입 시 노출.
+  //   - "오늘 하루 열지 않기" → localStorage 에 24시간 만료 timestamp 저장.
+  //   - "닫기" → sessionStorage 에 세션 동안만 숨김.
+  //   - 여러 공지가 있을 때 한 번에 하나씩 순차 노출.
+  // 장점:
+  //   - 사용자 피로도 최소화 (선택적 차단 옵션).
+  //   - 다음 공지로 자동 전환.
+  const [activeNotice, setActiveNotice] = useState(null);
+
+  useEffect(() => {
+    if (!notices || notices.length === 0) {
+      setActiveNotice(null);
+      return;
+    }
+    const now = new Date().getTime();
+    const unread = notices.filter((notice) => {
+      const hideUntil = localStorage.getItem(`hide_notice_${notice.id}`);
+      const isPermanentlyHidden = hideUntil && now < parseInt(hideUntil, 10);
+      const isSessionHidden = sessionStorage.getItem(`session_hide_${notice.id}`);
+      return !isPermanentlyHidden && !isSessionHidden;
+    });
+    setActiveNotice(unread.length > 0 ? unread[0] : null);
+  }, [notices]);
+
+  // 다음 대기 공지로 넘기는 헬퍼
+  const refreshNoticeList = () => {
+    const now = new Date().getTime();
+    const nextUnread = notices.filter((notice) => {
+      const hideUntil = localStorage.getItem(`hide_notice_${notice.id}`);
+      const isPermanentlyHidden = hideUntil && now < parseInt(hideUntil, 10);
+      const isSessionHidden = sessionStorage.getItem(`session_hide_${notice.id}`);
+      return !isPermanentlyHidden && !isSessionHidden;
+    });
+    if (nextUnread.length > 0) {
+      const filtered = nextUnread.filter((n) => n.id !== activeNotice?.id);
+      setActiveNotice(filtered.length > 0 ? filtered[0] : null);
+    } else {
+      setActiveNotice(null);
+    }
+  };
+
+  // "닫기" — 세션 단위만 숨김
+  const handleSimpleCloseNotice = () => {
+    if (!activeNotice) return;
+    sessionStorage.setItem(`session_hide_${activeNotice.id}`, "true");
+    refreshNoticeList();
+  };
+
+  // "오늘 하루 열지 않기" — 24시간 숨김
+  const handleHideNoticeToday = (e) => {
+    if (e.target.checked && activeNotice) {
+      const expiry = new Date().getTime() + 24 * 60 * 60 * 1000;
+      localStorage.setItem(`hide_notice_${activeNotice.id}`, expiry.toString());
+      refreshNoticeList();
+    }
+  };
+
   const currentSection = getTimeTitle();
 
   // ── 렌더링 ────────────────────────────────────────────────────────────────
 
   return (
     <div className="home">
+      {/* ── [추가 2026-05-13 / frontend 머지 Stage 2-4 - 공지사항 노출 모달] ──
+          출처: origin/frontend commits 6eaa438 / 576801f / 98693c1.
+          사유: 관리자가 작성한 공지사항을 홈 진입 시 1개씩 순차 노출.
+          기대효과:
+            - "닫기" → 세션 단위만 숨김 (브라우저 닫으면 다시 보임)
+            - "오늘 하루 열지 않기" → 24시간 동안 숨김 (localStorage 영속)
+            - 다음 대기 공지로 자동 전환
+          장점: z-index 10001 로 관리자 제재 알림(9999) 보다 위에 표시. */}
+      {activeNotice && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0,0,0,0.6)",
+            zIndex: 10001,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "24px",
+              width: "95%",
+              maxWidth: "480px",
+              overflow: "hidden",
+              boxShadow: "0 20px 50px rgba(0,0,0,0.3)",
+              border: "1px solid #eee",
+            }}
+          >
+            <div style={{ padding: "40px 30px 30px", textAlign: "center" }}>
+              <div style={{ marginBottom: "15px" }}>
+                <span
+                  style={{
+                    background: "#eef2ff",
+                    color: "#4f46e5",
+                    padding: "6px 16px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: "900",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                  }}
+                >
+                  {activeNotice.category}
+                </span>
+              </div>
+              <h2
+                style={{
+                  fontSize: "24px",
+                  fontWeight: "900",
+                  color: "#111",
+                  margin: "0 0 20px",
+                  lineHeight: "1.4",
+                }}
+              >
+                {activeNotice.title}
+              </h2>
+              <div
+                style={{
+                  padding: "20px",
+                  background: "#f9fafb",
+                  borderRadius: "16px",
+                  border: "1px solid #f1f1f1",
+                  textAlign: "left",
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: "15px",
+                    color: "#444",
+                    lineHeight: "1.7",
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    fontWeight: "600",
+                  }}
+                >
+                  {activeNotice.content}
+                </p>
+              </div>
+              <div style={{ marginTop: "15px", textAlign: "right" }}>
+                <span style={{ fontSize: "11px", color: "#bbb", fontWeight: "700" }}>
+                  {activeNotice.date}
+                </span>
+              </div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "15px 25px",
+                background: "#4f46e5",
+                color: "white",
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  userSelect: "none",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  onChange={handleHideNoticeToday}
+                  style={{
+                    width: "18px",
+                    height: "18px",
+                    cursor: "pointer",
+                    accentColor: "white",
+                  }}
+                />
+                <span style={{ fontWeight: "800", color: "rgba(255,255,255,0.95)" }}>
+                  오늘 하루 열지 않기
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={handleSimpleCloseNotice}
+                style={{
+                  background: "rgba(255,255,255,0.15)",
+                  border: "none",
+                  color: "white",
+                  padding: "8px 20px",
+                  borderRadius: "12px",
+                  fontWeight: "900",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                }}
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── [추가 2026-05-12 / frontend 머지 3/7 - 관리자 제재 알림 중앙 모달] ──
           출처: origin/frontend commit 56bc7cc.
           사유: 관리자가 신고된 게시글을 삭제(제재)하면, 작성자가 다음 접속 시 모달로 안내받음.
