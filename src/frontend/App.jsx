@@ -45,6 +45,13 @@ import ChallengePage from "./ChallengePage";
 // 기대효과: 로그인 시 id="admin" 이면 /admin 으로 진입, 일반 유저는 접근 차단.
 // 장점: 다른 보호 라우트와 동일한 isLoggedIn 가드 패턴 + 추가 관리자 권한 가드 한 줄로 처리.
 import AdminPage from "./AdminPage";
+// [추가 2026-05-13 / frontend 머지 Stage 2-7]
+// 출처: origin/frontend commits adde39d / 98693c1 (공지사항 리스트/상세 페이지)
+// 사유: Stage 2-1, 2-2 에서 추가한 NoticeList / NoticeDetail 컴포넌트를 라우트 등록.
+// 기대효과: /notice 로 리스트, /notice/detail 로 상세 페이지 접근 가능.
+// 장점: react-router 라우트 패턴으로 통일 (frontend 원본의 page-state 패턴 대신).
+import NoticeList from "./NoticeList";
+import NoticeDetail from "./NoticeDetail";
 
 function App() {
     // useNavigate: URL 이동을 프로그래밍적으로 처리 (예: 로그인 후 "/" 로 이동)
@@ -100,6 +107,30 @@ function App() {
         }
     });
     const [isAdmin, setIsAdmin] = useState(false);
+
+    // [추가 2026-05-13 / frontend 머지 Stage 2-7] 공지사항 전역 상태
+    // 출처: origin/frontend commit 1466600 "공지사항 전역 상태 관리 및 로그아웃 세션 초기화"
+    // 사유: AdminPage 가 작성한 공지를 HomePage 모달 + NoticeList 페이지가 모두 공유.
+    // 기대효과: localStorage 로 영속화 → 새로고침/재로그인 후에도 공지 유지.
+    // 장점: 단일 진실 공급원(SSOT) 패턴 — App.jsx 가 notices 데이터 한 곳에 모음.
+    const [notices, setNotices] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem("notices") || "[]");
+        } catch {
+            return [];
+        }
+    });
+    // 공지사항 상세 페이지에서 표시할 항목 (NoticeList 에서 클릭 → setSelectedNotice)
+    const [selectedNotice, setSelectedNotice] = useState(null);
+
+    // notices 변경 시 localStorage 동기화
+    useEffect(() => {
+        try {
+            localStorage.setItem("notices", JSON.stringify(notices));
+        } catch {
+            // 저장소 미지원/쿼터 초과 시 무시
+        }
+    }, [notices]);
 
     // deleteNotifications 변경 시 localStorage 동기화 (새로고침 후에도 모달 유지)
     useEffect(() => {
@@ -701,6 +732,10 @@ function App() {
         // 사유: 로그아웃 시 챌린지 mock 피드도 함께 초기화 (다음 유저에게 이전 데이터 노출 방지).
         // 장점: 동일 브라우저 다른 계정 로그인 시 깨끗한 챌린지 피드 상태로 시작.
         setChallengeMockFeedPosts([]);
+        // [추가 2026-05-13 / frontend 머지 Stage 2-7]
+        // 사유: 로그아웃 시 공지 상세 선택 상태 초기화 (notices 자체는 localStorage 보존).
+        // 장점: 다른 계정 로그인 시 이전 유저가 보던 공지 상세가 노출되지 않음.
+        setSelectedNotice(null);
         navigate("/login");
     };
 
@@ -730,6 +765,10 @@ function App() {
                             기대효과: 상단 네비게이션에서 /challenge 즉시 이동 가능.
                             장점: 사용자 동선 단축, 다른 메뉴들과 통일된 진입 방식 제공. */}
                         <button onClick={() => navigate("/challenge")}>챌린지</button>
+                        {/* [추가 2026-05-13 / frontend 머지 Stage 2-7]
+                            사유: 공지사항 리스트 페이지 진입점.
+                            기대효과: 사용자가 언제든 공지 목록 확인 가능. */}
+                        <button onClick={() => navigate("/notice")}>공지사항</button>
                         {/* [추가 2026-05-12 / frontend 머지 7/7 - 관리자 메뉴]
                             사유: 관리자만 보이는 상단 네비 진입점.
                             기대효과: isAdmin 일 때만 표시 → 일반 유저는 깔끔한 메뉴 유지.
@@ -783,6 +822,10 @@ function App() {
                                     // 기대효과: AdminPage 에서 제재 → 작성자가 홈 진입 시 모달로 안내.
                                     deleteNotifications={deleteNotifications}
                                     setDeleteNotifications={setDeleteNotifications}
+                                    // [추가 2026-05-13 / frontend 머지 Stage 2-7]
+                                    // 사유: HomePage Stage 2-4 에서 추가한 공지사항 노출 모달이 사용할 notices 주입.
+                                    // 기대효과: AdminPage 에서 공지 작성 → 홈 진입 시 모달로 안내.
+                                    notices={notices}
                                 />
                                 : <Navigate to="/login" />
                         }
@@ -836,8 +879,49 @@ function App() {
                                     ? <AdminPage
                                         reports={reports}
                                         onDeleteConfirm={handleDeleteConfirm}
+                                        // [추가 2026-05-13 / frontend 머지 Stage 2-7]
+                                        // 사유: Stage 2-3 AdminPage 의 공지 작성/수정 기능이 사용할 props 주입.
+                                        // 기대효과: AdminPage 가 setNotices 로 작성 → 즉시 localStorage 영속 →
+                                        //          HomePage 모달 + NoticeList 에 반영.
+                                        notices={notices}
+                                        setNotices={setNotices}
                                     />
                                     : <Navigate to="/" />
+                        }
+                    />
+
+                    {/* [추가 2026-05-13 / frontend 머지 Stage 2-7 - 공지사항 라우트]
+                        사유: Stage 2-1/2-2 에서 추가한 NoticeList / NoticeDetail 컴포넌트 라우팅 등록.
+                        가드: 로그인 사용자만 접근.
+                        주의: NoticeList 의 setPage 는 frontend 원본 page-state 패턴 → useNavigate adapt.
+                              setSelectedNotice 는 App.jsx 상태와 직결. */}
+                    <Route
+                        path="/notice"
+                        element={
+                            isLoggedIn
+                                ? <NoticeList
+                                    notices={notices}
+                                    setPage={(pageKey) => {
+                                        // frontend 원본: setPage("notice_detail") → react-router 로 매핑
+                                        if (pageKey === "notice_detail") navigate("/notice/detail");
+                                    }}
+                                    setSelectedNotice={setSelectedNotice}
+                                />
+                                : <Navigate to="/login" />
+                        }
+                    />
+                    <Route
+                        path="/notice/detail"
+                        element={
+                            isLoggedIn
+                                ? <NoticeDetail
+                                    notice={selectedNotice}
+                                    setPage={(pageKey) => {
+                                        // frontend 원본: setPage("notice") → 목록으로 복귀
+                                        if (pageKey === "notice") navigate("/notice");
+                                    }}
+                                />
+                                : <Navigate to="/login" />
                         }
                     />
 
