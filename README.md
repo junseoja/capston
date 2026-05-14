@@ -457,8 +457,14 @@ users
   │           └── feeds (1:1)
   │                 ├── feed_images (1:N)
   │                 ├── feed_likes (1:N)
-  │                 └── feed_comments (1:N)
-  └── feed_likes (1:N)
+  │                 ├── feed_comments (1:N)
+  │                 └── reports (1:N)              ← [추가 2026-05-13]
+  ├── feed_likes (1:N)
+  ├── challenges (1:N, created_by)                 ← [추가 2026-05-13]
+  │     ├── challenge_participants (1:N)
+  │     └── challenge_proofs (1:N)
+  │           └── challenge_proof_files (1:N)
+  └── notices (1:N, created_by)                    ← [추가 2026-05-13]
 ```
 
 ### users
@@ -551,26 +557,148 @@ users
 
 ---
 
+### 📌 2026-05-13 추가 테이블 (관리자 + 챌린지 시스템)
+
+DDL 원본: `docs/migrations-2026-05-13-admin-challenge.sql`
+
+#### challenges
+
+| 컬럼 | 타입 | NULL | KEY | 기본값 | 설명 |
+|---|---|---|---|---|---|
+| challenge_id | CHAR(36) | NO | PRI | — | UUID v7 기본키 |
+| title | VARCHAR(100) | NO | — | — | 챌린지 제목 |
+| description | TEXT | YES | — | NULL | 챌린지 설명 |
+| category | VARCHAR(50) | YES | — | NULL | 운동/공부/미라클모닝/건강/생활습관 등 (자유) |
+| start_date | DATE | NO | — | — | 시작일 |
+| end_date | DATE | NO | — | — | 종료일 |
+| total_days | INT UNSIGNED | NO | — | — | 총 진행 일수 |
+| participant_count | INT UNSIGNED | NO | — | 0 | 참여자 수 캐시 |
+| created_by | CHAR(36) | YES | FK | NULL | 생성 관리자 user_id |
+| created_at | DATETIME | NO | — | CURRENT_TIMESTAMP | 생성일 |
+| updated_at | DATETIME | NO | — | CURRENT_TIMESTAMP ON UPDATE | 수정일 |
+| deleted_at | DATETIME | YES | — | NULL | Soft Delete |
+| — | CHECK | — | — | — | `start_date <= end_date` |
+
+#### challenge_participants
+
+| 컬럼 | 타입 | NULL | KEY | 기본값 | 설명 |
+|---|---|---|---|---|---|
+| participant_id | CHAR(36) | NO | PRI | — | UUID v7 기본키 |
+| challenge_id | CHAR(36) | NO | FK | — | 챌린지 외래키 (CASCADE) |
+| user_id | CHAR(36) | NO | FK | — | 유저 외래키 |
+| joined_at | DATETIME | NO | — | CURRENT_TIMESTAMP | 참여일 |
+| status | ENUM('ACTIVE','COMPLETED','STOPPED') | NO | — | 'ACTIVE' | 참여 상태 |
+| created_at | DATETIME | NO | — | CURRENT_TIMESTAMP | 생성일 |
+| updated_at | DATETIME | NO | — | CURRENT_TIMESTAMP ON UPDATE | 수정일 |
+| — | UNIQUE | — | UNI | — | (challenge_id + user_id) 중복 참여 방지 |
+
+#### challenge_proofs
+
+| 컬럼 | 타입 | NULL | KEY | 기본값 | 설명 |
+|---|---|---|---|---|---|
+| proof_id | CHAR(36) | NO | PRI | — | UUID v7 기본키 |
+| challenge_id | CHAR(36) | NO | FK | — | 챌린지 외래키 (CASCADE) |
+| user_id | CHAR(36) | NO | FK | — | 유저 외래키 |
+| content | TEXT | YES | — | NULL | 인증 글 |
+| proof_date | DATE | NO | — | — | 하루 1회 인증 제한 기준 |
+| created_at | DATETIME | NO | — | CURRENT_TIMESTAMP | 생성일 |
+| deleted_at | DATETIME | YES | — | NULL | Soft Delete |
+| — | UNIQUE | — | UNI | — | (challenge_id + user_id + proof_date) 하루 2회 방지 |
+
+#### challenge_proof_files
+
+| 컬럼 | 타입 | NULL | KEY | 기본값 | 설명 |
+|---|---|---|---|---|---|
+| proof_file_id | CHAR(36) | NO | PRI | — | UUID v7 기본키 |
+| proof_id | CHAR(36) | NO | FK | — | 인증 외래키 (CASCADE) |
+| file_url | VARCHAR(500) | NO | — | — | S3 URL |
+| file_type | VARCHAR(50) | NO | — | — | image/jpeg, video/mp4 등 (feed_images 와 통일) |
+| file_order | INT UNSIGNED | NO | — | 0 | 표시 순서 |
+| created_at | DATETIME | NO | — | CURRENT_TIMESTAMP | 등록일 |
+
+#### notices
+
+| 컬럼 | 타입 | NULL | KEY | 기본값 | 설명 |
+|---|---|---|---|---|---|
+| notice_id | CHAR(36) | NO | PRI | — | UUID v7 기본키 |
+| category | ENUM('일반','이벤트','점검','업데이트') | NO | — | — | NoticeList 필터와 일치 |
+| title | VARCHAR(255) | NO | — | — | 공지 제목 |
+| content | TEXT | NO | — | — | 공지 본문 |
+| post_date | DATE | NO | — | — | 리스트 표시용 게시일 |
+| created_by | CHAR(36) | YES | FK | NULL | 작성 관리자 user_id |
+| created_at | DATETIME | NO | — | CURRENT_TIMESTAMP | 생성일 |
+| updated_at | DATETIME | NO | — | CURRENT_TIMESTAMP ON UPDATE | 수정일 |
+| deleted_at | DATETIME | YES | — | NULL | Soft Delete |
+
+#### reports
+
+| 컬럼 | 타입 | NULL | KEY | 기본값 | 설명 |
+|---|---|---|---|---|---|
+| report_id | CHAR(36) | NO | PRI | — | UUID v7 기본키 |
+| feed_id | CHAR(36) | NO | FK | — | 신고된 게시글 외래키 |
+| reporter_user_id | CHAR(36) | NO | FK | — | 신고한 사용자 user_id |
+| target_user_id | CHAR(36) | NO | FK | — | 게시글 작성자 user_id |
+| report_category | ENUM(6종) | NO | — | — | 욕설/비방, 부적절한 홍보, 도용/저작권, 스팸/도배, 음란/혐오, 기타 |
+| report_detail | TEXT | YES | — | NULL | 상세 사유 (선택) |
+| status | ENUM('pending','completed') | NO | — | 'pending' | 처리 상태 |
+| admin_comment | TEXT | YES | — | NULL | 관리자가 제재 시 작성 |
+| processed_by | CHAR(36) | YES | FK | NULL | 처리한 관리자 user_id |
+| created_at | DATETIME | NO | — | CURRENT_TIMESTAMP | 신고 접수 시각 |
+| processed_at | DATETIME | YES | — | NULL | 관리자 조치 완료 시각 |
+| deleted_at | DATETIME | YES | — | NULL | Soft Delete |
+
+---
+
 ### 🔗 외래키 관계
 
 ```
-users ──────────────────────────────────┐
-  │                                     │
-  ├── routines                          │
-  │     └── routine_completions ────────┤
-  │               └── feeds ────────────┤
-  │                     ├── feed_images │
-  │                     ├── feed_likes ─┤
-  │                     └── feed_comments
+users ──────────────────────────────────────────┐
+  │                                             │
+  ├── routines                                  │
+  │     └── routine_completions ────────────────┤
+  │               └── feeds ────────────────────┤
+  │                     ├── feed_images         │
+  │                     ├── feed_likes ─────────┤
+  │                     ├── feed_comments       │
+  │                     └── reports ────────────┤  ← [추가 2026-05-13]
+  │                           (reporter,target,
+  │                            processed_by 도
+  │                            users 참조)
+  │                                             │
+  ├── challenges (created_by)                   │  ← [추가 2026-05-13]
+  │     ├── challenge_participants ─────────────┤
+  │     └── challenge_proofs ───────────────────┤
+  │           └── challenge_proof_files
+  │                                             │
+  └── notices (created_by)                      │  ← [추가 2026-05-13]
 ```
 
-### ⚠️ 삭제 정책 (ON DELETE CASCADE)
+### ⚠️ 삭제 정책
+
+#### 기존 (Hard Delete + CASCADE)
 
 | 삭제 대상 | 연쇄 삭제 범위 |
 |---|---|
 | users 삭제 | 관련 모든 데이터 자동 삭제 |
-| routines 삭제 | completions, feeds 자동 삭제 |
 | feeds 삭제 | images, likes, comments 자동 삭제 |
+
+#### Soft Delete (deleted_at 적용 테이블)
+
+| 테이블 | Soft Delete 도입 시점 |
+|---|---|
+| users / routines / routine_completions | 2026-05-01 |
+| challenges / challenge_proofs / notices / reports | 2026-05-13 |
+
+→ 위 테이블들은 `DELETE` 대신 `UPDATE deleted_at = NOW()`. 모든 SELECT 는 `WHERE deleted_at IS NULL` 필터 필요.
+
+#### CASCADE (관리자/챌린지 영역, 2026-05-13 추가)
+
+| 삭제 대상 | 연쇄 삭제 범위 |
+|---|---|
+| challenges 삭제 (hard) | participants, proofs, proof_files 자동 삭제 |
+| challenge_proofs 삭제 (hard) | proof_files 자동 삭제 |
+
+> 실무에서는 챌린지도 Soft Delete 사용 권장. CASCADE 는 개발/테스트 환경에서 잘못 삽입된 데이터 정리용으로 활용.
 
 ---
 
