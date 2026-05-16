@@ -1,62 +1,107 @@
 #!/bin/bash
+# ============================================================
+# Routine Mate — 로컬 직접 실행 스크립트 (도커 미사용)
+# ============================================================
+# [개정 2026-05-17]
+#   - 도커 도입(5/7) 후 호스트에 venv/node_modules 가 없어 ./start.sh 가
+#     깨지던 문제 수정: 없으면 자동 설치(첫 1회만, 이후 빠름).
+#   - node --watch 로 Express 핫리로드 (네이티브라 도커와 달리 polling 불필요).
+#
+# 언제 이걸 쓰나:
+#   - 본인 PC 에서 가장 빠른 개발 루프가 필요할 때 (네이티브 핫리로드)
+#
+# 도커로 팀 공유/검증/디펜스 데모를 할 때는:
+#   ./start-docker.sh   또는   docker compose up
+#
+# 주의:
+#   - AWS RDS 3306 이 막힌 네트워크(예: 학교)에서는 도커든 로컬이든
+#     DB 접속이 동일하게 실패함 (이건 별개 이슈).
+# ============================================================
 
-# 이 스크립트가 위치한 디렉토리를 기준으로 경로 설정
-# (어떤 디렉토리에서 실행하든 올바른 경로를 찾음)
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-# ── 환경변수 로드 ──────────────────────────────────────────────────────────────
-# src/backend/.env 에서 PORT, PYTHON_API, FRONTEND_URL 읽기
+# ── 환경변수 로드 (src/backend/.env) ─────────────────────────────────────────
 ENV_FILE="$SCRIPT_DIR/src/backend/.env"
-
 if [ -f "$ENV_FILE" ]; then
-    # set -a: 이후 선언되는 변수를 자동으로 export
     set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
 else
-    echo "⚠️  $ENV_FILE 파일이 없습니다. 기본값을 사용합니다."
+    echo "⚠️  $ENV_FILE 없음 — 기본값 사용"
 fi
 
-# 기본값 (src/backend/.env 파일이 없을 때 fallback)
 PORT=${PORT:-3000}
 PYTHON_API=${PYTHON_API:-"http://localhost:8000"}
 FRONTEND_URL=${FRONTEND_URL:-"http://localhost:5173"}
-
-# PYTHON_API URL에서 포트 번호만 추출 (예: "http://localhost:8000" → "8000")
 FASTAPI_PORT=$(echo "$PYTHON_API" | grep -oE '[0-9]+$')
 FASTAPI_PORT=${FASTAPI_PORT:-8000}
 
-echo "🚀 서버 시작 중..."
+# ── 0. 호스트 실행 환경 자동 점검 / 설치 (첫 1회만 시간 소요) ─────────────────
+echo "🔍 실행 환경 점검 중..."
+
+# 0-1. FastAPI venv
+if [ ! -d "$SCRIPT_DIR/src/python_api/venv" ]; then
+    echo "📦 Python venv 가 없습니다. 생성 + 패키지 설치 (첫 1회, 1~3분)..."
+    cd "$SCRIPT_DIR/src/python_api" || exit 1
+    python3 -m venv venv || { echo "❌ venv 생성 실패 (python3 설치 확인)"; exit 1; }
+    # shellcheck disable=SC1091
+    source venv/bin/activate
+    pip install --quiet --upgrade pip
+    pip install --quiet -r requirements.txt || { echo "❌ pip install 실패"; exit 1; }
+    deactivate
+    cd "$SCRIPT_DIR" || exit 1
+    echo "✅ Python 환경 준비 완료"
+fi
+
+# 0-2. Express node_modules
+if [ ! -d "$SCRIPT_DIR/src/backend/node_modules" ]; then
+    echo "📦 Express node_modules 없음. npm install (첫 1회)..."
+    cd "$SCRIPT_DIR/src/backend" || exit 1
+    npm install || { echo "❌ Express npm install 실패"; exit 1; }
+    cd "$SCRIPT_DIR" || exit 1
+    echo "✅ Express 환경 준비 완료"
+fi
+
+# 0-3. 프론트(루트) node_modules
+if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
+    echo "📦 Frontend node_modules 없음. npm install (첫 1회)..."
+    cd "$SCRIPT_DIR" || exit 1
+    npm install || { echo "❌ Frontend npm install 실패"; exit 1; }
+    echo "✅ Frontend 환경 준비 완료"
+fi
+
+echo ""
+echo "🚀 서버 시작..."
 echo ""
 
-# ── FastAPI 실행 ───────────────────────────────────────────────────────────────
-echo "🐍 FastAPI 시작... (포트: $FASTAPI_PORT)"
+# ── FastAPI (uvicorn --reload: 네이티브라 polling 불필요) ────────────────────
+echo "🐍 FastAPI  → 포트 $FASTAPI_PORT"
 cd "$SCRIPT_DIR/src/python_api" || exit 1
+# shellcheck disable=SC1091
 source venv/bin/activate
 uvicorn app:app --reload --port "$FASTAPI_PORT" &
 FASTAPI_PID=$!
 
-# ── Express 실행 ───────────────────────────────────────────────────────────────
-echo "🟩 Express 시작... (포트: $PORT)"
+# ── Express (node --watch: Node 20+ 네이티브 핫리로드) ───────────────────────
+echo "🟩 Express  → 포트 $PORT"
 cd "$SCRIPT_DIR/src/backend" || exit 1
-node app.js &
+node --watch app.js &
 EXPRESS_PID=$!
 
-# ── React 실행 ────────────────────────────────────────────────────────────────
-echo "⚛️  React 시작..."
+# ── React (Vite HMR) ─────────────────────────────────────────────────────────
+echo "⚛️  React    → $FRONTEND_URL"
 cd "$SCRIPT_DIR" || exit 1
 npm run dev &
 REACT_PID=$!
 
 echo ""
-echo "✅ 모든 서버 시작 완료!"
+echo "✅ 모두 시작됨"
 echo "📌 React   → $FRONTEND_URL"
 echo "📌 Express → http://localhost:$PORT"
 echo "📌 FastAPI → $PYTHON_API"
 echo ""
-echo "종료하려면 Ctrl+C 누르세요"
+echo "종료: Ctrl+C"
 
-# Ctrl+C 누르면 세 서버 모두 종료
-trap "kill $FASTAPI_PID $EXPRESS_PID $REACT_PID 2>/dev/null; echo ''; echo '👋 서버 종료'" SIGINT
+trap "kill $FASTAPI_PID $EXPRESS_PID $REACT_PID 2>/dev/null; echo ''; echo '👋 종료'" SIGINT
 wait

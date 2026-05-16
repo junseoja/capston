@@ -524,6 +524,7 @@ users
 | completion_id | CHAR(36) | NO | FK | — | 완료기록 외래키 |
 | content | TEXT | YES | — | NULL | 인증 글 내용 |
 | created_at | DATETIME | YES | — | CURRENT_TIMESTAMP | 작성 시간 |
+| deleted_at | DATETIME | YES | — | NULL | [추가 2026-05-17] Soft Delete (신고 제재용). NULL=활성 |
 
 ### feed_images
 
@@ -688,6 +689,7 @@ users ────────────────────────�
 |---|---|
 | users / routines / routine_completions | 2026-05-01 |
 | challenges / challenge_proofs / notices / reports | 2026-05-13 |
+| feeds | 2026-05-17 (신고 제재용, `migrations-2026-05-17-feeds-soft-delete.sql`) |
 
 → 위 테이블들은 `DELETE` 대신 `UPDATE deleted_at = NOW()`. 모든 SELECT 는 `WHERE deleted_at IS NULL` 필터 필요.
 

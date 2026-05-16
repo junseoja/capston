@@ -85,6 +85,12 @@ services:
       # python 은 venv/site-packages 를 /usr/local/lib 에 두므로 별도 named volume 불필요
     env_file:
       - ./src/python_api/.env        # DB_HOST, DB_USER 등 RDS 자격증명
+    environment:
+      # [추가 2026-05-17] uvicorn --reload 가 macOS/Windows 도커 볼륨에서
+      # 파일 변경을 못 잡는 문제(inotify 가 볼륨 경계 못 넘음) 해결.
+      # watchfiles 를 polling 모드로 강제 → 호스트 코드 수정 시 자동 재시작.
+      # (frontend 의 CHOKIDAR_USEPOLLING=true 와 같은 목적)
+      - WATCHFILES_FORCE_POLLING=true
 
 # ── Named Volumes ────────────────────────────────────────────────────────────
 # 컨테이너 재기동·rebuild 시에도 node_modules 가 살아남아 npm install 시간 절약.

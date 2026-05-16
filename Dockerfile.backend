@@ -7,8 +7,11 @@
 #   1. /app 작업 디렉터리
 #   2. package*.json 만 먼저 복사 → npm install (캐싱)
 #   3. 코드는 docker-compose volume 으로 호스트 동기화
-#   4. node --watch 모드로 시작 → 코드 변경 시 자동 재시작 (Node 20+ 내장 기능)
-#      - nodemon 추가 의존성 불필요
+#   4. [수정 2026-05-17] nodemon --legacy-watch(polling) 으로 시작
+#      - 이유: macOS/Windows 도커 볼륨은 inotify 파일 이벤트가 경계를 못 넘어
+#        node --watch 가 호스트 코드 변경을 감지 못 함 → 핫리로드 사실상 죽음
+#        → 매번 재빌드하게 되던 문제. nodemon 의 legacy-watch(polling) 로 해결.
+#      - 로컬 직접 실행(start.sh)은 네이티브라 node --watch 로 충분 (package.json dev)
 #
 # 빌드 컨텍스트: ./src/backend
 #   - docker-compose.yml 에서 context: ./src/backend 로 지정
@@ -28,6 +31,6 @@ RUN npm install
 # Express 서버 포트
 EXPOSE 3000
 
-# Express 서버 시작 — Node 20+ 의 --watch 플래그로 코드 변경 시 자동 재시작
-# (별도 nodemon 패키지 설치 불필요)
-CMD ["node", "--watch", "app.js"]
+# Express 서버 시작 — nodemon legacy-watch(polling) 로 도커 볼륨 변경 감지
+# package.json 의 dev:docker 스크립트 = nodemon --legacy-watch --watch . --ext js,json app.js
+CMD ["npm", "run", "dev:docker"]

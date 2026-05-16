@@ -111,11 +111,11 @@ def create_notice(body: NoticeCreate):
             new_id = uuid7str()  # 시간순 정렬 가능한 UUID v7
             cursor.execute(
                 """INSERT INTO notices
-                       (notice_id, category, title, content, post_date, created_by)
-                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (notice_id, category, title, content, post_date, created_by)
+                    VALUES (%s, %s, %s, %s, %s, %s)""",
                 # created_at / updated_at 은 DB DEFAULT 로 자동 입력
                 (new_id, body.category, body.title, body.content,
-                 body.post_date, body.created_by),
+                body.post_date, body.created_by),
             )
         conn.commit()  # 여기까지 와야 실제 DB 반영
         return {"success": True, "notice_id": new_id}
@@ -186,7 +186,7 @@ def list_notices(
             # → SQL 인젝션 방어 (PyMySQL 이 이스케이프 처리)
             sql = """
                 SELECT notice_id, category, title, content,
-                       post_date, created_by, created_at, updated_at
+                    post_date, created_by, created_at, updated_at
                 FROM notices
                 WHERE deleted_at IS NULL
             """
@@ -241,9 +241,9 @@ def get_notice(notice_id: str):
         with conn.cursor() as cursor:
             cursor.execute(
                 """SELECT notice_id, category, title, content,
-                          post_date, created_by, created_at, updated_at
-                   FROM notices
-                   WHERE notice_id = %s AND deleted_at IS NULL""",
+                    post_date, created_by, created_at, updated_at
+                    FROM notices
+                    WHERE notice_id = %s AND deleted_at IS NULL""",
                 (notice_id,),
             )
             row = cursor.fetchone()
@@ -283,7 +283,7 @@ def update_notice(notice_id: str, body: NoticeUpdate):
         2. 수정할 필드가 하나도 없으면 400
         3. category 가 들어왔으면 ENUM 값 검증
         4. UPDATE ... WHERE notice_id=%s AND deleted_at IS NULL
-           (updated_at 은 DB ON UPDATE CURRENT_TIMESTAMP 로 자동 갱신)
+            (updated_at 은 DB ON UPDATE CURRENT_TIMESTAMP 로 자동 갱신)
         5. rowcount == 0 이면 404 (없거나 이미 삭제됨)
 
     반환:
@@ -367,8 +367,8 @@ def delete_notice(notice_id: str):
 
     동작:
         1. UPDATE notices SET deleted_at = NOW()
-             WHERE notice_id=%s AND deleted_at IS NULL
-           (AND deleted_at IS NULL → 이미 삭제된 공지 재삭제 방지 = 멱등성)
+            WHERE notice_id=%s AND deleted_at IS NULL
+            (AND deleted_at IS NULL → 이미 삭제된 공지 재삭제 방지 = 멱등성)
         2. rowcount == 0 이면 404
         3. commit
 
@@ -380,8 +380,8 @@ def delete_notice(notice_id: str):
         with conn.cursor() as cursor:
             cursor.execute(
                 """UPDATE notices
-                   SET deleted_at = NOW()
-                   WHERE notice_id = %s AND deleted_at IS NULL""",
+                    SET deleted_at = NOW()
+                    WHERE notice_id = %s AND deleted_at IS NULL""",
                 (notice_id,),
             )
             affected = cursor.rowcount

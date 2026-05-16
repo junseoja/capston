@@ -443,8 +443,13 @@ def get_feeds(
             """
             params = [user_id]
 
+            # [추가 2026-05-17] 신고 제재로 Soft Delete 된 피드 제외.
+            # feeds.deleted_at IS NULL 을 항상 WHERE 에 둔다 (5/1 Soft Delete 정책을
+            # feeds 까지 확장 — report.py process_report 가 UPDATE deleted_at 함).
+            # cursor 조건은 그 뒤에 AND 로 이어붙인다.
+            base_sql += " WHERE f.deleted_at IS NULL"
             if parsed_cursor:
-                base_sql += " WHERE (f.created_at, f.feed_id) < (%s, %s)"
+                base_sql += " AND (f.created_at, f.feed_id) < (%s, %s)"
                 params.extend([parsed_cursor[0], parsed_cursor[1]])
 
             base_sql += """
@@ -535,7 +540,8 @@ def get_feed_detail(feed_id: str):
                 FROM feeds f
                 LEFT JOIN users u ON f.user_id = u.user_id
                 LEFT JOIN routines r ON f.routine_id = r.routine_id
-                WHERE f.feed_id = %s""",
+                WHERE f.feed_id = %s AND f.deleted_at IS NULL""",
+                # [추가 2026-05-17] 제재(Soft Delete)된 피드는 상세도 404 처리
                 (feed_id,)
             )
             feed = cursor.fetchone()

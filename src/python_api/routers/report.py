@@ -96,8 +96,8 @@ def create_report(body: ReportCreate):
     동작:
         1. report_category 가 허용 ENUM 인지 검증 (아니면 400)
         2. (정책) 같은 사용자가 같은 게시물을 중복 신고하는 것 차단:
-           이미 pending 상태로 신고한 적 있으면 409.
-           → 어뷰징 방지. "한 사람이 한 게시물에 한 번만"
+            이미 pending 상태로 신고한 적 있으면 409.
+            → 어뷰징 방지. "한 사람이 한 게시물에 한 번만"
         3. uuid7str() 로 report_id 생성 후 INSERT (status 기본 'pending')
         4. commit
 
@@ -122,10 +122,10 @@ def create_report(body: ReportCreate):
             #    아직 처리 안 된(pending) 신고가 이미 있으면 막는다.
             cursor.execute(
                 """SELECT report_id FROM reports
-                   WHERE feed_id = %s
-                     AND reporter_user_id = %s
-                     AND status = 'pending'
-                     AND deleted_at IS NULL""",
+                    WHERE feed_id = %s
+                    AND reporter_user_id = %s
+                    AND status = 'pending'
+                    AND deleted_at IS NULL""",
                 (body.feed_id, body.reporter_user_id),
             )
             if cursor.fetchone():
@@ -138,11 +138,11 @@ def create_report(body: ReportCreate):
             new_id = uuid7str()
             cursor.execute(
                 """INSERT INTO reports
-                       (report_id, feed_id, reporter_user_id, target_user_id,
+                    (report_id, feed_id, reporter_user_id, target_user_id,
                         report_category, report_detail)
-                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                    VALUES (%s, %s, %s, %s, %s, %s)""",
                 (new_id, body.feed_id, body.reporter_user_id, body.target_user_id,
-                 body.report_category, body.report_detail),
+                body.report_category, body.report_detail),
             )
         conn.commit()
         return {"success": True, "report_id": new_id}
@@ -181,33 +181,33 @@ def list_reports(
     설계 메모:
         같은 게시물을 여러 명이 신고하면 관리자 화면엔 1줄로 보여야 한다.
         그래서 GROUP BY feed_id 로 묶고:
-          - report_count        : 그 게시물 신고 누적 횟수 COUNT(*)
-          - last_reported_at    : 가장 최근 신고 시각 MAX(created_at)
-          - representative_id   : 대표 report_id (가장 최근 것)
-          - reporters           : 신고자 목록을 JSON 배열로 (JSON_ARRAYAGG)
+            - report_count        : 그 게시물 신고 누적 횟수 COUNT(*)
+            - last_reported_at    : 가장 최근 신고 시각 MAX(created_at)
+            - representative_id   : 대표 report_id (가장 최근 것)
+            - reporters           : 신고자 목록을 JSON 배열로 (JSON_ARRAYAGG)
         프론트 AdminPage 의 reportCount / reporters 구조와 맞춘다.
 
     동작:
         1. WHERE r.status = %s AND r.deleted_at IS NULL
         2. JOIN feeds f / users u 로 게시물 제목·작성자 닉네임 결합
-           (피드가 이미 Soft Delete 됐어도 보이게 LEFT JOIN)
+            (피드가 이미 Soft Delete 됐어도 보이게 LEFT JOIN)
         3. GROUP BY r.feed_id
         4. ORDER BY report_count DESC  (많이 신고된 게 위로)
         5. LIMIT %s
 
     반환:
         {
-          "success": True,
-          "reports": [
+            "success": True,
+            "reports": [
             {
-              "feed_id": "...", "report_count": 10,
-              "representative_id": "...", "last_reported_at": "...",
-              "target_user_id": "...", "author_nickname": "...",
-              "feed_content": "...", "feed_deleted": 0|1,
-              "reporters": [ {"reporter_user_id":"...", "report_category":"...",
-                              "report_detail":"...", "created_at":"..."}, ... ]
+                "feed_id": "...", "report_count": 10,
+                "representative_id": "...", "last_reported_at": "...",
+                "target_user_id": "...", "author_nickname": "...",
+                "feed_content": "...", "feed_deleted": 0|1,
+                "reporters": [ {"reporter_user_id":"...", "report_category":"...",
+                            "report_detail":"...", "created_at":"..."}, ... ]
             }, ...
-          ]
+        ]
         }
 
     주의 (MySQL 버전):
@@ -248,7 +248,7 @@ def list_reports(
                 LEFT JOIN feeds f ON f.feed_id = r.feed_id
                 LEFT JOIN users u ON u.user_id = r.target_user_id
                 WHERE r.status = %s
-                  AND r.deleted_at IS NULL
+                    AND r.deleted_at IS NULL
                 GROUP BY r.feed_id, u.nickname, f.content, f.deleted_at
                 ORDER BY report_count DESC, last_reported_at DESC
                 LIMIT %s
@@ -358,9 +358,9 @@ def process_report(body: ReportProcess):
         1. 대상 게시물에 pending 신고가 실제로 있는지 확인 (없으면 404)
         2. UPDATE reports SET status='completed', admin_comment, processed_by,
                                 processed_at=NOW()
-           WHERE feed_id=%s AND status='pending' AND deleted_at IS NULL
+            WHERE feed_id=%s AND status='pending' AND deleted_at IS NULL
         3. UPDATE feeds SET deleted_at=NOW()
-           WHERE feed_id=%s AND deleted_at IS NULL
+            WHERE feed_id=%s AND deleted_at IS NULL
         4. 모두 성공 시 단 한 번 commit
 
     반환:
@@ -381,7 +381,7 @@ def process_report(body: ReportProcess):
             # 1) 처리 대상 pending 신고 존재 확인
             cursor.execute(
                 """SELECT COUNT(*) AS cnt FROM reports
-                   WHERE feed_id = %s AND status = 'pending' AND deleted_at IS NULL""",
+                    WHERE feed_id = %s AND status = 'pending' AND deleted_at IS NULL""",
                 (body.feed_id,),
             )
             pending_cnt = cursor.fetchone()["cnt"]
@@ -394,13 +394,13 @@ def process_report(body: ReportProcess):
             # 2) 해당 게시물의 모든 pending 신고를 한 번에 완료 처리
             cursor.execute(
                 """UPDATE reports
-                   SET status = 'completed',
-                       admin_comment = %s,
-                       processed_by = %s,
-                       processed_at = NOW()
-                   WHERE feed_id = %s
-                     AND status = 'pending'
-                     AND deleted_at IS NULL""",
+                    SET status = 'completed',
+                        admin_comment = %s,
+                        processed_by = %s,
+                        processed_at = NOW()
+                    WHERE feed_id = %s
+                        AND status = 'pending'
+                        AND deleted_at IS NULL""",
                 (body.admin_comment, body.processed_by, body.feed_id),
             )
             processed_count = cursor.rowcount
@@ -408,8 +408,8 @@ def process_report(body: ReportProcess):
             # 3) 게시물 Soft Delete (이미 삭제됐어도 멱등 — AND deleted_at IS NULL)
             cursor.execute(
                 """UPDATE feeds
-                   SET deleted_at = NOW()
-                   WHERE feed_id = %s AND deleted_at IS NULL""",
+                    SET deleted_at = NOW()
+                    WHERE feed_id = %s AND deleted_at IS NULL""",
                 (body.feed_id,),
             )
             # feeds rowcount 가 0 이어도(이미 삭제된 피드) 신고 처리는 유효하므로
