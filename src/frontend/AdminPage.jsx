@@ -21,14 +21,87 @@
 //   출처: origin/frontend commits 8c9c6a2 + 62d5017
 //   당시 사유: 관리자 페이지를 dev 경로 규칙(src/frontend/*)으로 이전, 순수 표시 컴포넌트.
 // ============================================================
-import React, { useState, useMemo } from "react";
+// [수정 2026-05-16 / 관리자 백엔드 연결]
+// 오류/변경 번호: 5/12~5/13 의 공지/신고 mock(localStorage·in-memory)
+//                → 실제 백엔드(Express /notice, /report) 연결
+// 날짜: 2026-05-16
+// 사유: notices/reports 가 가짜 데이터라 새로고침/다른 기기에서 안 보였음.
+// 기대효과: 공지 작성/수정/삭제와 신고 조회/제재가 DB 에 영속.
+// 장점: useEffect + fetch 패턴이 dev 기존 MyPage/FeedPage 와 일관.
+import React, { useState, useMemo, useEffect } from "react";
+import { EXPRESS_URL } from "./config";
 
-function AdminPage({ reports, onDeleteConfirm, notices, setNotices }) {
+function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
+  // [추가 2026-05-16] 신고 목록은 AdminPage 가 직접 GET /report 로 조회.
+  //   - reportTab(pending/completed) 이 바뀌면 재조회 (백엔드가 status 필터)
+  //   - 제재 처리 후에도 재조회 (fetchReports)
+  const [reports, setReports] = useState([]);
+
+  // 백엔드 GET /report 응답(feed_id 그룹 집계)을 기존 AdminPage 렌더가
+  // 기대하는 구조(id/feedId/user/postContent/reporters/reportCount...)로 변환.
+  // 백엔드: { feed_id, report_count, representative_id, author_nickname,
+  //          feed_content, reporters:[{reporter_user_id,report_category,
+  //          report_detail,created_at}], ... }
+  const mapReportRow = (r) => {
+    // reporters 가 JSON 문자열로 올 수도(드라이버별) → 안전 파싱
+    let reporters = r.reporters;
+    if (typeof reporters === "string") {
+      try {
+        reporters = JSON.parse(reporters);
+      } catch {
+        reporters = [];
+      }
+    }
+    return {
+      id: r.representative_id,
+      feedId: r.feed_id,
+      user: r.author_nickname || "(알 수 없음)",
+      postContent: {
+        title: "(신고된 게시물)",
+        text: r.feed_content || "",
+        img: "", // 백엔드가 썸네일 미제공 → 빈 값(렌더에서 조건부 처리)
+      },
+      status: r.feed_deleted ? "completed" : "pending",
+      reportCount: r.report_count,
+      reporters: (reporters || []).map((rp) => ({
+        user: rp.reporter_user_id,
+        reason: `[${rp.report_category}] ${rp.report_detail || ""}`.trim(),
+        date: rp.created_at,
+      })),
+      adminComment: r.admin_comment || "",
+    };
+  };
+
+  const fetchReports = async (status) => {
+    try {
+      const res = await fetch(
+        `${EXPRESS_URL}/report?status=${encodeURIComponent(status)}`,
+        { credentials: "include" },
+      );
+      const data = await res.json();
+      if (data.success) {
+        setReports((data.reports || []).map(mapReportRow));
+      } else {
+        setReports([]);
+      }
+    } catch (error) {
+      console.error("신고 목록 조회 실패:", error);
+      setReports([]);
+    }
+  };
+
   const [currentMenu, setCurrentMenu] = useState("dashboard");
   const [selectedReport, setSelectedReport] = useState(null);
   const [reportTab, setReportTab] = useState("pending");
   const [sortOrder, setSortOrder] = useState("desc");
   const [deleteReasonText, setDeleteReasonText] = useState("");
+
+  // [추가 2026-05-16] reportTab(검토대기/처리완료) 이 바뀔 때마다
+  // 백엔드에서 해당 status 신고 목록을 다시 조회. 최초 mount 시에도 1회 실행.
+  useEffect(() => {
+    fetchReports(reportTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportTab]);
 
   // ── [챌린지 관리 상태] ──
   const [challenges, setChallenges] = useState([
@@ -104,36 +177,84 @@ function AdminPage({ reports, onDeleteConfirm, notices, setNotices }) {
     }
   };
 
-  // ── [공지사항 핸들러] ──
-  const handleSaveNotice = () => {
-    if (!noticeTitle.trim() || !noticeContent.trim()) { 
-      alert("제목과 내용을 입력해주세요."); 
-      return; 
+  // ── [공지사항 핸들러] — [수정 2026-05-16] setNotices mock → 실제 API ──
+  // 작성: POST /notice, 수정: PATCH /notice/:id, 삭제: DELETE /notice/:id
+  // 성공하면 onNoticeChange() 로 App.jsx 가 GET /notice 재조회 → 화면 갱신.
+  // (RoutinePage 의 onRoutineChange 와 동일한 "변경 후 부모 재조회" 패턴)
+  const handleSaveNotice = async () => {
+    if (!noticeTitle.trim() || !noticeContent.trim()) {
+      alert("제목과 내용을 입력해주세요.");
+      return;
     }
 
-    if (editingNoticeId) {
-      setNotices(notices.map(n => n.id === editingNoticeId ? { ...n, category: noticeCategory, title: noticeTitle, content: noticeContent } : n));
-      alert("공지사항이 성공적으로 수정되었습니다.");
-    } else {
-      const newNotice = { 
-        id: Date.now(), 
-        category: noticeCategory, 
-        title: noticeTitle, 
-        content: noticeContent, 
-        date: new Date().toISOString().split('T')[0] 
-      };
-      setNotices([newNotice, ...notices]);
-      alert(`[${noticeCategory}] 새 공지사항이 등록되었습니다.\n모든 사용자에게 앱 푸시 알림이 발송됩니다.`);
+    try {
+      if (editingNoticeId) {
+        // 수정 — PATCH /notice/:id
+        const res = await fetch(`${EXPRESS_URL}/notice/${editingNoticeId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            category: noticeCategory,
+            title: noticeTitle,
+            content: noticeContent,
+          }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || "공지 수정에 실패했습니다.");
+          return;
+        }
+        alert("공지사항이 성공적으로 수정되었습니다.");
+      } else {
+        // 신규 — POST /notice (post_date 는 오늘 날짜)
+        const res = await fetch(`${EXPRESS_URL}/notice`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            category: noticeCategory,
+            title: noticeTitle,
+            content: noticeContent,
+            post_date: new Date().toISOString().split("T")[0],
+          }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || "공지 등록에 실패했습니다.");
+          return;
+        }
+        alert(`[${noticeCategory}] 새 공지사항이 등록되었습니다.`);
+      }
+
+      // 성공 → App.jsx 가 재조회하도록 콜백 (HomePage 모달/NoticeList 도 함께 갱신)
+      if (typeof onNoticeChange === "function") await onNoticeChange();
+      resetNoticeForm();
+    } catch (error) {
+      console.error("공지 저장 실패:", error);
+      alert("서버 오류로 공지 저장에 실패했습니다.");
     }
-    resetNoticeForm();
   };
 
   const resetNoticeForm = () => { setEditingNoticeId(null); setNoticeTitle(""); setNoticeContent(""); setNoticeCategory("일반"); };
-  const handleEditNotice = (notice) => { setEditingNoticeId(notice.id); setNoticeCategory(notice.category); setNoticeTitle(notice.title); setNoticeContent(notice.content); };
-  const handleDeleteNotice = (id) => { 
-    if (window.confirm("공지를 삭제하시겠습니까?")) {
-      setNotices(notices.filter(n => n.id !== id));
+  const handleEditNotice = (notice) => { setEditingNoticeId(notice.notice_id ?? notice.id); setNoticeCategory(notice.category); setNoticeTitle(notice.title); setNoticeContent(notice.content); };
+  const handleDeleteNotice = async (id) => {
+    if (!window.confirm("공지를 삭제하시겠습니까?")) return;
+    try {
+      const res = await fetch(`${EXPRESS_URL}/notice/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!data.success) {
+        alert(data.message || "공지 삭제에 실패했습니다.");
+        return;
+      }
       alert("공지사항이 삭제되었습니다.");
+      if (typeof onNoticeChange === "function") await onNoticeChange();
+    } catch (error) {
+      console.error("공지 삭제 실패:", error);
+      alert("서버 오류로 공지 삭제에 실패했습니다.");
     }
   };
 
@@ -144,24 +265,43 @@ function AdminPage({ reports, onDeleteConfirm, notices, setNotices }) {
     return Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
   };
 
+  // [수정 2026-05-16] 백엔드 GET /report?status= 가 이미 status 로 필터해 주므로
+  // 여기선 status 필터 없이 정렬만 한다 (중복 필터 제거).
   const filteredReports = useMemo(() => {
-    let list = reports.filter(r => r.status === reportTab);
-    return list.sort((a, b) => sortOrder === "desc" ? b.reportCount - a.reportCount : a.reportCount - b.reportCount);
-  }, [reports, reportTab, sortOrder]);
+    return [...reports].sort((a, b) =>
+      sortOrder === "desc" ? b.reportCount - a.reportCount : a.reportCount - b.reportCount,
+    );
+  }, [reports, sortOrder]);
 
-  const handleConfirmDelete = (report) => {
+  // [수정 2026-05-16] 제재 처리:
+  //   onDeleteConfirm(App.jsx) → PATCH /report/process (단일 트랜잭션) →
+  //   성공 시 현재 탭 신고 목록 재조회 (제재된 건은 pending 에서 사라짐)
+  const handleConfirmDelete = async (report) => {
     if (!deleteReasonText.trim()) { alert("제재 사유를 입력해주세요."); return; }
-    if (window.confirm(`${report.user}의 게시물을 삭제할까요?`)) {
-      onDeleteConfirm(report.id, report.feedId, report.user, deleteReasonText);
-      alert("해당 게시물이 삭제되었으며 유저에게 제재 알림이 전송되었습니다.");
-      setDeleteReasonText("");
-      setSelectedReport(null);
-    }
+    if (!window.confirm(`${report.user}의 게시물을 삭제할까요?`)) return;
+
+    // App.jsx handleDeleteConfirm 은 성공 시 true, 실패 시 false 반환
+    const ok = await onDeleteConfirm(
+      report.id, report.feedId, report.user, deleteReasonText,
+    );
+    if (ok === false) return; // 실패 시 alert 는 App.jsx 가 이미 표시
+
+    alert("해당 게시물이 삭제되었으며 유저에게 제재 알림이 전송되었습니다.");
+    setDeleteReasonText("");
+    setSelectedReport(null);
+    await fetchReports(reportTab); // 처리 완료 → 목록 갱신
   };
 
+  // [수정 2026-05-16] 백엔드 notices 컬럼(notice_id/post_date)을
+  // 기존 렌더가 쓰는 id/date 로 정규화 + 카테고리 필터.
   const filteredNotices = useMemo(() => {
-    if (filterCategory === "전체") return notices;
-    return notices.filter(n => n.category === filterCategory);
+    const normalized = (notices || []).map((n) => ({
+      ...n,
+      id: n.notice_id ?? n.id,
+      date: n.post_date ?? n.date,
+    }));
+    if (filterCategory === "전체") return normalized;
+    return normalized.filter((n) => n.category === filterCategory);
   }, [notices, filterCategory]);
 
   const StatCard = ({ title, value, colorVar }) => (

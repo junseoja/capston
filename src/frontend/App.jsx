@@ -98,7 +98,9 @@ function App() {
     // 장점:
     //   - 단일 진실 공급원(SSOT) 패턴 유지 — 데이터 흐름이 App.jsx 한 곳에 모임.
     //   - deleteNotifications 는 localStorage 영속화 → 새로고침/재로그인 후에도 알림 유지.
-    const [reports, setReports] = useState([]);
+    // [수정 2026-05-16] reports 는 더 이상 App.jsx 가 메모리로 관리하지 않음.
+    // AdminPage 가 GET /report 로 직접 조회하고, 제재 후 자체 재조회한다.
+    // (관리자만 보는 데이터라 항상 App 에서 들고 있을 필요가 없음)
     const [deleteNotifications, setDeleteNotifications] = useState(() => {
         try {
             return JSON.parse(localStorage.getItem("deleteNotifications") || "[]");
@@ -108,29 +110,47 @@ function App() {
     });
     const [isAdmin, setIsAdmin] = useState(false);
 
-    // [추가 2026-05-13 / frontend 머지 Stage 2-7] 공지사항 전역 상태
-    // 출처: origin/frontend commit 1466600 "공지사항 전역 상태 관리 및 로그아웃 세션 초기화"
-    // 사유: AdminPage 가 작성한 공지를 HomePage 모달 + NoticeList 페이지가 모두 공유.
-    // 기대효과: localStorage 로 영속화 → 새로고침/재로그인 후에도 공지 유지.
-    // 장점: 단일 진실 공급원(SSOT) 패턴 — App.jsx 가 notices 데이터 한 곳에 모음.
-    const [notices, setNotices] = useState(() => {
-        try {
-            return JSON.parse(localStorage.getItem("notices") || "[]");
-        } catch {
-            return [];
-        }
-    });
+    // [수정 2026-05-16 / 관리자 백엔드 연결] 공지사항 전역 상태
+    // 오류/변경 번호: 5/13 Stage 2-7 의 localStorage mock → 실제 백엔드(GET /notice) 전환
+    // 날짜: 2026-05-16
+    // 사유:
+    //   기존엔 AdminPage 가 setNotices 로 메모리/localStorage 에만 공지를 쌓아
+    //   다른 기기/새 브라우저에서는 공지가 안 보였음 (가짜 데이터).
+    //   백엔드 notice 라우터 완성으로 실제 DB 기반 공유 데이터로 전환.
+    // 기대효과:
+    //   AdminPage 가 공지를 작성하면 DB 에 저장되고, HomePage 모달 /
+    //   NoticeList 가 모든 사용자/기기에서 같은 공지를 본다.
+    // 장점:
+    //   단일 진실 공급원이 localStorage → 백엔드 DB 로 승격.
+    //   fetchRoutines 와 동일한 useCallback 패턴이라 코드 일관성 유지.
+    const [notices, setNotices] = useState([]);
     // 공지사항 상세 페이지에서 표시할 항목 (NoticeList 에서 클릭 → setSelectedNotice)
     const [selectedNotice, setSelectedNotice] = useState(null);
 
-    // notices 변경 시 localStorage 동기화
-    useEffect(() => {
+    // [추가 2026-05-16] 공지 목록 조회 — Express GET /notice 중계 → FastAPI
+    // fetchRoutines 와 같은 useCallback 패턴 (의존성 [] → 참조 고정).
+    const fetchNotices = useCallback(async () => {
         try {
-            localStorage.setItem("notices", JSON.stringify(notices));
-        } catch {
-            // 저장소 미지원/쿼터 초과 시 무시
+            const res = await fetch(`${EXPRESS_URL}/notice`, {
+                credentials: "include", // 세션 쿠키 → requireAuth 통과
+            });
+            const data = await res.json();
+            if (data.success) {
+                // [정규화] 백엔드 컬럼(notice_id/post_date)을 소비처들이 쓰는
+                // id/date 로 통일. NoticeList/NoticeDetail/HomePage 모달/AdminPage
+                // 가 전부 동일 필드명을 보도록 App 한 곳에서 한 번만 변환.
+                const normalized = (data.notices || []).map((n) => ({
+                    ...n,
+                    id: n.notice_id ?? n.id,
+                    date: n.post_date ?? n.date,
+                }));
+                setNotices(normalized);
+            }
+        } catch (error) {
+            // 공지 조회 실패는 치명적이지 않으므로 콘솔만 (홈/리스트가 빈 상태로 표시)
+            console.error("공지 목록 조회 실패:", error);
         }
-    }, [notices]);
+    }, []);
 
     // deleteNotifications 변경 시 localStorage 동기화 (새로고침 후에도 모달 유지)
     useEffect(() => {
@@ -270,6 +290,9 @@ function App() {
                 if (user) {
                     setIsLoggedIn(true);
                     await fetchRoutines();
+                    // [추가 2026-05-16] 로그인 복구 시 공지도 함께 조회
+                    // (HomePage 공지 모달이 첫 진입에 바로 뜨도록)
+                    await fetchNotices();
                 } else {
                     setIsLoggedIn(false);
                     setRoutines([]);
@@ -280,7 +303,7 @@ function App() {
         };
 
         bootstrapAuth();
-    }, [fetchCurrentUser, fetchRoutines]);
+    }, [fetchCurrentUser, fetchRoutines, fetchNotices]);
 
     // ── 로그인 처리 ───────────────────────────────────────────────────────────
 
@@ -305,6 +328,7 @@ function App() {
         setIsAdmin(role === "ADMIN");
         await fetchCurrentUser(); // 로그인한 유저 정보 fetch (닉네임 등)
         await fetchRoutines();    // 루틴 데이터 fetch (홈 화면 표시용)
+        await fetchNotices();     // [추가 2026-05-16] 공지 조회 (홈 모달/리스트용)
         navigate(role === "ADMIN" ? "/admin" : "/");
     };
 
@@ -566,46 +590,48 @@ function App() {
      *   - 백엔드 신고 API 가 없어도 프론트 단독으로 신고 흐름 완결.
      *   - 백엔드 API 가 추가되면 fetch 호출 한 줄만 더하면 됨.
      */
-    const handleReportPost = (post, reason) => {
+    // [수정 2026-05-16 / 관리자 백엔드 연결]
+    // 오류/변경 번호: 5/12 7/7 의 in-memory reports 누적 → 실제 백엔드(POST /report) 전환
+    // 날짜: 2026-05-16
+    // 사유:
+    //   기존엔 신고를 App.jsx 메모리 배열에만 쌓아 새로고침하면 사라지고,
+    //   다른 기기/관리자 화면에서 안 보였음. 백엔드 report 라우터 완성으로 DB 영속.
+    // 기대효과:
+    //   FeedPage 🚩 → POST /report → reports 테이블 저장 → AdminPage 가 GET /report 로 조회.
+    // 장점:
+    //   reason 문자열( "[카테고리] 상세" )을 백엔드 ENUM 스키마(report_category/report_detail)로
+    //   정확히 분해해서 전달 → AdminPage 통계/필터가 정상 동작.
+    const handleReportPost = async (post, reason) => {
         if (!post || !reason) return;
-        const reporterEntry = {
-            user: currentUser?.nickname || "익명",
-            user_id: currentUser?.user_id,
-            reason,
-            reportedAt: new Date().toISOString(),
-        };
-        setReports((prev) => {
-            const existing = prev.find((r) => r.feedId === post.feed_id);
-            if (existing) {
-                // 이미 신고된 게시물 → 신고자/사유 추가 + 카운트 증가
-                return prev.map((r) =>
-                    r.feedId === post.feed_id
-                        ? {
-                              ...r,
-                              reporters: [...r.reporters, reporterEntry],
-                              reportCount: r.reportCount + 1,
-                          }
-                        : r,
-                );
+
+        // FeedPage Stage 2-5 가 "[분류] 상세사유" 형태로 reason 을 만들어 보냄.
+        // 백엔드 reports.report_category(ENUM) / report_detail 로 분해한다.
+        const matched = reason.match(/^\[(.+?)\]\s*(.*)$/);
+        const report_category = matched ? matched[1] : "기타";
+        const report_detail = matched ? matched[2] : reason;
+
+        try {
+            const res = await fetch(`${EXPRESS_URL}/report`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include", // 세션 → reporter_user_id 는 Express 가 주입
+                body: JSON.stringify({
+                    feed_id: post.feed_id,
+                    // 게시글 작성자 — 백엔드 reports.target_user_id
+                    target_user_id: post.user_id || post.userId,
+                    report_category,
+                    report_detail,
+                }),
+            });
+            const data = await res.json();
+            if (!data.success) {
+                // 중복 신고(409) 등은 FeedPage 가 이미 성공 alert 를 띄우므로
+                // 여기서는 콘솔만 (UX 흐름 깨지 않게)
+                console.warn("신고 접수 응답:", data.message);
             }
-            // 신규 신고 항목 생성
-            return [
-                ...prev,
-                {
-                    id: Date.now(),
-                    feedId: post.feed_id,
-                    user: post.nickname || post.userName || "알수없음",
-                    postContent: {
-                        title: post.routine_title || post.routineTitle || "(루틴 제목 없음)",
-                        text: post.content || "",
-                    },
-                    status: "pending",
-                    reporters: [reporterEntry],
-                    reportCount: 1,
-                    createdAt: new Date().toISOString(),
-                },
-            ];
-        });
+        } catch (error) {
+            console.error("신고 접수 실패:", error);
+        }
     };
 
     /**
@@ -617,31 +643,55 @@ function App() {
      * 장점: dev 의 DELETE /feed/:feed_id 백엔드 호출도 함께 트리거하여
      *       실제 게시물도 제거 (실패해도 알림은 보냄).
      */
+    // [수정 2026-05-16 / 관리자 백엔드 연결]
+    // 오류/변경 번호: 5/12 7/7 의 DELETE /feed + in-memory 처리
+    //                → 단일 트랜잭션(PATCH /report/process) 전환
+    // 날짜: 2026-05-16
+    // 사유:
+    //   기존엔 (1) DELETE /feed 따로 (2) reports 상태 따로 변경이라
+    //   둘 사이 실패 시 데이터가 어긋남. 백엔드 process_report 가
+    //   "pending 신고 일괄 completed + 피드 Soft Delete" 를 한 트랜잭션으로 처리.
+    // 기대효과:
+    //   관리자가 제재하면 신고 완료 + 게시물 삭제가 원자적으로 처리되고,
+    //   작성자에게 deleteNotifications 알림이 큐잉된다.
+    // 장점:
+    //   프론트는 PATCH /report/process 한 번만 호출 → 정합성은 백엔드 트랜잭션이 보장.
+    //
+    // 인자 (AdminPage handleConfirmDelete 가 호출):
+    //   reportId(미사용/호환용), feedId, targetNickname, reasonText
     const handleDeleteConfirm = async (reportId, feedId, targetNickname, reasonText) => {
-        const report = reports.find((r) => r.id === reportId);
-        // 1) 백엔드 게시물 삭제 (실패해도 신고 처리는 진행 — 이미 삭제됐을 수도 있어서)
         try {
-            await fetch(`${EXPRESS_URL}/feed/${feedId}`, {
-                method: "DELETE",
-                credentials: "include",
+            const res = await fetch(`${EXPRESS_URL}/report/process`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include", // 세션 → processed_by(관리자) Express 주입
+                body: JSON.stringify({
+                    feed_id: feedId,
+                    admin_comment: reasonText,
+                }),
             });
+            const data = await res.json();
+            if (!data.success) {
+                alert(data.message || "신고 처리에 실패했습니다.");
+                return false;
+            }
         } catch (error) {
-            console.error("관리자 게시물 삭제 실패(무시하고 계속):", error);
+            console.error("신고 처리 실패:", error);
+            alert("서버 오류로 신고 처리에 실패했습니다.");
+            return false;
         }
-        // 2) 신고 상태 업데이트 (pending → completed)
-        setReports((prev) =>
-            prev.map((r) => (r.id === reportId ? { ...r, status: "completed" } : r)),
-        );
-        // 3) 작성자에게 제재 알림 큐잉
+
+        // 작성자에게 제재 알림 큐잉 (HomePage 모달용 — 별도 mock 기능 유지)
         setDeleteNotifications((prev) => [
             ...prev,
             {
                 id: Date.now(),
                 nickname: targetNickname,
-                routineTitle: report?.postContent?.title || "(제목 없음)",
+                routineTitle: "(제재된 게시물)",
                 reason: reasonText,
             },
         ]);
+        return true;
     };
 
     // ── [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] 챌린지 인증 → 피드 업로드 (mock) ──
@@ -727,7 +777,7 @@ function App() {
         // 기대효과: 같은 브라우저에서 다른 계정으로 로그인해도 이전 관리자 권한이 남지 않음.
         // 장점: deleteNotifications 는 의도적으로 보존(영구화) → 알림은 다음 접속 시에도 확인 가능.
         setIsAdmin(false);
-        setReports([]);
+        setNotices([]); // [수정 2026-05-16] 로그아웃 시 공지 캐시도 비움 (재로그인 시 재조회)
         // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
         // 사유: 로그아웃 시 챌린지 mock 피드도 함께 초기화 (다음 유저에게 이전 데이터 노출 방지).
         // 장점: 동일 브라우저 다른 계정 로그인 시 깨끗한 챌린지 피드 상태로 시작.
@@ -877,14 +927,15 @@ function App() {
                                 ? <Navigate to="/login" />
                                 : isAdmin
                                     ? <AdminPage
-                                        reports={reports}
+                                        // [수정 2026-05-16 / 관리자 백엔드 연결]
+                                        // reports 는 props 주입 대신 AdminPage 가
+                                        // 자체적으로 GET /report 조회 (관리자만 보는 데이터).
+                                        // onDeleteConfirm: 제재 시 PATCH /report/process 호출.
                                         onDeleteConfirm={handleDeleteConfirm}
-                                        // [추가 2026-05-13 / frontend 머지 Stage 2-7]
-                                        // 사유: Stage 2-3 AdminPage 의 공지 작성/수정 기능이 사용할 props 주입.
-                                        // 기대효과: AdminPage 가 setNotices 로 작성 → 즉시 localStorage 영속 →
-                                        //          HomePage 모달 + NoticeList 에 반영.
+                                        // notices 는 App 의 fetchNotices 결과를 그대로 보여주고,
+                                        // 작성/수정/삭제 후엔 onNoticeChange 로 App 이 재조회.
                                         notices={notices}
-                                        setNotices={setNotices}
+                                        onNoticeChange={fetchNotices}
                                     />
                                     : <Navigate to="/" />
                         }
