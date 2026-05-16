@@ -57,6 +57,12 @@ const mypageRouter = require("./routes/mypage");
 // 통계 라우터: GET /stats
 const statsRouter = require("./routes/stats");
 
+// [추가 2026-05-16] 관리자 페이지 라우터
+// 공지 라우터: POST/GET/PATCH/DELETE /notice
+const noticeRouter = require("./routes/notice");
+// 신고 라우터: POST/GET /report, PATCH /report/process, GET /report/:id
+const reportRouter = require("./routes/report");
+
 const app = express();
 
 // ── 미들웨어 등록 ────────────────────────────────────────────────────────────
@@ -144,6 +150,11 @@ app.use("/", commentRouter);
 // 설명: 두 라우터 모두 requireAuth 로 세션 user_id 를 주입한 뒤 FastAPI 에 전달한다.
 app.use("/", mypageRouter);
 app.use("/", statsRouter);
+
+// [추가 2026-05-16] 관리자 페이지 라우터 마운트.
+// 공지/신고 — 각 라우터 내부에서 requireAuth(+requireAdmin) 체이닝으로 보호.
+app.use("/", noticeRouter);
+app.use("/", reportRouter);
 
 // ── 글로벌 에러 핸들러 ───────────────────────────────────────────────────────
 // 해결하는 에러 (README 4월 18일 #3 — 글로벌 에러 핸들러 없음):

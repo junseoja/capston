@@ -517,6 +517,99 @@ async function getStats(user_id, { mode = "weekly", start, end } = {}) {
     return await fetchJson(`${PYTHON_API}/stats/${user_id}?${params.toString()}`);
 }
 
+// ════════════════════════════════════════════════════════════
+// [추가 2026-05-16] 관리자 페이지 — 공지사항(notice) / 신고(report)
+// ════════════════════════════════════════════════════════════
+// 패턴: 기존 createFeed / getFeeds / deleteFeed 와 100% 동일.
+//   - fetchJson() 이 X-Internal-Api-Key 헤더를 자동 첨부 (withInternalAuth)
+//   - 에러는 fetchJson 이 FastApiError 로 표준화 → 라우터가 try/catch
+//   - 라우터는 이 함수들만 호출하면 FastAPI 통신을 신경 쓸 필요 없음
+
+// ── 공지사항 ──────────────────────────────────────────────────────────────────
+
+/** 공지 작성 (관리자). FastAPI POST /notice/ */
+async function createNotice(noticeData) {
+    return await fetchJson(`${PYTHON_API}/notice/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(noticeData),
+    });
+}
+
+/** 공지 목록. category 옵션 시 필터. FastAPI GET /notice/ */
+async function listNotices({ category, limit = 100 } = {}) {
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    params.set("limit", String(limit));
+    return await fetchJson(`${PYTHON_API}/notice/?${params.toString()}`);
+}
+
+/** 공지 단건 상세. FastAPI GET /notice/{notice_id} */
+async function getNotice(notice_id) {
+    return await fetchJson(
+        `${PYTHON_API}/notice/${encodeURIComponent(notice_id)}`,
+    );
+}
+
+/** 공지 부분 수정 (관리자). FastAPI PATCH /notice/{notice_id} */
+async function updateNotice(notice_id, patchData) {
+    return await fetchJson(
+        `${PYTHON_API}/notice/${encodeURIComponent(notice_id)}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patchData),
+        },
+    );
+}
+
+/** 공지 Soft Delete (관리자). FastAPI DELETE /notice/{notice_id} */
+async function deleteNotice(notice_id) {
+    return await fetchJson(
+        `${PYTHON_API}/notice/${encodeURIComponent(notice_id)}`,
+        { method: "DELETE" },
+    );
+}
+
+// ── 신고 ──────────────────────────────────────────────────────────────────────
+
+/** 신고 접수 (일반 사용자). FastAPI POST /report/ */
+async function createReport(reportData) {
+    return await fetchJson(`${PYTHON_API}/report/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reportData),
+    });
+}
+
+/** 신고 목록 (관리자, feed_id 그룹 집계). FastAPI GET /report/ */
+async function listReports({ status = "pending", limit = 100 } = {}) {
+    const params = new URLSearchParams();
+    params.set("status", status);
+    params.set("limit", String(limit));
+    return await fetchJson(`${PYTHON_API}/report/?${params.toString()}`);
+}
+
+/** 신고 단건 상세 (관리자). FastAPI GET /report/{report_id} */
+async function getReport(report_id) {
+    return await fetchJson(
+        `${PYTHON_API}/report/${encodeURIComponent(report_id)}`,
+    );
+}
+
+/**
+ * 게시물 제재 처리 (관리자, 단일 트랜잭션). FastAPI PATCH /report/process
+ * FastAPI 내부에서 (1) pending 신고 일괄 completed (2) 피드 Soft Delete 를
+ * 한 트랜잭션으로 처리한다.
+ */
+async function processReport(processData) {
+    return await fetchJson(`${PYTHON_API}/report/process`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(processData),
+    });
+}
+
 // ── 모듈 내보내기 ────────────────────────────────────────────────────────────
 module.exports = {
     // 헬퍼 / 커스텀 에러 — 라우터에서 `error instanceof FastApiError` 로 구분 가능
@@ -553,4 +646,15 @@ module.exports = {
     getMypageSummary,
     getMypageGallery,
     getStats,
+    // [추가 2026-05-16] 관리자 — 공지사항
+    createNotice,
+    listNotices,
+    getNotice,
+    updateNotice,
+    deleteNotice,
+    // [추가 2026-05-16] 관리자 — 신고
+    createReport,
+    listReports,
+    getReport,
+    processReport,
 };
