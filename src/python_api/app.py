@@ -49,7 +49,10 @@ SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "500"))
 # - comment  : 피드 댓글 CRUD
 # - mypage   : 마이페이지 summary/gallery 실제 데이터
 # - stats    : 상세 분석 통계 실제 데이터
+# - notice   : [추가 2026-05-16] 관리자 공지사항 CRUD
+# - report   : [추가 2026-05-16] 게시글 신고 접수 + 관리자 제재 처리
 from routers import user, routine, completion, feed, like, comment, mypage, stats
+from routers import notice, report
 
 # FastAPI 앱 인스턴스 생성
 app = FastAPI()
@@ -121,3 +124,13 @@ app.include_router(comment.router)
 # 설명: Express requireAuth 이후 user_id 를 붙여 호출하며, 내부 인증 헤더 미들웨어를 통과해야 한다.
 app.include_router(mypage.router)
 app.include_router(stats.router)
+
+# [추가 2026-05-16] 관리자 페이지 백엔드 라우터 등록.
+# 이유: AdminPage / NoticeList / FeedPage 의 공지사항·신고 mock 을
+#       실제 DB 기반 API 로 대체하기 위함.
+# 설명: Express notice.js / report.js 가 require_admin 등 인증을 거친 뒤
+#       내부 인증 헤더(X-Internal-Api-Key)와 함께 이 라우터들을 호출한다.
+# - notice : POST/GET/PATCH/DELETE /notice
+# - report : POST /report, GET /report, GET /report/{id}, PATCH /report/process
+app.include_router(notice.router)
+app.include_router(report.router)
