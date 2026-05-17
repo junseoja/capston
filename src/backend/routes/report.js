@@ -38,22 +38,32 @@ const requireAdmin = require("../middleware/requireAdmin");
 // ── 신고 접수 (POST /report) — 로그인 ────────────────────────────────────────
 router.post("/report", requireAuth, async (req, res, next) => {
     try {
-        const { feed_id, target_user_id, report_category, report_detail } =
-            req.body;
+        const { feed_id, report_category, report_detail } = req.body;
 
-        if (!feed_id || !target_user_id || !report_category) {
+        if (!feed_id || !report_category) {
             return res.status(400).json({
                 success: false,
-                message: "feed_id, target_user_id, report_category 는 필수입니다.",
+                message: "feed_id, report_category 는 필수입니다.",
             });
         }
 
+        // [수정 2026-05-17] target_user_id 는 더 이상 클라이언트 body 에서 받지 않는다.
+        // 원인:
+        //   기존 구조는 브라우저가 보낸 target_user_id 를 그대로 FastAPI 에 전달했다.
+        //   이 경우 악의적 클라이언트가 다른 user_id 로 바꿔 보내면
+        //   신고 대상자가 실제 게시글 작성자와 어긋날 수 있었다.
+        // 이유:
+        //   feed_id 만 신뢰 경계 밖에서 받고, 실제 작성자는 FastAPI 가
+        //   DB 의 feeds.user_id 를 조회해 확정해야 신고 데이터 정합성이 보장된다.
+        // 작동원리:
+        //   Express 는 reporter_user_id 만 세션에서 주입하고,
+        //   FastAPI report.py 의 create_report() 가 feed_id 기준으로
+        //   target_user_id 를 재조회한 뒤 reports 테이블에 저장한다.
         // reporter_user_id 는 클라이언트 값을 믿지 않고 세션에서 주입
         // (남의 이름으로 신고하는 위조 방지)
         const result = await createReport({
             feed_id,
             reporter_user_id: req.user.user_id,
-            target_user_id,
             report_category,
             report_detail: report_detail || null,
         });

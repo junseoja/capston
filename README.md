@@ -3701,6 +3701,121 @@ Day 6~7:     3.2 (컴포넌트 분할, 3.1 의 Context 활용)
 
 ---
 
+## 🔧 2026-05-17 작업 내역
+
+### 1. 이번 세션 개요
+
+5/13 계획의 작업 순서(① DB 테이블 → ② 챌린지 FastAPI 구조 가이드 → ③ 관리자 페이지 백엔드)를 실제 구현. **관리자 페이지(공지사항·신고)를 mock → 실제 백엔드로 풀스택 연결**. 챌린지 백엔드는 담당 팀원 인계용 구조 가이드만 작성.
+
+| 결과물 | 내용 |
+|---|---|
+| DB 테이블 | `docs/migrations-2026-05-13-admin-challenge.sql` (6개) RDS 적용 |
+| 챌린지 가이드 | `routers/challenge.py` — 12 엔드포인트 구조 + TODO 주석 (팀원 구현용) |
+| 공지/신고 백엔드 | FastAPI 2 + Express 2 라우터 + 미들웨어 + 헬퍼 — 풀스택 |
+| 프론트 통합 | AdminPage / App.jsx 의 localStorage·in-memory mock 전부 제거 |
+| 부수 처리 | 도커 핫리로드 복구 + `start.sh` 자동 셋업 + `feeds.deleted_at` 누락 수정 |
+
+---
+
+### 2. DB 테이블 (6개) + feeds 보강
+
+- 5/13 작성한 `migrations-2026-05-13-admin-challenge.sql` 을 AWS RDS 에 실제 적용:
+  challenges / challenge_participants / challenge_proofs / challenge_proof_files / notices / reports
+- 규약: PK `CHAR(36)` UUID v7, KST, Soft Delete(`deleted_at`), 실제 FK
+- **5/17 추가 발견·수정**: 5/1 Soft Delete 도입 시 `feeds` 만 누락되어 있었음.
+  신고 제재(피드 Soft Delete)가 `feeds.deleted_at` 을 전제하므로
+  `migrations-2026-05-17-feeds-soft-delete.sql` 로 `ALTER TABLE feeds ADD deleted_at` +
+  `feed.py` 조회 2곳에 `WHERE deleted_at IS NULL` 필터 추가.
+
+---
+
+### 3. 챌린지 FastAPI 구조 가이드 (구현은 팀원)
+
+`src/python_api/routers/challenge.py` — **실 구현 대신 청사진**:
+- 12 엔드포인트 (CRUD 5 / 참여 3 / 인증 3 + my)
+- 5 Pydantic 모델 + try/except/rollback/finally 골격 미리 작성
+- 각 함수 docstring 에 SQL 예시 + 단계별 TODO 17개
+- `raise HTTPException(501)` 로 미구현 표시 (Swagger 에 노출되어 팀원이 채워감)
+
+---
+
+### 4. 관리자 페이지 백엔드 풀스택 (공지 + 신고)
+
+#### 4-1. FastAPI 라우터
+- `routers/notice.py` (5) — 공지 CRUD. category ENUM 4종 사전검증, Soft Delete
+- `routers/report.py` (4) — 신고 접수 / `GET /report` (feed_id 그룹 집계 + JSON_ARRAYAGG) /
+  `PATCH /report/process` (**단일 트랜잭션**: pending 신고 일괄 completed + 피드 Soft Delete)
+- `app.py` 에 2 라우터 등록
+
+#### 4-2. Express 계층
+- `middleware/requireAdmin.js` — `login_id === "admin"` 검증 (requireAuth 뒤 체이닝)
+- `database.js` — FastAPI 호출 헬퍼 9개 추가 (createNotice~processReport)
+- `routes/notice.js` (5) / `routes/report.js` (4) — 인증·검증 후 중계
+  - 신규/변경 보안: `created_by`/`reporter_user_id`/`processed_by` 는 클라 값 무시,
+    세션 `req.user.user_id` 주입 (위조 방지)
+- `app.js` 에 2 라우터 등록
+
+#### 4-3. 프론트 통합 (mock 완전 제거)
+- `App.jsx`
+  - `notices`: localStorage → `fetchNotices()` (GET /notice, 로그인 시 호출)
+  - `handleReportPost`: in-memory → `POST /report` (`[분류] 상세` reason 분해)
+  - `handleDeleteConfirm`: DELETE+메모리 → `PATCH /report/process` (단일 트랜잭션)
+  - 백엔드 `notice_id/post_date` → 프론트 `id/date` 정규화 1곳에서 처리
+- `AdminPage.jsx`
+  - 공지 CRUD: `setNotices` 직접조작 → POST/PATCH/DELETE + `onNoticeChange()` 재조회
+  - 신고: 자체 `GET /report?status=` fetch + reportTab 변경 시 재조회
+  - 백엔드 그룹 집계 응답 → 기존 렌더 구조로 `mapReportRow` 변환
+
+데이터 흐름(공지): AdminPage → POST /notice → FastAPI INSERT → onNoticeChange → App.fetchNotices → HomePage 모달/NoticeList/AdminPage 동시 갱신
+
+---
+
+### 5. 2026-05-17 추가 오류 수정 (신고·통계·루틴·공지)
+
+관리자/신고 기능 연결 후 코드 리딩 과정에서 발견한 정합성·검증·라우팅 오류 5건을 추가 수정.
+
+| 번호 | 파일 | 원인 | 수정 | 작동 원리 |
+|---|---|---|---|---|
+| 1 | `src/backend/routes/report.js`, `src/python_api/routers/report.py` | 신고 접수 시 `target_user_id` 를 클라이언트 body 에서 받아 저장해 실제 게시글 작성자와 어긋날 수 있었음 | Express 는 `feed_id/report_category/report_detail` 만 받고, FastAPI 가 `feed_id` 기준으로 `feeds.user_id` 를 직접 조회 | `reports.target_user_id` 는 요청자가 보낸 값이 아니라 DB 의 `feeds.user_id` 로 확정되어 위조·누락 방지 |
+| 2 | `src/python_api/routers/stats.py` | `date.today()` 와 MySQL `CURDATE()` 가 서버/DB 타임존을 따라 KST 기준 통계와 어긋날 수 있었음 | `_kst_today()` helper 추가, 기본 주/월 범위와 latest streak 비교를 KST 로 통일. 최근 365일 조회도 Python 이 계산한 KST cutoff 전달 | FastAPI/DB 서버 타임존이 UTC 여도 사용자가 보는 “오늘/이번 주/이번 달”은 한국 시간 기준으로 계산 |
+| 3 | `src/python_api/routers/routine.py` | `time_slot`, `routine_mode` 를 서버에서 검증하지 않아 잘못된 값이 DB ENUM 오류 또는 잘못된 데이터로 이어질 수 있었음 | `ALLOWED_TIME_SLOTS`, `ALLOWED_ROUTINE_MODES` 집합 검증 추가 | INSERT 전 400 응답으로 차단해 DB 제약은 마지막 방어선으로만 사용 |
+| 4 | `src/frontend/NoticeDetail.jsx` | 목록 버튼은 `setPage("notice_list")` 를 호출하지만 `App.jsx` 라우터 어댑터는 `"notice"` 만 처리 | 버튼 pageKey 를 `setPage("notice")` 로 변경 | 클릭 시 App 의 adapter 가 `navigate("/notice")` 를 실행해 공지 목록으로 복귀 |
+| 5 | `src/python_api/routers/report.py` | `AdminPage` 는 `admin_comment` 를 읽지만 `GET /report` 목록 SELECT 가 해당 컬럼을 반환하지 않음 | feed_id 그룹 집계 SELECT 에 `MAX(r.admin_comment) AS admin_comment` 추가 | 처리 완료 목록에서도 제재 사유가 응답에 포함되어 상세 모달 표시 가능 |
+
+수정 주석 정책:
+- 변경 지점마다 `2026-05-17` 날짜를 남김.
+- 단순 변경 설명이 아니라 **원인 / 이유 / 작동원리**를 코드 주석에 분리해 기록.
+- 관리자 권한을 `users.role` 로 전환하는 작업은 별도 6번 이슈로 남겨 두고 이번 수정 범위에서는 제외.
+
+---
+
+### 6. 부수 작업 (개발 환경)
+
+| 문제 | 원인 | 해결 |
+|---|---|---|
+| 도커에서 코드 수정해도 반영 안 됨 → 매번 재빌드 | macOS 볼륨이 inotify 못 넘김. backend/python_api 에 polling 설정 누락 (frontend 만 있었음) | python_api `WATCHFILES_FORCE_POLLING=true`, backend `nodemon --legacy-watch`, package.json dev 스크립트(5/11 #Minor 부채 해소) |
+| 도커 후 `./start.sh` 깨짐 | 호스트에 venv/node_modules 없음 | `start.sh` 가 없으면 자동 생성·설치(첫 1회) + node --watch 핫리로드 |
+| `GET /report` 500 | `feeds.deleted_at` 컬럼 없음 (5/1 누락) | 2번 참고 — feeds Soft Delete 통일 |
+
+---
+
+### 7. 검증 / 한계
+
+- 전 파일 syntax OK (esbuild JSX 6 / Python 3 / Express 5)
+- 2026-05-17 추가 오류 수정 검증:
+  - `python3 -m py_compile src/python_api/routers/report.py src/python_api/routers/stats.py src/python_api/routers/routine.py`
+  - `node --check src/backend/routes/report.js`
+  - `npm run build`
+  - `git diff --check`
+- 로컬 `./start.sh` 정상, 공지·신고 흐름 1차 동작 확인 (정밀 테스트는 후속)
+- 한계:
+  - 챌린지 백엔드 미구현 (가이드만 — 팀원 담당)
+  - 도커(`./start-docker.sh`) 재빌드 필요 상태 (정밀 검증 후속)
+  - `deleteNotifications`(제재 알림) 는 여전히 localStorage mock (별도 항목)
+  - 메트릭스/대시보드 통계는 하드코딩 유지 (별도 항목)
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료

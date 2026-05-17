@@ -31,13 +31,31 @@
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 TIME_SLOTS = ["morning", "lunch", "dinner"]
 CATEGORY_COLORS = ["#4f46e5", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6", "#06b6d4"]
+KST = timezone(timedelta(hours=9))
+
+
+def _kst_today() -> date:
+    """KST 기준 오늘 날짜.
+
+    [수정 2026-05-17]
+    원인:
+        date.today() 는 FastAPI 컨테이너/서버의 로컬 타임존을 따른다.
+        서버가 UTC 로 실행되면 한국 시간 자정 이후에도 통계 기본 기간과
+        최신 연속 달성일 계산이 하루 늦게 잡힐 수 있었다.
+    이유:
+        서비스 화면과 루틴 달성 판단은 한국 사용자 기준 날짜(KST)로 통일해야 한다.
+    작동원리:
+        timezone(+09:00)을 명시한 datetime.now(KST) 에서 date() 만 추출한다.
+        이 helper 를 통계 기본 시작일/종료일, 최신 streak 비교, 365일 조회 기준에 공통 적용한다.
+    """
+    return datetime.now(KST).date()
 
 
 def _rate(done: int, total: int) -> int:
@@ -84,7 +102,9 @@ def _calculate_streaks(completion_dates):
             current = 1
     best = max(best, current)
 
-    latest = current if sorted_dates[-1] == date.today() else 0
+    # [수정 2026-05-17] 최신 streak 도 KST 오늘과 비교한다.
+    # 원인/이유/작동원리는 _kst_today() 주석 참고.
+    latest = current if sorted_dates[-1] == _kst_today() else 0
     return {"best_streak": best, "latest_streak": latest}
 
 
@@ -130,7 +150,14 @@ def get_stats(
     반환:
         total, chart, routine_stats, category_stats, best_streak/latest_streak.
     """
-    today = date.today()
+    # [수정 2026-05-17] 주간/월간 기본 범위 산정 기준을 KST 로 통일한다.
+    # 원인:
+    #   기존 date.today() 는 서버 타임존을 따라 UTC 환경에서 한국 날짜와 달라질 수 있었다.
+    # 이유:
+    #   사용자가 보는 "이번 주/이번 달" 통계는 한국 시간 기준이어야 루틴 완료 상태와 맞다.
+    # 작동원리:
+    #   _kst_today() 로 현재 KST 날짜를 구한 뒤 기존 weekly/monthly 계산식을 그대로 적용한다.
+    today = _kst_today()
     default_start = today - timedelta(days=today.weekday()) if mode == "weekly" else today.replace(day=1)
     default_end = default_start + timedelta(days=6) if mode == "weekly" else (
         today.replace(day=28) + timedelta(days=4)
@@ -171,14 +198,23 @@ def get_stats(
             )
             completion_rows = cursor.fetchall()
 
+            # [수정 2026-05-17] DB CURDATE() 대신 Python 에서 계산한 KST 기준일을 전달한다.
+            # 원인:
+            #   CURDATE() 는 MySQL 서버 타임존에 의존하므로 FastAPI 의 KST 기준과 다시 어긋날 수 있다.
+            # 이유:
+            #   streak 계산용 최근 365일 조회도 화면의 "오늘"과 같은 날짜 기준을 써야 한다.
+            # 작동원리:
+            #   today 는 이미 KST 날짜이므로 today - 365일을 cutoff 로 만들고,
+            #   SQL 은 completed_at >= %s 파라미터만 비교한다.
+            streak_cutoff = today - timedelta(days=365)
             cursor.execute(
                 """SELECT DISTINCT DATE(completed_at) AS completed_date
                 FROM routine_completions
                 WHERE user_id = %s
                   AND deleted_at IS NULL
-                  AND completed_at >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+                  AND completed_at >= %s
                 ORDER BY completed_date ASC""",
-                (user_id,)
+                (user_id, streak_cutoff.isoformat())
             )
             streak_dates = [_to_iso_date(row["completed_date"]) for row in cursor.fetchall()]
 

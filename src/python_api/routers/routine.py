@@ -67,6 +67,9 @@ from uuid_extensions import uuid7str  # UUID v7: 시간 순서가 보장되는 U
 # /routine 접두사 라우터 생성, Swagger UI 태그 "routine"으로 그룹화
 router = APIRouter(prefix="/routine", tags=["routine"])
 
+ALLOWED_TIME_SLOTS = {"morning", "lunch", "dinner"}
+ALLOWED_ROUTINE_MODES = {"check", "detail"}
+
 # ── 요청 데이터 모델 ──────────────────────────────────────────────────────────
 
 class RoutineCreate(BaseModel):
@@ -100,8 +103,33 @@ def create_routine(body: RoutineCreate):
         dict: {"success": True}
 
     Raises:
+        HTTPException 400: time_slot / routine_mode 허용값 위반
         HTTPException 500: DB 저장 오류
     """
+    # [수정 2026-05-17] time_slot / routine_mode 서버 검증 추가.
+    # 원인:
+    #   기존에는 프론트가 보내는 문자열을 그대로 INSERT 했다.
+    #   프론트 버그나 직접 API 호출로 "night", "photo" 같은 값이 들어오면
+    #   DB ENUM 제약에서 500 오류처럼 터지거나 잘못된 상태가 저장될 수 있었다.
+    # 이유:
+    #   입력 오류는 서버가 명확한 400 응답으로 차단해야 하고,
+    #   DB 제약은 마지막 방어선으로만 두는 편이 API 동작을 예측 가능하게 만든다.
+    # 작동원리:
+    #   허용 집합(ALLOWED_TIME_SLOTS / ALLOWED_ROUTINE_MODES)에 포함되는지
+    #   INSERT 전에 검사한다. 실패하면 커넥션을 열기 전 HTTPException 400 을 반환하므로
+    #   불필요한 DB 트랜잭션도 생성되지 않는다.
+    if body.time_slot not in ALLOWED_TIME_SLOTS:
+        raise HTTPException(
+            status_code=400,
+            detail="time_slot 은 morning, lunch, dinner 중 하나여야 합니다.",
+        )
+
+    if body.routine_mode not in ALLOWED_ROUTINE_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail="routine_mode 는 check 또는 detail 이어야 합니다.",
+        )
+
     conn = get_connection()
     try:
         with conn.cursor() as cursor:

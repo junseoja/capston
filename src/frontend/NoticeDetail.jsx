@@ -63,8 +63,18 @@ function NoticeDetail({ notice, setPage }) {
         paddingTop: "25px",
         marginBottom: "10px"
       }}>
+        {/* [수정 2026-05-17] App.jsx 의 react-router 어댑터가 인식하는 pageKey 로 통일.
+            원인:
+              이 컴포넌트는 "notice_list" 를 전달했지만 App.jsx 는 "notice" 만 목록 경로로 매핑했다.
+              그래서 버튼 클릭은 발생해도 navigate("/notice") 가 실행되지 않았다.
+            이유:
+              NoticeList → NoticeDetail 이동은 frontend 원본의 page-state 패턴을
+              App.jsx 에서 react-router 로 변환하는 구조라 pageKey 문자열이 정확히 맞아야 한다.
+            작동원리:
+              setPage("notice") 를 호출하면 App.jsx 의 setPage adapter 가 이를 받아
+              navigate("/notice") 를 실행하고 공지 목록 화면으로 돌아간다. */}
         <button
-          onClick={() => setPage("notice_list")}
+          onClick={() => setPage("notice")}
           style={{
             padding: "10px 40px",
             borderRadius: "8px",

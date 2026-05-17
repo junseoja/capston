@@ -64,12 +64,11 @@ class ReportCreate(BaseModel):
     """신고 접수 요청 (POST /report/)
 
     Express report.js 가 세션에서 reporter_user_id 를 주입.
-    target_user_id(작성자) 는 Express 가 feed_id 로 조회해 주입하거나
-    프론트가 보낸 값을 그대로 전달 (Express 에서 결정).
+    target_user_id(작성자) 는 2026-05-17 부터 요청값으로 받지 않고,
+    이 라우터가 feed_id 기준으로 feeds.user_id 를 직접 조회해 확정한다.
     """
     feed_id: str                       # 신고된 게시글 UUID v7
     reporter_user_id: str              # 신고한 사용자 (세션 주입)
-    target_user_id: str                # 게시글 작성자
     report_category: str               # 6종 ENUM 중 하나
     report_detail: Optional[str] = None  # 상세 사유 (선택)
 
@@ -106,6 +105,7 @@ def create_report(body: ReportCreate):
 
     예외:
         400 : category 잘못됨
+        404 : 신고할 게시물이 없음
         409 : 이미 신고한 게시물 (중복)
         500 : DB 오류
     """
@@ -118,6 +118,33 @@ def create_report(body: ReportCreate):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # [수정 2026-05-17] feed_id 기준 실제 게시글 작성자 조회.
+            # 원인:
+            #   이전에는 Express/프론트가 전달한 target_user_id 를 INSERT 에 사용했다.
+            #   클라이언트 입력은 조작 가능하므로 reports.target_user_id 가
+            #   실제 feeds.user_id 와 달라지는 데이터 불일치가 발생할 수 있었다.
+            # 이유:
+            #   신고의 대상자는 "요청자가 주장한 사용자"가 아니라
+            #   "신고된 feed_id 의 실제 작성자"여야 한다. 따라서 DB 를 진실 공급원으로 삼는다.
+            # 작동원리:
+            #   1) feeds 에서 feed_id 와 deleted_at IS NULL 조건으로 활성 게시글을 찾는다.
+            #   2) 조회된 feeds.user_id 를 target_user_id 변수에 담는다.
+            #   3) 아래 INSERT 는 이 변수만 사용하므로 클라이언트가 target_user_id 를 보내도 무시된다.
+            cursor.execute(
+                """SELECT user_id
+                    FROM feeds
+                    WHERE feed_id = %s
+                      AND deleted_at IS NULL""",
+                (body.feed_id,),
+            )
+            feed = cursor.fetchone()
+            if not feed:
+                raise HTTPException(
+                    status_code=404,
+                    detail="신고할 게시물을 찾을 수 없습니다.",
+                )
+            target_user_id = feed["user_id"]
+
             # 2) 중복 신고 차단 — 같은 사람이 같은 게시물을 또 신고했는지 확인.
             #    아직 처리 안 된(pending) 신고가 이미 있으면 막는다.
             cursor.execute(
@@ -141,7 +168,7 @@ def create_report(body: ReportCreate):
                     (report_id, feed_id, reporter_user_id, target_user_id,
                         report_category, report_detail)
                     VALUES (%s, %s, %s, %s, %s, %s)""",
-                (new_id, body.feed_id, body.reporter_user_id, body.target_user_id,
+                (new_id, body.feed_id, body.reporter_user_id, target_user_id,
                 body.report_category, body.report_detail),
             )
         conn.commit()
@@ -204,6 +231,7 @@ def list_reports(
                 "representative_id": "...", "last_reported_at": "...",
                 "target_user_id": "...", "author_nickname": "...",
                 "feed_content": "...", "feed_deleted": 0|1,
+                "admin_comment": "...",
                 "reporters": [ {"reporter_user_id":"...", "report_category":"...",
                             "report_detail":"...", "created_at":"..."}, ... ]
             }, ...
@@ -235,6 +263,18 @@ def list_reports(
                     f.content                                    AS feed_content,
                     -- 피드가 이미 Soft Delete 됐는지 (관리자 참고용)
                     (f.deleted_at IS NOT NULL)                   AS feed_deleted,
+                    -- [수정 2026-05-17] 처리 완료 목록에서 관리자 코멘트를 함께 내려준다.
+                    -- 원인:
+                    --   AdminPage 는 r.admin_comment 를 읽어 상세 모달에 표시하지만
+                    --   기존 SELECT 가 admin_comment 를 반환하지 않아 항상 빈 문자열로 보였다.
+                    -- 이유:
+                    --   PATCH /report/process 가 reports.admin_comment 를 저장하므로
+                    --   GET /report 목록도 같은 필드를 포함해야 처리 사유를 확인할 수 있다.
+                    -- 작동원리:
+                    --   목록은 feed_id 단위 GROUP BY 이므로 일반 컬럼을 그대로 SELECT 할 수 없다.
+                    --   같은 처리 작업에서 같은 admin_comment 가 일괄 저장되는 구조라
+                    --   MAX(r.admin_comment) 로 그룹 대표값을 안정적으로 뽑아 응답에 포함한다.
+                    MAX(r.admin_comment)                         AS admin_comment,
                     -- 신고자들을 JSON 배열로 집계 (프론트 reporters 와 매핑)
                     JSON_ARRAYAGG(
                         JSON_OBJECT(
