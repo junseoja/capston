@@ -33,6 +33,26 @@ const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY; // [추가 2026-05-10] Fa
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // [추가] 백엔드 기본 이메일 형식 검사
 const ALLOWED_GENDERS = ["남", "여", "기타"]; // [추가] DB ENUM과 동일한 허용 성별 목록
 
+// [추가 2026-05-17 / 배포 준비] 세션 쿠키 옵션 공통 상수.
+// 오류번호: 배포 준비 (크로스 도메인 쿠키)
+// 날짜: 2026-05-17
+// 기대효과:
+//   배포 시 프론트(vercel.app)와 백엔드(render.com)가 다른 도메인이라
+//   sameSite:"lax" 면 브라우저가 세션 쿠키를 안 보내 로그인이 안 됨.
+//   production 에서는 secure:true + sameSite:"none" 으로 자동 전환.
+// 장점:
+//   - 발급(res.cookie)과 제거(res.clearCookie)가 동일 옵션을 공유 →
+//     옵션 불일치로 로그아웃 시 쿠키가 안 지워지는 브라우저 버그 예방.
+//   - 로컬은 기존대로 secure:false + sameSite:"lax" (HTTP 개발 정상 동작).
+// 주의: sameSite:"none" 은 브라우저 규칙상 반드시 secure:true 와 함께여야 함
+//       → production(HTTPS) 에서만 none 적용하므로 안전.
+const IS_PROD = process.env.NODE_ENV === "production";
+const SESSION_COOKIE_OPTIONS = {
+    httpOnly: true,                          // JS 접근 불가 → XSS 방어
+    secure: IS_PROD,                         // 배포(HTTPS)에서만 true
+    sameSite: IS_PROD ? "none" : "lax",      // 배포=크로스도메인 none, 로컬 lax
+};
+
 // [추가 2026-05-17 / 신규 #19 회원가입 비밀번호 정책]
 // 오류번호: 5/11 종합 리뷰 신규 #19 (회원가입 비밀번호 정책 부재)
 // 날짜: 2026-05-17
@@ -238,14 +258,10 @@ router.post("/login", async (req, res, next) => {
         const sessionId = uuidv4();
         await createSession(sessionId, user.user_id);
 
+        // [수정 2026-05-17] 공통 SESSION_COOKIE_OPTIONS 사용 (배포 크로스도메인 대응)
         res.cookie("sessionId", sessionId, {
-            httpOnly: true,              // JS 접근 불가 → XSS 방어
-            // [수정 2026-04-29] 프로덕션(NODE_ENV=production) 에서는 HTTPS 필수,
-            // 개발 환경(HTTP) 에서는 false 로 동작하도록 환경에 따라 자동 결정.
-            // 기존에는 항상 false 라 프로덕션 배포 시 쿠키 탈취 위험이 있었음.
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",             // CSRF 일부 방어
-            maxAge: 1000 * 60 * 60 * 24, // 1일
+            ...SESSION_COOKIE_OPTIONS,
+            maxAge: 1000 * 60 * 60 * 24, // 1일 (발급 시에만 추가)
         });
 
         return res.json({ success: true, message: "로그인 성공" });
@@ -305,13 +321,9 @@ router.post("/logout", async (req, res, next) => {
         const { sessionId } = req.cookies;
         if (sessionId) await deleteSession(sessionId);
 
-        // [수정 2026-04-29] clearCookie 옵션도 발급 시와 동일하게 맞춰야 일부 브라우저에서
-        // 쿠키가 제거되지 않는 문제를 예방. secure 도 환경에 따라 자동 결정.
-        res.clearCookie("sessionId", {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
-        });
+        // [수정 2026-05-17] 발급(res.cookie)과 완전히 동일한 옵션으로 제거.
+        // SESSION_COOKIE_OPTIONS 공유 → 옵션 불일치로 쿠키가 안 지워지는 버그 예방.
+        res.clearCookie("sessionId", SESSION_COOKIE_OPTIONS);
         return res.json({ success: true, message: "로그아웃 완료" });
     } catch (error) {
         return next(error);

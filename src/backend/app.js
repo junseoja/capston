@@ -29,7 +29,17 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 
 const PORT = process.env.PORT || 3000;
+// [수정 2026-05-17 / 배포 준비] CORS 다중 origin 지원.
+// 오류번호: 배포 준비 (배포 후 로컬 동시 테스트 불가 문제)
+// 날짜: 2026-05-17
+// 기대효과: FRONTEND_URL 을 콤마로 여러 개 지정 가능.
+//   예) FRONTEND_URL=http://localhost:5173,https://my-app.vercel.app
+//   → 배포 후에도 로컬 개발 서버에서 동시에 붙어 테스트 가능.
+// 장점: 기존 단일 값도 그대로 동작(콤마 없으면 1개짜리 배열) → 후방 호환.
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const ALLOWED_ORIGINS = FRONTEND_URL.split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
 const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS || 500);
 
 // 인증 라우터: 회원가입(/signup), 로그인(/login), 로그아웃(/logout),
@@ -67,10 +77,22 @@ const app = express();
 
 // ── 미들웨어 등록 ────────────────────────────────────────────────────────────
 
-// CORS 설정: React 개발 서버(5173)에서 오는 요청만 허용
+// CORS 설정: 허용된 프론트 origin 목록(ALLOWED_ORIGINS)만 통과
 // credentials: true → 쿠키 포함 요청(fetch credentials: "include") 허용
-//              반드시 origin을 와일드카드(*) 대신 명시적 URL로 지정해야 함
-app.use(cors({ origin: FRONTEND_URL, credentials: true }));
+//   - 와일드카드(*) 는 credentials 와 함께 못 쓰므로 명시 목록 사용
+//   - [수정 2026-05-17] 다중 origin: 콤마 분리된 ALLOWED_ORIGINS 중 하나면 허용.
+//     origin 이 없는 요청(서버간 호출, 헬스체크, curl)은 통과(!origin).
+app.use(
+    cors({
+        origin(origin, callback) {
+            if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+                return callback(null, true);
+            }
+            return callback(new Error(`CORS 차단된 origin: ${origin}`));
+        },
+        credentials: true,
+    }),
+);
 
 // 요청 body를 JSON으로 파싱 → req.body 에 JSON 데이터 담김
 app.use(express.json());
