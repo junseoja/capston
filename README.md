@@ -3862,6 +3862,90 @@ EC2(직접) / Render·Vercel(PaaS) / cloudflared(터널) 트레이드오프 비�
 
 ---
 
+## 🔧 2026-05-18 작업 내역
+
+### 1. 이번 세션 개요
+
+5/17 에 준비한 배포 코드(환경변수 전환·CORS·쿠키)를 실제로 **cloudflared Quick Tunnel 로 글로벌 공개**. 도메인 구매 전 무료 검증 단계. 윈도우 PC·맥 사파리·맥 크롬 **3개 기기/브라우저에서 로그인까지 정상** 확인.
+
+| 결과 | 내용 |
+|---|---|
+| 글로벌 접속 | `https://<랜덤>.trycloudflare.com` (프론트) + 별도 터널(Express) |
+| 검증 범위 | 외부 기기 접속 → 로그인 → 세션 유지 (크로스 도메인 쿠키 동작) |
+| 핵심 깨달음 | **터널 노출은 dev 서버 금지, 반드시 프로덕션 빌드 정적 서빙** |
+| 변경 파일 | `vite.config.js`, `start.sh` (2개) |
+
+---
+
+### 2. 터널 연결까지 — 순차 오류 5건 (원인 → 해결 → 작동원리)
+
+외부기기 → 터널 → 맥(프론트 5173) → 터널 → Express(3000) → FastAPI(8000, 비노출) 경로가 한 번에 안 뚫린 이유는 막힌 지점이 5곳이었기 때문. 앞 3개는 **네트워크 연결** 문제, 뒤 2개는 **실행 모드** 문제.
+
+| # | 증상 | 원인 | 해결 | 작동 원리 |
+|---|---|---|---|---|
+| 1 | `trycloudflare` 500 / error 1101 | Cloudflare 무료 Quick Tunnel **서버측 일시 장애** (우리 코드 무관) | 터널 명령 재실행 (새 URL 발급) | 코드 변경 0. Quick Tunnel 의 알려진 간헐 현상 — 디펜스 전 미리 1회 띄워 확인 |
+| 2 | `Blocked request. This host is not allowed` | Vite(5.x+) 보안: dev 서버가 **등록 안 된 호스트(터널 도메인) 차단**. Quick URL 은 매번 바뀌어 하드코딩 불가 | `vite.config.js` `server.allowedHosts: true` (+`preview` 동일) | 어떤 호스트 헤더든 통과 → 터널/도메인 무엇이든 수용 |
+| 3 | 흰 화면 + cloudflared 로그 `dial tcp [::1]:5173: connection refused` | **바인딩 불일치**: macOS Vite 기본이 IPv6 `[::1]` 한쪽만 바인딩, cloudflared 는 `localhost`→IPv4 `127.0.0.1` 접근 | `vite.config.js` `server.host: true` → `0.0.0.0`(IPv4+IPv6 전부) | cloudflared 가 어느 스택으로 와도 동일 포트에서 응답 |
+| 4 | `$RefreshSig$ is not defined (HomePage.jsx)` + cloudflared HMR `400 Bad Request` | **핵심 원인**: `npm run dev` 는 HMR/React Fast Refresh 전제. preamble 주입·HMR WebSocket 이 **터널을 통과 못 함** → `$RefreshSig$` 미주입 → JS 폭발 | `vite.config.js` `preview` 블록 + `start.sh` `prod` 모드 분기(`npm run build` → `npm run preview`) | 빌드 산출물엔 HMR 자체가 없음 → 터널 통과 시 깨질 요소 제거 (터널 노출의 정석) |
+| 5 | 4 수정 후에도 dev 로 뜸 | `start.sh` 는 인자 없으면 dev, `prod` 인자 있어야 build+preview | 실행을 `./start.sh prod` 로 | 정적 빌드 서빙 → `$RefreshSig$` 소멸 → 전 기기 로그인 정상 |
+
+> 한 줄 결론: **1~3 = "터널이 맥의 Vite 까지 닿게"**, **4~5 = "닿은 뒤 받는 게 dev 가 아니라 빌드 결과물이게"**. 5개가 다 풀려 경로가 끊김 없이 연결됨.
+> 크로스 도메인 쿠키 유지는 별개로 5/17 의 `NODE_ENV=production`(→ `sameSite:"none"+secure`) + CORS 다중 origin 덕분.
+
+---
+
+### 3. 변경 파일
+
+#### 3-1. `vite.config.js`
+```js
+preview: { allowedHosts: true, host: true, port: 5173 },  // 빌드 산출물 정적 서빙 (터널/배포)
+server:  { allowedHosts: true, host: true },               // dev 도 터널 통과 가능 (로컬 개발 영향 0)
+```
+- `allowedHosts` → 오류 #2 해결, `host:true` → 오류 #3 해결, `preview` 블록 → 오류 #4 해결.
+- dev/preview 분리라 로컬 `npm run dev` 동작에는 영향 없음.
+
+#### 3-2. `start.sh`
+- React 구간에 `prod` 모드 분기 추가:
+  - 인자 없음 → `npm run dev` (HMR, 로컬 개발용 — 기존 동작 보존)
+  - `prod` 인자 → `npm run build` → `npm run preview` (정적 서빙, 터널/배포용)
+  - 빌드 실패 시 FastAPI/Express 프로세스 정리 후 종료.
+
+---
+
+### 4. 디펜스 당일 재세팅 체크리스트 ⚠️
+
+> Quick Tunnel URL 은 **터널 재시작마다 바뀐다**. 디펜스 직전 1회 세팅 권장. (상세: `docs/cloudflared-tunnel.md`)
+
+```
+① 로컬 서버      : ./start.sh prod        ← 반드시 prod (그냥 ./start.sh 는 dev=흰화면)
+② Express 터널   : cloudflared tunnel --url http://localhost:3000   → URL 복사 (= API 주소 BBB)
+③ 프론트 터널    : cloudflared tunnel --url http://localhost:5173   → URL 복사 (= 접속 주소 AAA)
+④ .env 3곳 갱신  :
+     루트 .env            VITE_EXPRESS_URL=https://BBB.trycloudflare.com
+     src/backend/.env     FRONTEND_URL=https://AAA.trycloudflare.com,http://localhost:5173
+     src/backend/.env     NODE_ENV=production      (크로스도메인 쿠키 — HTTPS 터널 필수)
+⑤ ① 재시작      : Ctrl+C → ./start.sh prod   다시 (Vite 가 새 VITE_EXPRESS_URL 로 재빌드해야 반영)
+                  (터널 ②③ 은 끄지 말 것 — 유지)
+⑥ 접속 테스트   : ③의 프론트 URL(AAA) 로 → 로그인 → 새로고침 유지 확인
+```
+
+자주 막히는 곳: 흰화면=① prod 아님 / 새로고침 풀림=NODE_ENV·⑤재시작 / API 전부 실패=VITE_EXPRESS_URL 옛 URL+⑤미재시작 / CORS=FRONTEND_URL 오타·끝슬래시.
+
+---
+
+### 5. 검증 / 한계
+
+- `curl` 로 터널 응답 확인: `/@vite/client` 없음 + `/assets/index-*.js`·`/assets/index-*.css` 존재 → **프로덕션 빌드 서빙 확정**.
+- Express 터널 404 응답(루트 라우트 없음) = 서버 살아있음 확인.
+- 윈도우 PC / 맥 Safari / 맥 Chrome 3종 로그인 + 세션 유지 성공.
+- 한계:
+  - Quick Tunnel URL 은 재시작마다 변경 (고정 주소 필요 시 → Named Tunnel: 도메인 구매 후, `docs/cloudflared-tunnel.md` §6).
+  - 맥이 켜져 있고 터미널 3개(`start.sh prod` + 터널 2개)가 떠 있어야 동작.
+  - `NODE_ENV=production` 인 동안 로컬 `http://localhost:5173` 직접 접속은 secure 쿠키라 로그인 불가 → 테스트는 터널 URL 로. 순수 로컬 복귀 시 `NODE_ENV=development` + 재시작.
+  - 다음: 도메인 구매 → Named Tunnel(고정 주소) → Capacitor 웹뷰 앱화.
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료

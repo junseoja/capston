@@ -89,11 +89,26 @@ cd "$SCRIPT_DIR/src/backend" || exit 1
 node --watch app.js &
 EXPRESS_PID=$!
 
-# ── React (Vite HMR) ─────────────────────────────────────────────────────────
-echo "⚛️  React    → $FRONTEND_URL"
+# ── React ────────────────────────────────────────────────────────────────────
+# [수정 2026-05-18 / 배포 준비] dev vs prod(터널/배포) 모드 분기
+#   - 인자 없음        : npm run dev   (HMR 핫리로드 — 로컬 개발용)
+#   - 인자 "prod"      : npm run build → npm run preview (정적 서빙 — 터널/배포용)
+#     이유: dev 서버 HMR(Fast Refresh, $RefreshSig$)은 cloudflared 터널을
+#     통과하지 못해 흰 화면이 됨. 배포/터널 노출은 빌드 산출물 정적 서빙이 정석.
+#   사용: ./start.sh         (로컬 개발)
+#         ./start.sh prod    (터널/외부 공개)
 cd "$SCRIPT_DIR" || exit 1
-npm run dev &
-REACT_PID=$!
+if [ "$1" = "prod" ]; then
+    echo "⚛️  React    → build + preview (정적 서빙, 터널/배포 모드)"
+    echo "    빌드 중... (수십 초 소요, VITE_EXPRESS_URL 이 이 시점에 코드에 박힘)"
+    npm run build || { echo "❌ 프론트 빌드 실패"; kill "$FASTAPI_PID" "$EXPRESS_PID" 2>/dev/null; exit 1; }
+    npm run preview &
+    REACT_PID=$!
+else
+    echo "⚛️  React    → $FRONTEND_URL (dev HMR)"
+    npm run dev &
+    REACT_PID=$!
+fi
 
 echo ""
 echo "✅ 모두 시작됨"
