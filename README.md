@@ -3946,6 +3946,33 @@ server:  { allowedHosts: true, host: true },               // dev 도 터널 통
 
 ---
 
+### 6. 신규 #18 — 라우터 트랜잭션 정합성 일괄 감사
+
+5/11 리뷰의 신규 #18(`feed.py`/`completion.py`/`user.py` 등 다단계 INSERT/UPDATE 가 5/2 like.py·5/17 report.py 와 같은 표준 패턴인지 미점검) 을 전수 감사.
+
+**감사 결과: 이미 전 라우터 정합 — 패턴 수정 0건 (검증 완료 종결).**
+
+| 검사 항목 | 결과 |
+|---|---|
+| `get_connection → try → commit(쓰기) → except → finally:close` 골격 | 전 함수 일관 ✅ |
+| `except HTTPException: rollback; raise` (4xx 재전파, 삼킴 없음) | 해당 7함수 전부 정상 ✅ |
+| `except Exception: rollback; raise HTTPException(500)` | 전 함수 일관 ✅ |
+| 4xx 검증을 연결 획득 전(try 밖)에서 raise | `routine.create_routine`·`notice` validation — 모범 ✅ |
+| `finally: conn.close()` 전 경로 보장 / 커넥션 누수 | 누락 0 ✅ |
+
+→ #9 커넥션 풀(`database.py MysqlConnectionPool`, 5/3 완료) + 5/17 report.py 작업으로 패턴이 이미 전파 완료. **#18 은 "수정"이 아니라 "health check pass"로 종결.** (#9 의 잔여 async 마이그레이션은 데모 후 과제로 분리.)
+
+**단, 감사 중 발견한 정합성 버그 1건 수정 — `feed.py delete_feed`:**
+
+| 구분 | 내용 |
+|---|---|
+| 원인 | 사용자 본인 피드 삭제만 물리 `DELETE FROM feeds` — 5/17 도입한 `feeds.deleted_at` Soft Delete 모델 위반 (조회·신고제재는 이미 Soft Delete) |
+| 수정 | `UPDATE feeds SET deleted_at = NOW() ... AND deleted_at IS NULL` 로 전환. docstring/`affected==0` 메시지 정정 |
+| 작동 원리 | 조회(`get_feeds`/`get_feed_detail`)가 이미 `deleted_at IS NULL` 필터라 사용자 체감 동일. CASCADE 로 `feed_images`/`likes`/`comments` 영구 소멸하던 것 → 보존(복구 가능). 신고된 피드를 작성자가 지워 제재 이력과 어긋나던 구멍 차단 |
+| 검증 | `python3 -m py_compile src/python_api/routers/feed.py` ✅ |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료

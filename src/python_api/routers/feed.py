@@ -496,12 +496,12 @@ def delete_feed(
     feed_id: str,
     user_id: str = Query(..., description="작성자 UUID v7 — 본인 피드만 삭제 가능")
 ):
-    """피드 게시물 삭제 (소유자 검증 포함)
+    """피드 게시물 삭제 (Soft Delete, 소유자 검증 포함)
 
-    WHERE feed_id = %s AND user_id = %s 조건으로 삭제하여
-    다른 유저의 피드는 삭제되지 않도록 보장.
-    ON DELETE CASCADE 설정이 되어 있으면 feed_images, feed_likes,
-    feed_comments도 자동으로 삭제됨.
+    WHERE feed_id = %s AND user_id = %s 조건으로 본인 피드만 처리하며,
+    물리 삭제가 아니라 deleted_at 갱신(Soft Delete)으로 동작한다.
+    연관 feed_images / feed_likes / feed_comments 는 보존된다
+    (조회 경로가 feeds.deleted_at IS NULL 로 이미 가려줌).
 
     Args:
         feed_id (str): 삭제할 피드의 UUID v7 (URL 경로 파라미터)
@@ -509,16 +509,29 @@ def delete_feed(
 
     Returns:
         dict: {"success": True}                     → 삭제 성공
-                {"success": False, "message": "..."}  → 권한 없음
+                {"success": False, "message": "..."}  → 권한 없음 / 이미 삭제됨
 
     Raises:
         HTTPException 500: DB 삭제 오류
     """
+    # ── [오류번호] #18 인접 — 피드 삭제 모델 정합성 (Soft Delete 위반)
+    #    [날짜]   2026-05-18
+    #    [기대효과]
+    #      사용자 본인 피드 삭제가 물리 DELETE → Soft Delete(UPDATE deleted_at)로 전환되어
+    #      루틴/완료/공지/신고/신고제재(report.process)와 동일한 삭제 모델로 통일.
+    #    [장점]
+    #      - ON DELETE CASCADE 로 feed_images/likes/comments 가 영구 소멸하던 문제 제거(복구 가능).
+    #      - 신고된 피드를 작성자가 직접 지워 제재 이력과 어긋나던 정합성 깨짐 방지.
+    #      - 조회(get_feeds/get_feed_detail)는 이미 deleted_at IS NULL 필터라 추가 변경 불필요.
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "DELETE FROM feeds WHERE feed_id = %s AND user_id = %s",
+                """UPDATE feeds
+                       SET deleted_at = NOW()
+                     WHERE feed_id = %s
+                       AND user_id = %s
+                       AND deleted_at IS NULL""",
                 (feed_id, user_id)
             )
             affected = cursor.rowcount
@@ -526,7 +539,7 @@ def delete_feed(
         conn.commit()
 
         if affected == 0:
-            return {"success": False, "message": "삭제 권한이 없거나 존재하지 않는 피드입니다."}
+            return {"success": False, "message": "삭제 권한이 없거나 이미 삭제된 피드입니다."}
 
         return {"success": True}
     except Exception as e:
