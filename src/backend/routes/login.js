@@ -19,33 +19,20 @@ const bcrypt = require("bcryptjs"); // 비밀번호 단방향 해싱 라이브�
 const {
     findUser,
     createUser,
-    // [추가 2026-04-29] 평문→bcrypt Lazy Migration 용
     updateUserPassword,
     createSession,
     deleteSession,
 } = require("../database");
 const { v4: uuidv4 } = require("uuid"); // 세션 ID 생성용 UUID v4
-// [리팩터링 #12] /me, /logout 에서 세션 검증 중복 코드를 미들웨어로 대체
 const requireAuth = require("../middleware/requireAuth");
 
 const PYTHON_API = process.env.PYTHON_API || "http://localhost:8000"; // FastAPI 서버 주소
-const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY; // [추가 2026-05-10] FastAPI 내부 호출 인증 키
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // [추가] 백엔드 기본 이메일 형식 검사
-const ALLOWED_GENDERS = ["남", "여", "기타"]; // [추가] DB ENUM과 동일한 허용 성별 목록
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY; // FastAPI 내부 호출 인증 키
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // 백엔드 기본 이메일 형식 검사
+const ALLOWED_GENDERS = ["남", "여", "기타"]; // DB ENUM과 동일한 허용 성별 목록
 
-// [추가 2026-05-17 / 배포 준비] 세션 쿠키 옵션 공통 상수.
-// 오류번호: 배포 준비 (크로스 도메인 쿠키)
-// 날짜: 2026-05-17
-// 기대효과:
-//   배포 시 프론트(vercel.app)와 백엔드(render.com)가 다른 도메인이라
-//   sameSite:"lax" 면 브라우저가 세션 쿠키를 안 보내 로그인이 안 됨.
-//   production 에서는 secure:true + sameSite:"none" 으로 자동 전환.
-// 장점:
-//   - 발급(res.cookie)과 제거(res.clearCookie)가 동일 옵션을 공유 →
-//     옵션 불일치로 로그아웃 시 쿠키가 안 지워지는 브라우저 버그 예방.
-//   - 로컬은 기존대로 secure:false + sameSite:"lax" (HTTP 개발 정상 동작).
-// 주의: sameSite:"none" 은 브라우저 규칙상 반드시 secure:true 와 함께여야 함
-//       → production(HTTPS) 에서만 none 적용하므로 안전.
+// 세션 쿠키 옵션은 발급/삭제가 같은 값을 쓰도록 공통 상수로 관리한다.
+// production에서는 크로스도메인 HTTPS 쿠키 전송을 위해 secure + sameSite none을 사용한다.
 const IS_PROD = process.env.NODE_ENV === "production";
 const SESSION_COOKIE_OPTIONS = {
     httpOnly: true,                          // JS 접근 불가 → XSS 방어
@@ -53,15 +40,7 @@ const SESSION_COOKIE_OPTIONS = {
     sameSite: IS_PROD ? "none" : "lax",      // 배포=크로스도메인 none, 로컬 lax
 };
 
-// [추가 2026-05-17 / 신규 #19 회원가입 비밀번호 정책]
-// 오류번호: 5/11 종합 리뷰 신규 #19 (회원가입 비밀번호 정책 부재)
-// 날짜: 2026-05-17
-// 기대효과: 프론트(SignupPage.validatePassword)가 검증하던 비번 정책을
-//          백엔드에서도 동일하게 강제 → curl/직접 API 호출 우회 차단.
-// 장점: 약한 비밀번호 가입 자체를 막아 계정 탈취 위험 감소.
-//       프론트와 규칙을 1:1로 맞춰(8~16자/공백X/영문·숫자·특수 각 1+)
-//       사용자가 프론트 통과 후 백엔드에서 또 막히는 불일치 없음.
-// SignupPage.jsx 의 SPECIAL_CHAR_REGEX 와 동일한 특수문자 집합.
+// SignupPage.jsx와 같은 비밀번호 정책을 백엔드에서도 강제한다.
 const PASSWORD_SPECIAL_REGEX = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/;
 
 /**
@@ -95,10 +74,6 @@ function validateSignupPassword(pw) {
  *   4. 생년월일 "YYYY-MM-DD" 변환
  *   5. FastAPI /user/signup 으로 유저 생성 (해시된 비밀번호 전달)
  */
-// [리팩터링 #1] try/catch + next(err) 추가
-//   - 기존: findUser/createUser 가 throw하면 Express 기본 핸들러로 흘러 HTML 500
-//     → 프론트 res.json()이 SyntaxError 로 크래시
-//   - 이후: 글로벌 에러 핸들러(#3)로 넘겨 JSON 응답 보장
 router.post("/signup", async (req, res, next) => {
     try {
         const { id, password, nickname, birth, gender, email } = req.body;
@@ -107,15 +82,13 @@ router.post("/signup", async (req, res, next) => {
             return res.status(400).json({ success: false, message: "아이디와 비밀번호를 입력하세요." });
         }
 
-        // [추가 2026-05-17 / 신규 #19] 비밀번호 정책 백엔드 강제.
-        // 프론트 검증을 우회한 직접 API 호출(curl 등)도 약한 비번을 막는다.
+        // 프론트 검증을 우회한 직접 API 호출도 같은 비밀번호 정책으로 차단한다.
         const pwError = validateSignupPassword(password);
         if (pwError) {
             return res.status(400).json({ success: false, message: pwError });
         }
 
-        // [추가] 프론트 외의 클라이언트가 잘못된 body를 보내더라도
-        // 500이 아닌 400으로 명확히 응답하도록 기본 입력 검증 보강
+        // 필수 필드 누락은 FastAPI/DB까지 보내지 않고 400으로 응답한다.
         if (!nickname || !email || !gender || !birth) {
             return res.status(400).json({ success: false, message: "회원가입 필수값이 누락되었습니다." });
         }
@@ -181,9 +154,6 @@ router.post("/signup", async (req, res, next) => {
  *   2. bcrypt.compare()로 입력 비밀번호 vs 저장된 해시 비교
  *   3. 일치 시 세션 생성 → httpOnly 쿠키 발급
  */
-// [리팩터링 #1] try/catch + next(err) 추가
-//   - 기존: findUser/createSession 실패 시 HTML 500 반환 → 프론트 crash
-//   - 이후: 글로벌 에러 핸들러(#3)로 JSON 응답 보장
 router.post("/login", async (req, res, next) => {
     try {
         const { id, password } = req.body;
@@ -200,12 +170,7 @@ router.post("/login", async (req, res, next) => {
         //   - 이전 방식으로 평문이 저장된 계정
         //     → 우선 직접 문자열 비교(하위 호환)
         //
-        // [수정 2026-04-29] 평문 → bcrypt Lazy Migration 추가
-        //   기존에는 평문 폴백이 영구적으로 남아 있어 DB 유출 시 즉시 탈취되는
-        //   심각한 보안 위험이 있었음. 이를 해결하기 위해
-        //   "로그인 성공 시점에 자동으로 bcrypt 해시로 업그레이드" 하는 패턴을
-        //   도입하여, 사용자가 한 번이라도 정상 로그인하면 그 즉시
-        //   해당 계정 비밀번호가 bcrypt 해시로 영구 교체되도록 한다.
+        // 레거시 평문 비밀번호는 로그인 성공 시 bcrypt 해시로 자동 교체한다.
         //
         //   흐름:
         //     1) 평문 일치 확인
@@ -218,7 +183,7 @@ router.post("/login", async (req, res, next) => {
         //     - 업그레이드 실패는 console.error 로 로그만 남기고 다음 기회를 노림.
         //       (마이그레이션은 N번 시도되어도 멱등 — 항상 같은 평문이면 같은 결과)
         //
-        //   향후 정리:
+        //   정리 기준:
         //     SELECT user_id FROM users WHERE password NOT LIKE '$2%'; 가
         //     0건이 되면 아래 평문 폴백 분기를 완전히 제거할 수 있다.
         // ─────────────────────────────────────────────────────────────────
@@ -234,17 +199,16 @@ router.post("/login", async (req, res, next) => {
 
             if (isMatch) {
                 try {
-                    // [추가 2026-04-29] saltRounds=10 으로 bcrypt 해시 생성 후 DB 교체
                     const newHash = await bcrypt.hash(password, 10);
                     await updateUserPassword(user.user_id, newHash);
                     console.log(
-                        `[lazy-migration 2026-04-29] user_id=${user.user_id} 평문→bcrypt 변환 완료`
+                        `[lazy-migration] user_id=${user.user_id} 평문→bcrypt 변환 완료`
                     );
                 } catch (migrationError) {
                     // 업그레이드 실패해도 로그인 자체는 통과시킴 — 다음 로그인 때 재시도됨.
                     // 단, 운영 모니터링을 위해 에러 로그는 반드시 남긴다.
                     console.error(
-                        `[lazy-migration 2026-04-29] 비밀번호 해시 업그레이드 실패 — user_id=${user.user_id}:`,
+                        `[lazy-migration] 비밀번호 해시 업그레이드 실패 — user_id=${user.user_id}:`,
                         migrationError?.message || migrationError
                     );
                 }
@@ -258,7 +222,6 @@ router.post("/login", async (req, res, next) => {
         const sessionId = uuidv4();
         await createSession(sessionId, user.user_id);
 
-        // [수정 2026-05-17] 공통 SESSION_COOKIE_OPTIONS 사용 (배포 크로스도메인 대응)
         res.cookie("sessionId", sessionId, {
             ...SESSION_COOKIE_OPTIONS,
             maxAge: 1000 * 60 * 60 * 24, // 1일 (발급 시에만 추가)
@@ -275,12 +238,7 @@ router.post("/login", async (req, res, next) => {
 /**
  * GET /me
  * 쿠키의 sessionId → (requireAuth) 세션 조회 → 유저 정보 반환 (비밀번호 제외)
- *
- * [리팩터링 #12] 기존의 sessionId 추출 + findSession 블록을 requireAuth 로 대체.
- * 401 메시지가 기존 "로그인되지 않았습니다." / "유효하지 않은 세션입니다." 에서
- * 미들웨어 표준 메시지 "로그인이 필요합니다." 로 통일됨 (프론트 쪽은 401 자체만 판단하므로 영향 없음).
  */
-// [리팩터링 #1] try/catch + next(err) 추가 — findUser가 throw해도 글로벌 핸들러로 전달
 router.get("/me", requireAuth, async (req, res, next) => {
     try {
         const user = await findUser(req.user.login_id);
@@ -312,8 +270,6 @@ router.get("/me", requireAuth, async (req, res, next) => {
  * POST /logout
  * DB에서 세션 삭제 + 브라우저 쿠키 제거
  *
- * [리팩터링 #1] try/catch + next(err) 추가 — FastAPI 세션 삭제 실패 시에도
- * 쿠키는 삭제하고 에러만 글로벌 핸들러로 전달.
  * (logout은 미로그인 상태에서도 성공해야 하므로 requireAuth는 적용하지 않음)
  */
 router.post("/logout", async (req, res, next) => {
@@ -321,8 +277,6 @@ router.post("/logout", async (req, res, next) => {
         const { sessionId } = req.cookies;
         if (sessionId) await deleteSession(sessionId);
 
-        // [수정 2026-05-17] 발급(res.cookie)과 완전히 동일한 옵션으로 제거.
-        // SESSION_COOKIE_OPTIONS 공유 → 옵션 불일치로 쿠키가 안 지워지는 버그 예방.
         res.clearCookie("sessionId", SESSION_COOKIE_OPTIONS);
         return res.json({ success: true, message: "로그아웃 완료" });
     } catch (error) {
@@ -367,10 +321,7 @@ router.get("/check-duplicate", async (req, res) => {
 
     try {
         const fetch = require("node-fetch");
-        // [추가 2026-05-10] /check-duplicate 는 database.fetchJson()을 거치지 않고
-        // FastAPI를 직접 fetch 하므로, 여기서도 내부 인증 헤더를 반드시 붙인다.
-        // 이유: FastAPI 전역 미들웨어가 X-Internal-Api-Key 없는 직접 호출을 차단하도록
-        // 바뀌었기 때문에 중복체크만 403으로 깨지는 일을 막기 위함.
+        // 이 엔드포인트는 fetchJson()을 거치지 않으므로 내부 인증 헤더를 직접 붙인다.
         const headers = INTERNAL_API_KEY
             ? { "X-Internal-Api-Key": INTERNAL_API_KEY }
             : {};

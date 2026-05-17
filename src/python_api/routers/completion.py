@@ -13,16 +13,14 @@
 #   - user_id       : UUID v7 (FK → users.user_id)
 #   - proof_text    : 인증 글 (상세 루틴에서 입력)
 #   - completed_at  : 완료 일시 (자동)
-#   - deleted_at    : 삭제 시각 (NULL=활성, NOT NULL=취소됨)  [추가 2026-05-01]
+#   - deleted_at    : 삭제 시각 (NULL=활성, NOT NULL=취소됨)
 #
 # 연결 상태:
 #   Express completion.js 라우터를 통해 프론트엔드와 연결 완료
 #   홈 화면에서 루틴 완료/취소 시 이 API가 호출됨
 #   마이페이지 "최근 활동" 섹션에서 완료 이력 조회에 사용
 #
-# ─────────────────────────────────────────────────────────────────
-# [Soft Delete 도입 2026-05-01]
-# ─────────────────────────────────────────────────────────────────
+# Soft Delete 정책:
 # routines 와 동일 정책: DELETE 행 제거 대신 UPDATE deleted_at = NOW().
 #
 # 정책 분기:
@@ -35,22 +33,7 @@
 #   - DELETE /completion/{id}         → UPDATE deleted_at = NOW()
 #                                        (CASCADE 가 더 이상 트리거되지 않으므로
 #                                         연결된 피드/이미지/댓글/좋아요는 보존)
-# ─────────────────────────────────────────────────────────────────
-#
-# ────────────────────────────────────────────────────────────────────
-# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
-# ────────────────────────────────────────────────────────────────────
-# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
-# 날짜: 2026-05-11
-# 기대효과:
-#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
-#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
-#   - 완료/취소가 빈번한 라우트라 자기 데드락 위험이 가장 큼 → 우선 보강
-# 장점:
-#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
-#   - 풀 반환 시 깨끗한 트랜잭션 상태 보장
-#   - 7개 라우터 일괄 패턴화로 유지보수 비용 최소
-# ────────────────────────────────────────────────────────────────────
+# 모든 실패 경로는 rollback 후 커넥션을 반환해 풀 재사용 상태를 깨끗하게 유지한다.
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -93,21 +76,7 @@ def create_completion(body: CompletionCreate):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # ────────────────────────────────────────────────────────────
-            # [추가 2026-05-10] 완료 생성 전 루틴 소유권 검증.
-            # ────────────────────────────────────────────────────────────
-            # 이유:
-            #   Express 는 세션에서 user_id 를 주입하지만, routine_id 는 프론트가 보낸
-            #   입력값이다. FastAPI 가 이를 그대로 믿으면 사용자가 타인의 routine_id 를
-            #   넣어 완료 기록을 만들 수 있고, 이후 MyPage/Stats 통계까지 오염된다.
-            #
-            # 동작:
-            #   routine_id 가 body.user_id 소유의 "활성 루틴(deleted_at IS NULL)"인지
-            #   먼저 확인한다. 결과가 없으면 INSERT 하지 않고 403으로 거부한다.
-            #
-            # 결과:
-            #   Express 인증을 우회하거나 잘못된 routine_id 를 보내도 완료 기록이 생성되지 않는다.
-            # ────────────────────────────────────────────────────────────
+            # routine_id는 클라이언트 입력이므로, 세션 user_id 소유의 활성 루틴인지 확인한다.
             cursor.execute(
                 """SELECT routine_id
                 FROM routines
@@ -132,14 +101,12 @@ def create_completion(body: CompletionCreate):
         # completion_id를 반환해야 피드 생성 시 FK로 사용 가능
         return {"success": True, "completion_id": new_uuid}
     except HTTPException:
-        # [수정 2026-05-11 #18] 403 등도 트랜잭션 정리 후 재전파
         try:
             conn.rollback()
         except Exception:
             pass
         raise
     except Exception as e:
-        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리 — 풀 반환 시 다음 요청 오염 차단
         try:
             conn.rollback()
         except Exception:
@@ -171,19 +138,8 @@ def get_today_completions(user_id: str):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # ────────────────────────────────────────────────────────────
-            # [주석 보강 2026-04-29] CURDATE() 의 의미 확정
-            # ────────────────────────────────────────────────────────────
-            # database.get_connection() 에서 init_command 로
-            # `SET time_zone = '+09:00'` 을 실행하므로,
-            # 이 쿼리의 CURDATE() 는 항상 KST 기준 "오늘 날짜"를 반환한다.
-            # DATE(completed_at) 도 동일 세션의 KST 타임존으로 해석되므로
-            # 자정 전후 완료 기록이 누락되던 기존 버그는 발생하지 않는다.
-            # ────────────────────────────────────────────────────────────
-            # [수정 2026-05-01] Soft Delete 필터 추가:
-            #   AND deleted_at IS NULL → 완료 취소된 기록은 화면에서 숨김.
-            #   인덱스 idx_completions_user_active(user_id, deleted_at) 가
-            #   user_id + deleted_at 조합을 빠르게 커버한다.
+            # DB 세션 타임존이 KST라 CURDATE()와 DATE(completed_at)는 같은 기준으로 비교된다.
+            # deleted_at IS NULL 조건으로 완료 취소된 기록은 제외한다.
             cursor.execute(
                 """SELECT * FROM routine_completions
                 WHERE user_id = %s
@@ -195,7 +151,7 @@ def get_today_completions(user_id: str):
             completions = cursor.fetchall()  # 오늘 완료 기록 전체 (없으면 빈 리스트)
         return completions
     except Exception as e:
-        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        # 조회 라우트도 실패 시 열린 트랜잭션을 정리한다.
         try:
             conn.rollback()
         except Exception:
@@ -216,12 +172,9 @@ def delete_completion(
 
     홈 화면에서 완료된 루틴 카드를 클릭해 완료 취소할 때 호출됨.
 
-    [수정 2026-05-01] Soft Delete 전환:
-        UPDATE routine_completions SET deleted_at = NOW() 만 수행하므로
-        ON DELETE CASCADE 가 트리거되지 않는다 → 연관 피드/이미지/댓글/좋아요는
-        그대로 보존되어 SNS 성격의 인증 기록이 사라지지 않는다.
-
-    [수정] user_id 까지 WHERE 에 포함시켜 본인 완료 기록만 처리 가능하도록 강화.
+    UPDATE routine_completions SET deleted_at = NOW() 만 수행하므로
+    연관 피드/이미지/댓글/좋아요는 보존된다.
+    user_id까지 WHERE에 포함해 본인 완료 기록만 취소할 수 있다.
 
     Args:
         completion_id (str): 삭제할 완료 기록의 UUID v7 (URL 경로 파라미터)
@@ -237,12 +190,6 @@ def delete_completion(
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # [수정 2026-05-01] Soft Delete 전환
-            #   기존: DELETE FROM routine_completions  → CASCADE 로 연결된 피드/이미지/댓글/좋아요 모두 사라짐
-            #   변경: UPDATE ... SET deleted_at = NOW()
-            #         → 사용자 화면에는 안 보이지만, 연결된 피드/이미지 등은 그대로 보존됨
-            #         → 사용자 결정사항 1(a)/2(a) 와 일관 (피드는 표시, 마이페이지 활동도 표시)
-            #
             # WHERE 절:
             #   completion_id = %s            : 대상 완료 기록
             #   AND user_id = %s              : 본인 소유 검증
@@ -258,7 +205,7 @@ def delete_completion(
             affected = cursor.rowcount
         conn.commit()
 
-        # [수정 2026-05-01] 갱신된 행이 0이면 다음 셋 중 하나:
+        # 갱신된 행이 0이면 다음 셋 중 하나:
         #   1) 존재하지 않는 completion_id
         #   2) 본인 소유 아님
         #   3) 이미 취소된 상태(중복 호출)
@@ -267,7 +214,6 @@ def delete_completion(
 
         return {"success": True}
     except Exception as e:
-        # [수정 2026-05-11 #18] UPDATE 도 INSERT 와 동일하게 트랜잭션 정리
         try:
             conn.rollback()
         except Exception:
@@ -303,13 +249,13 @@ def get_completion_history(user_id: str):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # [수정 2026-05-01] Soft Delete + 삭제 루틴 fallback 처리
+            # Soft Delete + 삭제 루틴 fallback 처리
             #   1) JOIN → LEFT JOIN
             #      삭제된 루틴(routines.deleted_at NOT NULL)도 결과에 포함되도록.
             #      INNER JOIN 이면 삭제 루틴의 완료 기록이 결과에서 사라짐.
             #      → 사용자 결정사항 2(a) "삭제된 루틴의 완료 기록도 표시" 충족
             #   2) COALESCE(r.title, '(삭제된 루틴)')
-            #      만약 routine 행 자체가 hard delete 되었거나(과거 데이터) JOIN 실패 시
+            #      만약 routine 행 자체가 없거나 JOIN 실패 시
             #      "(삭제된 루틴)" 라벨로 표시.
             #      현재는 routines 도 soft delete 정책이라 r.title 은 항상 조회되지만,
             #      방어 코드로 두어 데이터 정합성 변화에 견고하게.
@@ -336,7 +282,7 @@ def get_completion_history(user_id: str):
             history = cursor.fetchall()
         return history
     except Exception as e:
-        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        # 조회 라우트도 실패 시 열린 트랜잭션을 정리한다.
         try:
             conn.rollback()
         except Exception:

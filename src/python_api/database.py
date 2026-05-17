@@ -5,17 +5,10 @@
 #   - .env 파일에서 MySQL 접속 정보를 읽어 커넥션 생성
 #   - FastAPI 라우터가 get_connection() 으로 DB 커넥션을 빌려 쓰고 close() 로 반환
 #
-# [수정 2026-05-10] 요청마다 새 연결 → 간단한 PyMySQL 커넥션 풀로 전환
-# 이유:
-#   React → Express → FastAPI → MySQL 구조를 유지하면서 성능을 높이려면
-#   FastAPI 내부에서 매 요청마다 MySQL 연결을 새로 여는 비용을 줄이는 것이 가장 효과적이다.
-#   RDS 연결 생성은 TCP 연결/인증/세션 초기화 비용이 있고, 트래픽이 늘면 연결 수 한도에도 빨리 닿는다.
-#
-# 설명:
-#   - 기존 라우터 코드의 try/finally conn.close() 패턴은 그대로 유지한다.
-#   - get_connection() 은 풀에서 연결을 빌려온 PooledConnection 래퍼를 반환한다.
-#   - conn.close() 는 실제 종료가 아니라 풀 반환으로 동작한다.
-#   - 끊긴 연결은 ping(reconnect=True) 로 복구한 뒤 사용한다.
+# 동작:
+#   - get_connection()은 풀에서 연결을 빌려온 PooledConnection 래퍼를 반환한다.
+#   - conn.close()는 실제 종료가 아니라 풀 반환으로 동작한다.
+#   - 끊긴 연결은 ping(reconnect=True)로 복구한 뒤 사용한다.
 #   - 쿼리 시간이 SLOW_QUERY_MS 이상이면 로그를 남겨 병목 쿼리를 찾는다.
 # ============================================================
 
@@ -37,9 +30,7 @@ SLOW_QUERY_MS = int(os.getenv("SLOW_QUERY_MS", "200"))
 def _connection_kwargs():
     """PyMySQL 커넥션 공통 옵션.
 
-    [유지 2026-05-10]
-    이유:
-        기존 KST 타임존 보정 정책을 커넥션 풀에서도 동일하게 유지하기 위함.
+    모든 DB 세션의 날짜 함수와 completed_at 해석을 KST로 맞춘다.
     """
     return {
         "host": os.getenv("DB_HOST"),
@@ -92,7 +83,7 @@ class TimedCursor:
 
 
 class PooledConnection:
-    """라우터가 기존 pymysql.Connection 처럼 쓰는 풀 커넥션 래퍼."""
+    """라우터가 일반 pymysql.Connection처럼 쓰는 풀 커넥션 래퍼."""
 
     def __init__(self, pool, raw_connection, overflow=False):
         self._pool = pool
@@ -189,7 +180,7 @@ _pool = None
 def get_connection():
     """MySQL 커넥션 풀에서 연결을 빌려 반환.
 
-    사용 예시는 기존과 동일:
+    사용 예시:
         conn = get_connection()
         try:
             with conn.cursor() as cursor:
@@ -197,9 +188,7 @@ def get_connection():
         finally:
             conn.close()
 
-    [수정 2026-05-10]
-    결과:
-        라우터 코드는 그대로 두고, close() 시 실제 종료 대신 풀 반환을 수행한다.
+    라우터 코드는 일반 PyMySQL 커넥션처럼 사용하고, close() 시 풀로 반환된다.
     """
     global _pool
     if _pool is None:

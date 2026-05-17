@@ -2,8 +2,8 @@
 // Express ↔ FastAPI 연결 모듈 (database.js)
 // ============================================================
 // 역할:
-//   Express 라우터(login.js, routine.js, feed.js, like.js, comment.js)에서 호출하며,
-//   실제 DB 작업은 FastAPI(포트 8000)에 HTTP 요청으로 위임.
+//   Express 라우터가 FastAPI 내부 API를 호출할 때 쓰는 단일 통신 계층.
+//   실제 DB 작업은 FastAPI가 수행하고, 이 모듈은 URL 구성/JSON 파싱/에러 표준화를 담당.
 //
 // 아키텍처:
 //   Express 라우터 → 이 모듈의 함수 → HTTP fetch → FastAPI 라우터 → MySQL
@@ -19,16 +19,9 @@
 //   마이페이지   : getMypageSummary, getMypageGallery
 //   통계 관련   : getStats
 //
-// [리팩터링 #2] FastAPI 호출 에러 처리 통합 (README 4월 18일 #2)
-//   기존 문제:
-//     - `await res.json()` 직전에 res.ok 검증이 없었음
-//       → FastAPI가 HTML 500을 내려주면 SyntaxError 로 라우터 크래시
-//     - fetch 자체가 네트워크 오류로 throw 하면 스택 전체로 전파
-//     - FastAPI의 {detail: "..."} 에러 페이로드를 그대로 성공처럼 반환
-//   해결:
-//     - 모든 FastAPI 호출을 fetchJson() 단일 헬퍼로 통과시킴
-//     - 네트워크/HTTP/JSON 파싱 에러를 일관된 FastApiError 로 throw
-//     - 라우터는 try/catch 만 붙이면 500 응답을 안전하게 내릴 수 있음
+// 모든 FastAPI 호출은 fetchJson()을 통과한다.
+// 네트워크 실패, HTTP 에러, JSON 파싱 실패를 FastApiError로 표준화해
+// app.js의 글로벌 에러 핸들러가 일관된 JSON 응답을 만들 수 있게 한다.
 // ============================================================
 
 const fetch = require("node-fetch"); // HTTP 요청 라이브러리 (node.js 환경용)
@@ -52,23 +45,7 @@ class FastApiError extends Error {
     }
 }
 
-/**
- * [추가 2026-05-10] Express → FastAPI 내부 인증 헤더 주입 헬퍼.
- *
- * 이유:
- *   FastAPI(8000)는 원칙적으로 브라우저가 직접 호출하는 공개 API가 아니라,
- *   Express(3000)가 세션 쿠키를 검증한 뒤 호출하는 내부 데이터 계층이다.
- *   그런데 개발/배포 설정 실수로 FastAPI 포트가 외부에 열리면
- *   /user/password, /completion, /feed 같은 내부 엔드포인트를 우회 호출할 수 있다.
- *
- * 동작:
- *   모든 fetchJson() 호출에 X-Internal-Api-Key 헤더를 자동으로 붙인다.
- *   개별 라우터가 헤더를 빠뜨리지 않도록 공통 헬퍼에서 처리한다.
- *
- * 주의:
- *   FastAPI 쪽 INTERNAL_API_KEY 와 Express 쪽 INTERNAL_API_KEY 값이 반드시 같아야 한다.
- *   값이 누락되면 FastAPI 미들웨어가 500/403으로 차단하므로 .env 설정이 필요하다.
- */
+/** Express가 FastAPI 내부 API를 호출할 때 공유 비밀키 헤더를 자동 첨부한다. */
 function withInternalAuth(options = {}) {
     const headers = {
         ...(options.headers || {}),
@@ -87,14 +64,6 @@ function withInternalAuth(options = {}) {
 /**
  * FastAPI에 HTTP 요청을 보내고 JSON 응답을 파싱.
  *
- * 해결하는 에러 (README 4월 18일 #2):
- *   1. FastAPI가 HTML 500 응답 반환 → res.json() 이 SyntaxError 로 크래시
- *      → content-type 체크 + try/catch 로 표준 에러로 변환
- *   2. res.ok 체크 없음 → FastAPI 에러 응답({detail: "..."})이 성공처럼 반환
- *      → res.ok 검증 후 false 면 throw
- *   3. 네트워크 끊김 → fetch 자체가 throw 후 스택 전체 크래시
- *      → try/catch 로 감싸 FastApiError(status=0) 으로 변환
- *
  * @param {string} url - FastAPI 엔드포인트 절대 URL
  * @param {object} [options] - fetch 옵션 (method, headers, body 등)
  * @returns {Promise<any>} 파싱된 JSON 응답
@@ -106,7 +75,6 @@ async function fetchJson(url, options) {
         response = await fetch(url, withInternalAuth(options));
     } catch (error) {
         // 네트워크 레벨 실패: FastAPI 서버 다운, DNS 실패, 타임아웃 등
-        // 이 throw를 잡지 않으면 기존에는 Express 기본 핸들러가 HTML 500을 내렸음
         throw new FastApiError(
             `FastAPI 서버에 연결할 수 없습니다: ${error.message}`,
             0
@@ -174,22 +142,9 @@ async function createUser(userInfo) {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [추가 2026-04-29] 비밀번호 해시 업데이트 (평문 → bcrypt Lazy Migration 용)
-// ─────────────────────────────────────────────────────────────────────────────
-// 사용처:
-//   src/backend/routes/login.js 에서 평문 비밀번호 매치 성공 시 호출.
-//   bcrypt.hash(평문, 10) 로 해시 생성한 뒤 이 함수를 통해 DB 의 password
-//   컬럼을 해시값으로 교체한다.
-//
-// 주의:
-//   - hashed_password 인자에는 반드시 "이미 bcrypt 로 해싱된 문자열" 을 전달.
-//     평문을 넘기면 평문이 그대로 DB 에 저장되어 보안 사고가 된다.
-//   - [수정 2026-05-10] FastAPI(8000) 는 외부 비공개여야 하며,
-//     추가로 fetchJson() 이 X-Internal-Api-Key 내부 인증 헤더를 붙여 호출한다.
-// ─────────────────────────────────────────────────────────────────────────────
 /**
  * 유저의 비밀번호 해시값을 DB 에 업데이트.
+ * 평문 비밀번호가 남아 있는 계정의 로그인 성공 시 bcrypt 해시로 교체하는 내부 호출이다.
  *
  * @param {string} user_id - 대상 유저의 UUID v7
  * @param {string} hashed_password - bcrypt 해시 문자열 ($2b$... 형식)
@@ -334,7 +289,7 @@ async function createFeed(feedData) {
 
 /**
  * 피드 이미지 레코드 추가 (FastAPI POST /feed/image)
- * 파일은 Express에서 디스크에 저장한 뒤, URL을 이 함수로 전달.
+ * 현재 주 흐름은 createFeedWithImages()이며, 이 함수는 단순/레거시 호출용으로 유지한다.
  */
 async function addFeedImage(imageData) {
     return await fetchJson(`${PYTHON_API}/feed/image`, {
@@ -344,22 +299,9 @@ async function addFeedImage(imageData) {
     });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// [추가 2026-05-11] 신규 #16 — 피드 + 이미지 단일 트랜잭션 통합 호출
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: 신규 #16 (Express ↔ FastAPI 분산 트랜잭션 부재)
-// 날짜: 2026-05-11
-// 기대효과:
-//   - 기존 createFeed → addFeedImage × N 회 호출을 단일 HTTP 호출로 통합
-//   - FastAPI 가 단일 트랜잭션으로 INSERT 후 부분 실패 시 자동 ROLLBACK → orphan 피드 행 제거
-//   - 정상 흐름 라운드트립 (1 + N) → 1 회로 축소
-// 장점:
-//   - DB 정합성을 Express 의 best-effort cleanup 이 아닌 DB 트랜잭션으로 보장
-//   - 호출 측 코드 단순화 + 실패 분기 단일화
-//   - 기존 createFeed/addFeedImage 는 그대로 유지 → 단순 시나리오/롤백 호환
-// ────────────────────────────────────────────────────────────────────
 /**
  * FastAPI POST /feed/with-images 호출.
+ * 피드와 첨부 이미지 여러 건을 FastAPI 단일 트랜잭션에서 생성한다.
  *
  * @param {object} payload
  * @param {string} payload.user_id      - 세션에서 주입된 작성자 UUID v7
@@ -381,10 +323,8 @@ async function createFeedWithImages(payload) {
 /**
  * 전체 피드 목록 조회 (FastAPI GET /feed/, 최신순, 커서 기반 페이지네이션)
  *
- * [수정 2026-05-03]
- *   기존: 전체 피드 일괄 반환 → 호출자가 각 피드별로 이미지/좋아요 N+1 조회.
- *   신규: user_id / cursor / limit 전달 → FastAPI 가 한 번에
- *         피드 + 좋아요 상태 + 이미지 + 카운트 를 묶어 반환.
+ * user_id / cursor / limit을 전달하면 FastAPI가 피드 메타, 좋아요 상태,
+ * 이미지 목록, 카운트를 페이지 단위로 묶어 반환한다.
  *
  * @param {object} opts
  * @param {string} [opts.user_id] - 현재 로그인 사용자. liked 상태 결정용.
@@ -469,47 +409,24 @@ async function deleteComment(comment_id, user_id) {
 
 // ─── 마이페이지 / 통계 관련 함수 ─────────────────────────────────────────────
 
-/**
- * [추가 2026-05-10] 마이페이지 핵심 지표 조회.
- *
- * 이유:
- *   MyPage.jsx 의 오늘 달성률/연속 달성/인증 게시글 수 mock 값을
- *   FastAPI 가 계산한 실제 DB 값으로 대체하기 위함.
- */
+/** 마이페이지 핵심 지표 조회. */
 async function getMypageSummary(user_id) {
     return await fetchJson(`${PYTHON_API}/mypage/summary/${user_id}`);
 }
 
-/**
- * [추가 2026-05-10] 마이페이지 통합 조회.
- *
- * 이유:
- *   /me + /mypage/summary + /mypage/gallery 를 한 화면 API로 합쳐
- *   React → Express → FastAPI 왕복 횟수를 줄이기 위함.
- */
+/** 마이페이지 화면용 user + summary + gallery 통합 조회. */
 async function getMypageOverview(user_id, galleryLimit = 9) {
     const params = new URLSearchParams({ gallery_limit: String(galleryLimit) });
     return await fetchJson(`${PYTHON_API}/mypage/${user_id}?${params.toString()}`);
 }
 
-/**
- * [추가 2026-05-10] 내 인증 갤러리 조회.
- *
- * 이유:
- *   MyPage.jsx 의 Unsplash placeholder 이미지를 실제 feed_images 데이터로 대체하기 위함.
- */
+/** 내 인증 갤러리 이미지/영상 조회. */
 async function getMypageGallery(user_id, limit = 9) {
     const params = new URLSearchParams({ limit: String(limit) });
     return await fetchJson(`${PYTHON_API}/mypage/gallery/${user_id}?${params.toString()}`);
 }
 
-/**
- * [추가 2026-05-10] 상세 분석 통계 조회.
- *
- * 이유:
- *   StatsPage.jsx 의 주간/월간/시간대/카테고리 mock 데이터를
- *   routine_completions 기반 실제 통계로 대체하기 위함.
- */
+/** 주간/월간 상세 분석 통계 조회. */
 async function getStats(user_id, { mode = "weekly", start, end } = {}) {
     const params = new URLSearchParams({ mode });
     if (start) params.set("start", start);
@@ -517,13 +434,9 @@ async function getStats(user_id, { mode = "weekly", start, end } = {}) {
     return await fetchJson(`${PYTHON_API}/stats/${user_id}?${params.toString()}`);
 }
 
-// ════════════════════════════════════════════════════════════
-// [추가 2026-05-16] 관리자 페이지 — 공지사항(notice) / 신고(report)
-// ════════════════════════════════════════════════════════════
-// 패턴: 기존 createFeed / getFeeds / deleteFeed 와 100% 동일.
-//   - fetchJson() 이 X-Internal-Api-Key 헤더를 자동 첨부 (withInternalAuth)
-//   - 에러는 fetchJson 이 FastApiError 로 표준화 → 라우터가 try/catch
-//   - 라우터는 이 함수들만 호출하면 FastAPI 통신을 신경 쓸 필요 없음
+// ─── 관리자 페이지: 공지사항 / 신고 ─────────────────────────────────────────
+// 관리자 라우터도 일반 기능과 동일하게 fetchJson()을 통해 내부 인증 헤더와
+// FastApiError 표준화를 적용받는다.
 
 // ── 공지사항 ──────────────────────────────────────────────────────────────────
 
@@ -618,7 +531,6 @@ module.exports = {
 
     findUser,
     createUser,
-    // [추가 2026-04-29] 평문→bcrypt Lazy Migration 용
     updateUserPassword,
     createSession,
     findSession,
@@ -632,7 +544,6 @@ module.exports = {
     deleteCompletion,
     createFeed,
     addFeedImage,
-    // [추가 2026-05-11 #16] 단일 트랜잭션 통합 호출
     createFeedWithImages,
     getFeeds,
     getFeedDetail,
@@ -646,13 +557,11 @@ module.exports = {
     getMypageSummary,
     getMypageGallery,
     getStats,
-    // [추가 2026-05-16] 관리자 — 공지사항
     createNotice,
     listNotices,
     getNotice,
     updateNotice,
     deleteNotice,
-    // [추가 2026-05-16] 관리자 — 신고
     createReport,
     listReports,
     getReport,

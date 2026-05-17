@@ -6,30 +6,11 @@
 #   GET /mypage/summary/{user_id} : 마이페이지 핵심 지표 조회
 #   GET /mypage/gallery/{user_id} : 내 인증 갤러리 이미지/영상 조회
 #
-# [추가 2026-05-10]
-# 이유:
-#   MyPage.jsx 가 오늘 달성률, 연속 달성, 인증 게시글 수, 갤러리를
-#   mock/Unsplash 데이터로 표시하고 있어 실제 사용자 데이터와 불일치했다.
-#
 # 설명:
 #   Express 의 requireAuth 를 거쳐 세션 user_id 로만 호출되며,
 #   FastAPI 전역 X-Internal-Api-Key 미들웨어가 직접 호출을 1차 차단한다.
 # ============================================================
-#
-# ────────────────────────────────────────────────────────────────────
-# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
-# ────────────────────────────────────────────────────────────────────
-# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
-# 날짜: 2026-05-11
-# 기대효과:
-#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
-#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
-#   - SELECT-only 라우터지만 풀 반환 시 깨끗한 트랜잭션 상태 보장
-# 장점:
-#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
-#   - 미래 INSERT/UPDATE 추가에 안전 (마이페이지에 통계 저장 등 확장 가능)
-#   - 7개 라우터 일괄 패턴화로 유지보수 비용 최소
-# ────────────────────────────────────────────────────────────────────
+# 조회 실패 경로도 rollback 후 커넥션을 반환해 풀 재사용 상태를 깨끗하게 유지한다.
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -176,12 +157,6 @@ def get_mypage_overview(
 ):
     """마이페이지 화면에 필요한 데이터를 한 번에 조회.
 
-    [추가 2026-05-10]
-    이유:
-        기존 프론트가 /me, /mypage/summary, /mypage/gallery 를 각각 호출하면
-        React → Express → FastAPI 왕복이 3번 발생한다. 구조는 유지하되 화면 단위 API로
-        합쳐 왕복 횟수와 로딩 조각을 줄인다.
-
     결과:
         MyPage.jsx 는 GET /mypage 한 번으로 user + summary + gallery 를 받는다.
     """
@@ -197,14 +172,12 @@ def get_mypage_overview(
                 "gallery": _load_gallery(cursor, user_id, gallery_limit),
             }
     except HTTPException:
-        # [수정 2026-05-11 #18] 404 등도 트랜잭션 정리 후 재전파
         try:
             conn.rollback()
         except Exception:
             pass
         raise
     except Exception as e:
-        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
         try:
             conn.rollback()
         except Exception:
@@ -219,11 +192,6 @@ def get_mypage_overview(
 def get_mypage_summary(user_id: str):
     """마이페이지 핵심 지표 조회.
 
-    [추가 2026-05-10]
-    이유:
-        프론트의 임시 값(오늘의 갓생 지수, 연속 달성, 인증 게시글 수)을
-        실제 DB 데이터로 대체하기 위한 단일 summary API.
-
     계산 기준:
         - 총 루틴 수: deleted_at IS NULL 인 활성 루틴 수
         - 오늘 달성률: 오늘 완료한 distinct routine_id / 활성 루틴 수
@@ -236,7 +204,6 @@ def get_mypage_summary(user_id: str):
         with conn.cursor() as cursor:
             return _load_summary(cursor, user_id)
     except Exception as e:
-        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
         try:
             conn.rollback()
         except Exception:
@@ -254,14 +221,9 @@ def get_mypage_gallery(
 ):
     """내 인증 갤러리 조회.
 
-    [추가 2026-05-10]
-    이유:
-        MyPage.jsx 의 Unsplash placeholder 이미지를 실제 사용자가 올린
-        feed_images 데이터로 대체하기 위함.
-
     동작:
         현재 유저가 작성한 피드의 이미지/영상 파일을 최신 피드 순으로 가져온다.
-        file_url 은 S3 퍼블릭 URL 또는 과거 /uploads 경로를 그대로 반환하며,
+        file_url 은 S3 퍼블릭 URL을 그대로 반환하며,
         프론트는 http 여부에 따라 표시 URL을 결정한다.
     """
     conn = get_connection()
@@ -269,7 +231,6 @@ def get_mypage_gallery(
         with conn.cursor() as cursor:
             return {"items": _load_gallery(cursor, user_id, limit)}
     except Exception as e:
-        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
         try:
             conn.rollback()
         except Exception:

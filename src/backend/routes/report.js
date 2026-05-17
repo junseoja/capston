@@ -1,7 +1,6 @@
 // ============================================================
 // 게시글 신고(Report) 관련 Express 라우터
 // ============================================================
-// 작성일: 2026-05-16
 // 담당 라우트:
 //   POST   /report             : 신고 접수   (로그인 — 일반 사용자)
 //   GET    /report             : 신고 목록   (로그인 + 관리자)
@@ -21,7 +20,7 @@
 //   (둘은 HTTP 메서드가 달라 충돌은 없지만, 향후 PATCH /report/:id 가
 //    추가될 경우를 대비해 고정 경로(/process)를 파라미터 경로보다 위에 둠)
 //
-// 에러 처리: feed.js 패턴 — try/catch 후 next(error).
+// 에러 처리: try/catch 후 next(error)로 app.js 글로벌 에러 핸들러에 위임.
 // ============================================================
 
 const express = require("express");
@@ -47,18 +46,8 @@ router.post("/report", requireAuth, async (req, res, next) => {
             });
         }
 
-        // [수정 2026-05-17] target_user_id 는 더 이상 클라이언트 body 에서 받지 않는다.
-        // 원인:
-        //   기존 구조는 브라우저가 보낸 target_user_id 를 그대로 FastAPI 에 전달했다.
-        //   이 경우 악의적 클라이언트가 다른 user_id 로 바꿔 보내면
-        //   신고 대상자가 실제 게시글 작성자와 어긋날 수 있었다.
-        // 이유:
-        //   feed_id 만 신뢰 경계 밖에서 받고, 실제 작성자는 FastAPI 가
-        //   DB 의 feeds.user_id 를 조회해 확정해야 신고 데이터 정합성이 보장된다.
-        // 작동원리:
-        //   Express 는 reporter_user_id 만 세션에서 주입하고,
-        //   FastAPI report.py 의 create_report() 가 feed_id 기준으로
-        //   target_user_id 를 재조회한 뒤 reports 테이블에 저장한다.
+        // target_user_id는 클라이언트에서 받지 않는다.
+        // FastAPI가 feed_id 기준으로 실제 작성자를 조회해 신고 대상자를 확정한다.
         // reporter_user_id 는 클라이언트 값을 믿지 않고 세션에서 주입
         // (남의 이름으로 신고하는 위조 방지)
         const result = await createReport({

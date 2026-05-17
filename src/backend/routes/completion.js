@@ -9,8 +9,6 @@
 //
 // 보안:
 //   세션 쿠키로 로그인 여부 확인 후 user_id를 FastAPI에 전달
-//
-// [리팩터링 #12] 세션 인증 4줄 블록을 requireAuth 미들웨어로 대체
 // ============================================================
 
 const express = require("express");
@@ -34,7 +32,6 @@ const requireAuth = require("../middleware/requireAuth");
  *   2. routine_id, proof_text를 FastAPI로 전달하여 완료 기록 생성
  *   3. 생성된 completion_id 반환
  */
-// [리팩터링 #1+#3] next(err)로 글로벌 핸들러에 위임
 router.post("/completion", requireAuth, async (req, res, next) => {
     const { routine_id, proof_text = "" } = req.body;
 

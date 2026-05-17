@@ -54,30 +54,8 @@ def add_like(body: LikeCreate):
     Raises:
         HTTPException 500: 예상치 못한 DB 오류
     """
-    # ────────────────────────────────────────────────────────────────────
-    # [수정 2026-05-02] README #8 "like.py rollback 누락" 해결
-    # ────────────────────────────────────────────────────────────────────
-    # 기존 버그:
-    #   pymysql 의 기본 autocommit=False 환경에서 INSERT 실패 후
-    #   conn1 의 트랜잭션이 활성 상태로 남아 (feed_id, user_id) 에 락 보유.
-    #   그 상태에서 conn2 를 새로 열어 같은 행에 DELETE 시도 →
-    #   conn1 의 락이 close 시점까지 풀리지 않아 자기 자신과 충돌
-    #   → innodb_lock_wait_timeout(50초) 초과 후
-    #     OperationalError 1205 "Lock wait timeout exceeded" 발생.
-    #
-    #   증상: 좋아요 취소 시 50초 후 502 Bad Gateway, 사용자 입장에선
-    #         "좋아요가 한 번씩 안 먹힘".
-    #
-    # 해결:
-    #   IntegrityError 캐치 직후 conn.rollback() 으로 트랜잭션을 정리하여
-    #   락을 즉시 해제한 뒤, 동일 커넥션에서 DELETE 실행.
-    #   - 커넥션 1개로 처리 → 풀(#9) 도입 시 자원 효율 ↑
-    #   - 자기 자신과의 락 충돌 원천 차단
-    #
-    # 동시 클릭 race condition (둘 다 INSERT 실패 → 둘 다 DELETE) 은
-    # 본 패턴으로도 미해결이지만, 같은 사용자가 동시에 같은 피드를 두 번
-    # 클릭하는 경우는 실사용에서 사실상 발생하지 않으므로 본 수정에선 다루지 않음.
-    # ────────────────────────────────────────────────────────────────────
+    # INSERT 중복이면 rollback으로 트랜잭션을 정리한 뒤 같은 커넥션에서 DELETE한다.
+    # 이 순서를 지켜야 UNIQUE 충돌 뒤 남은 락이 좋아요 취소 흐름을 막지 않는다.
     conn = get_connection()
     try:
         try:
@@ -92,7 +70,6 @@ def add_like(body: LikeCreate):
             return {"success": True, "liked": True}  # 좋아요 추가 완료
         except pymysql.err.IntegrityError:
             # UNIQUE(feed_id, user_id) 중복 → 이미 좋아요 누른 상태 → 취소 처리
-            # [수정 2026-05-02] 새 커넥션 대신 rollback 후 동일 커넥션 재사용
             conn.rollback()  # ← 핵심: 활성 트랜잭션 정리 → 락 즉시 해제
             with conn.cursor() as cursor:
                 cursor.execute(
@@ -102,7 +79,6 @@ def add_like(body: LikeCreate):
             conn.commit()
             return {"success": True, "liked": False}  # 좋아요 취소 완료
     except Exception as e:
-        # [수정 2026-05-02] 예외 누수 방지 — 어떤 실패 경로든 트랜잭션 정리
         try:
             conn.rollback()
         except Exception:

@@ -471,7 +471,7 @@ users
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| user_id | VARCHAR(255) | 기본키 (UUID v7) |
+| user_id | CHAR(36) | 기본키 (UUID v7) |
 | login_id | VARCHAR(255) | 로그인 아이디 (UNIQUE) |
 | password | VARCHAR(255) | 비밀번호 (bcrypt 해시 저장) |
 | nickname | VARCHAR(255) | 닉네임 |
@@ -486,8 +486,8 @@ users
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| routine_id | VARCHAR(255) | 기본키 (UUID v7) |
-| user_id | VARCHAR(255) | 유저 FK |
+| routine_id | CHAR(36) | 기본키 (UUID v7) |
+| user_id | CHAR(36) | 유저 FK |
 | title | VARCHAR(255) | 루틴 제목 |
 | category | VARCHAR(50) | 카테고리 |
 | time_slot | ENUM('morning','lunch','dinner') | 시간대 (목표 시간으로 자동 분류) |
@@ -503,7 +503,8 @@ users
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | session_id | VARCHAR(255) | 세션 ID (UUID v4) |
-| user_id | VARCHAR(255) | 유저 FK |
+| user_id | CHAR(36) | 유저 FK |
+| created_at | DATETIME | 세션 생성 시각 |
 | expires_at | DATETIME | 세션 만료 시간 (로그인 시점 + 1일) |
 
 ### routine_completions
@@ -3802,7 +3803,49 @@ Day 6~7:     3.2 (컴포넌트 분할, 3.1 의 Context 활용)
 
 ---
 
-### 7. 검증 / 한계
+### 7. Phase 1 마무리 (5/13 계획 — 데모 직전 필수)
+
+| Phase | 항목 | 결과 |
+|---|---|---|
+| 1.1 | DB admin 계정 INSERT | ✅ 완료 |
+| 1.2 | frontend 브런치 정리 | ⏭️ 스킵 결정 |
+| 1.3 | 루틴 추가 시 인증 표시 사라지는 버그 | ✅ 클로즈 (D1 e2e 에서 재현 안 됨) |
+| 1.4 | 회원가입 비밀번호 정책 (신규 #19) | ✅ `login.js` 백엔드 강제 추가 (강도 B: 8자+영문+숫자+특수). 프론트 `SignupPage.validatePassword` 는 이미 완비라 변경 0. FastAPI 는 password 가 해시라 검증 무의미 → Express 가 정확한 위치 |
+| 1.5 | 🚨 RDS 비밀번호 회전 (5/11 P0 잔여) | ✅ AWS 콘솔 새 비번 → `.env` 갱신 → 재시작. 회전 직후 세션 500(`GET /user/session`) 발생 → DB 접속 동기화 문제로 진단·해결 |
+| — | RDS 보안그룹 | 배포 대비 인바운드 MySQL 3306 `0.0.0.0/0` 추가 (강한 새 비번 전제 임시 개방, 데모 후 원복 권장) |
+
+→ **Phase 1 전부 완료**. 배포 2대 선행조건(① D1 동작검증 ② 비번 회전) 충족.
+
+---
+
+### 8. 배포 준비 및 전략
+
+#### 8-1. 코드 측 배포 준비 (환경변수만으로 로컬↔배포 전환)
+
+| 파일 | 변경 |
+|---|---|
+| `src/backend/routes/login.js` | 세션 쿠키 `SESSION_COOKIE_OPTIONS` 공통 상수 — `NODE_ENV=production` 시 자동 `secure:true`+`sameSite:"none"` (크로스도메인 쿠키), 발급/제거 옵션 공유로 로그아웃 쿠키 미삭제 버그 예방 |
+| `src/backend/app.js` | CORS 다중 origin — `FRONTEND_URL` 콤마 분리(배포+로컬 동시 테스트) |
+| `.env.example` 3개 | 배포 변수 안내 + `NODE_ENV` 추가 |
+| `docs/deploy.md` | Render/Vercel 배포 가이드 (흔한 실패 Top 3 포함) |
+| `docs/cloudflared-tunnel.md` | Cloudflare Tunnel(Quick) 가이드 + Named 승격 절차 |
+
+→ 코드 수정 없이 `.env` 값만 채우면 로컬/배포 전환. EC2·Render·cloudflared 어디든 동일 코드 사용.
+
+#### 8-2. 배포 전략 결정
+
+EC2(직접) / Render·Vercel(PaaS) / cloudflared(터널) 트레이드오프 비교 후 결정:
+
+> **웹 먼저 (cloudflared) → 앱 (Capacitor 웹뷰)**
+> - 1단계: 도메인 없이 **Quick Tunnel** 로 무료 글로벌 검증
+> - 2단계: 검증 후 도메인 구매 → **Named Tunnel** (고정 주소 `godsanglog.com` 등)
+> - 3단계: 앱은 Capacitor `server.url = 고정도메인` 으로 기존 React 그대로 웹뷰 앱화
+> - 근거: 본인이 "유지보수 부담 최소 + 맥 24h 가동 가능" → 터널 방식이 최적.
+>   FastAPI(8000)는 터널 비노출(Express 내부 호출만) → 보안 ↑
+
+---
+
+### 9. 검증 / 한계
 
 - 전 파일 syntax OK (esbuild JSX 6 / Python 3 / Express 5)
 - 2026-05-17 추가 오류 수정 검증:

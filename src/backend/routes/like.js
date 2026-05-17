@@ -6,8 +6,6 @@
 //
 // 보안:
 //   세션 쿠키로 로그인 여부 확인 후 user_id를 FastAPI에 전달
-//
-// [리팩터링 #12] 세션 인증 4줄 블록을 requireAuth 미들웨어로 대체
 // ============================================================
 
 const express = require("express");
@@ -25,7 +23,6 @@ const requireAuth = require("../middleware/requireAuth");
  *
  * 반환: { success: true, liked: true/false }
  */
-// [리팩터링 #1+#3] next(err)로 글로벌 핸들러에 위임 — FastApiError 상태코드 보존
 router.post("/like", requireAuth, async (req, res, next) => {
     const { feed_id } = req.body;
 

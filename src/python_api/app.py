@@ -2,7 +2,7 @@
 # FastAPI 앱 진입점 (Entry Point)
 # ============================================================
 # 역할:
-#   - Express 백엔드(포트 3000)에서 HTTP 요청을 받아 실제 DB 작업을 처리
+#   - Express 백엔드에서 내부 HTTP 요청을 받아 실제 DB 작업을 처리
 #   - 포트 8000에서 실행 (uvicorn 사용)
 #
 # 실행 방법:
@@ -19,22 +19,9 @@ from dotenv import load_dotenv
 import os
 import time
 
-# [추가 2026-05-10] FastAPI 전역 내부 인증 설정.
-#
-# 이유:
-#   이 FastAPI 서버는 브라우저가 직접 사용하는 공개 API가 아니라
-#   Express 서버가 세션 인증을 마친 뒤 호출하는 내부 데이터 계층이다.
-#   포트 8000이 개발/배포 환경에서 실수로 외부에 열리면 Express 인증을 우회해
-#   DB 변경 엔드포인트를 직접 호출할 수 있으므로, 내부 공유 키를 요구한다.
-#
-# 동작:
-#   Express(src/backend/database.js, routes/login.js)가 모든 FastAPI 요청에
-#   X-Internal-Api-Key 헤더를 붙이고, 아래 미들웨어가 .env의 INTERNAL_API_KEY와 비교한다.
-#   /docs, /openapi.json 같은 문서 경로는 확인을 위해 열어두되 실제 API 호출은 차단한다.
-#
-# 결과:
-#   키가 없거나 틀린 직접 호출은 403, 서버에 INTERNAL_API_KEY 자체가 없으면 500으로 실패한다.
-#   즉, 설정 누락/직접 접근 모두 "실패 닫힘(fail closed)"으로 처리한다.
+# FastAPI는 브라우저 공개 API가 아니라 Express 뒤의 내부 데이터 계층이다.
+# 모든 실제 API 요청은 X-Internal-Api-Key를 요구하고, 문서 경로만 공개 예외로 둔다.
+# 키 누락/불일치와 서버 설정 누락은 모두 실패 응답으로 닫힌다.
 load_dotenv()
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY")
 PUBLIC_PATHS = {"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect", "/favicon.ico"}
@@ -49,8 +36,8 @@ SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "500"))
 # - comment  : 피드 댓글 CRUD
 # - mypage   : 마이페이지 summary/gallery 실제 데이터
 # - stats    : 상세 분석 통계 실제 데이터
-# - notice   : [추가 2026-05-16] 관리자 공지사항 CRUD
-# - report   : [추가 2026-05-16] 게시글 신고 접수 + 관리자 제재 처리
+# - notice   : 관리자 공지사항 CRUD
+# - report   : 게시글 신고 접수 + 관리자 제재 처리
 from routers import user, routine, completion, feed, like, comment, mypage, stats
 from routers import notice, report
 
@@ -81,14 +68,12 @@ async def require_internal_api_key(request: Request, call_next):
 
 @app.middleware("http")
 async def log_slow_requests(request: Request, call_next):
-    """[추가 2026-05-10] FastAPI 요청 처리 시간 측정."""
+    """FastAPI 요청 처리 시간을 측정하고 느린 요청만 로그로 남긴다."""
     started_at = time.perf_counter()
     response = await call_next(request)
     elapsed_ms = (time.perf_counter() - started_at) * 1000
 
-    # 이유:
-    #   Express 에서 느린 API가 보였을 때 FastAPI 내부도 함께 느린지 확인하기 위함.
-    #   SLOW_REQUEST_MS 미만의 정상 요청은 로그를 남기지 않아 노이즈를 줄인다.
+    # Express 지연과 FastAPI/DB 지연을 분리해 볼 수 있도록 기준값 이상만 기록한다.
     if elapsed_ms >= SLOW_REQUEST_MS and request.url.path not in PUBLIC_PATHS:
         print(
             f"🐢 [fastapi] {request.method} {request.url.path} "
@@ -119,17 +104,12 @@ app.include_router(like.router)
 # 댓글 라우터: /comment/, /comment/{feed_id}, /comment/{comment_id}
 app.include_router(comment.router)
 
-# [추가 2026-05-10] 마이페이지/통계 실제 데이터 라우터 등록.
-# 이유: MyPage.jsx / StatsPage.jsx 의 mock 값을 DB 기반 값으로 대체하기 위함.
-# 설명: Express requireAuth 이후 user_id 를 붙여 호출하며, 내부 인증 헤더 미들웨어를 통과해야 한다.
+# 마이페이지/통계 라우터는 Express requireAuth가 전달한 user_id 기준으로 조회한다.
 app.include_router(mypage.router)
 app.include_router(stats.router)
 
-# [추가 2026-05-16] 관리자 페이지 백엔드 라우터 등록.
-# 이유: AdminPage / NoticeList / FeedPage 의 공지사항·신고 mock 을
-#       실제 DB 기반 API 로 대체하기 위함.
-# 설명: Express notice.js / report.js 가 require_admin 등 인증을 거친 뒤
-#       내부 인증 헤더(X-Internal-Api-Key)와 함께 이 라우터들을 호출한다.
+# 관리자 공지/신고 라우터.
+# 관리자 권한 검사는 Express notice.js/report.js에서 처리한 뒤 내부 키와 함께 호출한다.
 # - notice : POST/GET/PATCH/DELETE /notice
 # - report : POST /report, GET /report, GET /report/{id}, PATCH /report/process
 app.include_router(notice.router)

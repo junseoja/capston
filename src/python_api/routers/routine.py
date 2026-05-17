@@ -20,19 +20,9 @@
 #   - repeat_cycle: 반복 주기 (예: "매일" 또는 "월, 수, 금")
 #   - description: 루틴 설명
 #   - created_at : 생성 일시 (자동)
-#   - deleted_at : 삭제 시각 (NULL=활성, NOT NULL=삭제됨)  [추가 2026-05-01]
+#   - deleted_at : 삭제 시각 (NULL=활성, NOT NULL=삭제됨)
 #
-# ─────────────────────────────────────────────────────────────────
-# [Soft Delete 도입 2026-05-01]
-# ─────────────────────────────────────────────────────────────────
-# 변경 이유:
-#   기존에는 DELETE FROM routines 시 ON DELETE CASCADE 로
-#   routine_completions / feeds / feed_images / feed_likes / feed_comments
-#   가 모두 함께 사라졌음. 사용자 인증 글(피드)은 SNS 게시물 성격이므로
-#   "내 루틴을 삭제했다고 해서 과거 인증 기록까지 사라지는 것은 부자연스럽다"
-#   는 요구가 있었음.
-#
-# 적용 정책:
+# Soft Delete 정책:
 #   - 본 라우터의 DELETE 는 더 이상 행을 지우지 않고
 #     UPDATE routines SET deleted_at = NOW() 만 수행한다.
 #   - 모든 SELECT 는 WHERE deleted_at IS NULL 을 추가하여
@@ -40,22 +30,7 @@
 #   - 단, 피드 화면(feed.py) 과 마이페이지 최근 활동(completion.history)
 #     에서는 삭제된 루틴의 인증 기록이 그대로 표시되어야 하므로
 #     해당 라우터들은 routines 의 deleted_at 을 필터링하지 않는다.
-# ─────────────────────────────────────────────────────────────────
-#
-# ────────────────────────────────────────────────────────────────────
-# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
-# ────────────────────────────────────────────────────────────────────
-# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
-# 날짜: 2026-05-11
-# 기대효과:
-#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
-#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
-#   - 루틴 생성/삭제(Soft Delete UPDATE)의 트랜잭션 누수 차단
-# 장점:
-#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
-#   - SELECT-only 라우터에서도 동일 패턴으로 미래 INSERT 추가에 안전
-#   - 7개 라우터 일괄 패턴화로 유지보수 비용 최소
-# ────────────────────────────────────────────────────────────────────
+# 모든 실패 경로는 rollback 후 커넥션을 반환해 풀 재사용 상태를 깨끗하게 유지한다.
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -106,18 +81,7 @@ def create_routine(body: RoutineCreate):
         HTTPException 400: time_slot / routine_mode 허용값 위반
         HTTPException 500: DB 저장 오류
     """
-    # [수정 2026-05-17] time_slot / routine_mode 서버 검증 추가.
-    # 원인:
-    #   기존에는 프론트가 보내는 문자열을 그대로 INSERT 했다.
-    #   프론트 버그나 직접 API 호출로 "night", "photo" 같은 값이 들어오면
-    #   DB ENUM 제약에서 500 오류처럼 터지거나 잘못된 상태가 저장될 수 있었다.
-    # 이유:
-    #   입력 오류는 서버가 명확한 400 응답으로 차단해야 하고,
-    #   DB 제약은 마지막 방어선으로만 두는 편이 API 동작을 예측 가능하게 만든다.
-    # 작동원리:
-    #   허용 집합(ALLOWED_TIME_SLOTS / ALLOWED_ROUTINE_MODES)에 포함되는지
-    #   INSERT 전에 검사한다. 실패하면 커넥션을 열기 전 HTTPException 400 을 반환하므로
-    #   불필요한 DB 트랜잭션도 생성되지 않는다.
+    # DB ENUM 오류까지 보내기 전에 허용값을 검증해 입력 오류를 400으로 명확히 반환한다.
     if body.time_slot not in ALLOWED_TIME_SLOTS:
         raise HTTPException(
             status_code=400,
@@ -146,7 +110,6 @@ def create_routine(body: RoutineCreate):
         conn.commit()  # INSERT 완료 후 트랜잭션 커밋
         return {"success": True}
     except Exception as e:
-        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리 — 풀 반환 시 다음 요청 오염 차단
         try:
             conn.rollback()
         except Exception:
@@ -179,8 +142,7 @@ def get_routines(user_id: str):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # [수정 2026-05-01] Soft Delete 적용:
-            #   AND deleted_at IS NULL → 삭제된 루틴은 사용자 화면에서 숨김
+            # deleted_at IS NULL 조건으로 삭제된 루틴은 사용자 화면에서 숨긴다.
             #   복합 인덱스 idx_routines_user_active(user_id, deleted_at) 가
             #   이 WHERE 절을 정확히 커버함.
             cursor.execute(
@@ -193,7 +155,7 @@ def get_routines(user_id: str):
             routines = cursor.fetchall()  # DictCursor → dict 배열 반환 (없으면 빈 리스트)
         return routines
     except Exception as e:
-        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
+        # 조회 라우트도 실패 시 열린 트랜잭션을 정리한다.
         try:
             conn.rollback()
         except Exception:
@@ -215,12 +177,8 @@ def delete_routine(
     Express의 deleteRoutine(routine_id, user_id) 에서 호출.
     WHERE routine_id = %s AND user_id = %s 조건으로 본인 소유 루틴만 처리.
 
-    [수정 2026-05-01] Soft Delete 전환
-        기존: DELETE FROM routines  → CASCADE 로 completions/feeds/이미지/좋아요/댓글 모두 삭제됨
-        변경: UPDATE routines SET deleted_at = NOW()
-              → DB 레코드는 보존되고, 연결된 피드/완료기록도 그대로 살아남음
-              → 사용자 화면에선 deleted_at IS NULL 필터로 자동으로 숨겨짐
-              → 피드/마이페이지 최근활동에서는 "(삭제된 루틴)" 라벨로 표시
+    UPDATE routines SET deleted_at = NOW() 방식으로 DB 레코드와 연결된 피드/완료기록을 보존한다.
+    사용자 화면의 루틴 목록에서는 deleted_at IS NULL 필터로 숨긴다.
 
         멱등성:
           - 이미 삭제된 행을 다시 호출해도 deleted_at 만 갱신될 뿐 부작용 없음
@@ -241,7 +199,6 @@ def delete_routine(
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # [수정 2026-05-01] DELETE → UPDATE deleted_at
             # WHERE 절:
             #   routine_id = %s            : 대상 루틴
             #   AND user_id = %s            : 본인 소유 검증 (타인 루틴 차단)
@@ -268,7 +225,6 @@ def delete_routine(
 
         return {"success": True}
     except Exception as e:
-        # [수정 2026-05-11 #18] Soft Delete UPDATE 도 트랜잭션 정리
         try:
             conn.rollback()
         except Exception:

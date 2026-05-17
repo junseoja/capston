@@ -1,7 +1,6 @@
 # ============================================================
 # 공지사항(Notice) 관련 API 라우터
 # ============================================================
-# 작성일: 2026-05-16
 # 담당 엔드포인트:
 #   POST   /notice/                : 공지 작성 (관리자)
 #   GET    /notice/                : 공지 목록 (active, 카테고리 필터, 최신순)
@@ -12,18 +11,15 @@
 # DB 테이블:
 #   notices : notice_id PK(UUID v7), category ENUM 4종,
 #             created_by FK(users), Soft Delete(deleted_at) O
-#   (docs/migrations-2026-05-13-admin-challenge.sql 참고)
 #
 # 호출 흐름:
 #   React(AdminPage/NoticeList) → Express(notice.js) → 이 라우터(8000) → MySQL
 #
-# 기존 규약 준수 (feed.py / user.py 패턴 그대로):
+# 현재 규약:
 #   - UUID v7 PK (uuid7str)
-#   - 트랜잭션 정합성 (5/11 #18): try / except HTTPException / except Exception
-#     모두 rollback 후 처리, finally conn.close()
-#   - Soft Delete (5/1): 조회는 WHERE deleted_at IS NULL,
-#     삭제는 UPDATE deleted_at = NOW()
-#   - KST: database.py 가 커넥션 풀에서 SET time_zone='+09:00' 적용 (여기서 신경 X)
+#   - 실패 경로는 rollback 후 conn.close()
+#   - 조회는 WHERE deleted_at IS NULL, 삭제는 UPDATE deleted_at = NOW()
+#   - KST는 database.py 커넥션 풀의 SET time_zone='+09:00'로 통일
 #   - 응답 포맷: 성공 {"success": True, ...}, 실패 HTTPException
 #
 # 관리자 권한 처리 정책:
@@ -121,8 +117,6 @@ def create_notice(body: NoticeCreate):
         return {"success": True, "notice_id": new_id}
 
     except HTTPException:
-        # [5/11 #18] HTTPException 도 트랜잭션 미정리 가능 → rollback 후 재전파
-        # (풀 반환 시 다음 요청에 더러운 트랜잭션이 새지 않게)
         try:
             conn.rollback()
         except Exception:
@@ -163,7 +157,7 @@ def list_notices(
         다만 트래픽/데이터 증가 대비해 limit + category 필터는 옵션으로 제공.
 
     동작:
-        1. WHERE deleted_at IS NULL   (Soft Delete 된 공지 제외 — 5/1 규약)
+        1. WHERE deleted_at IS NULL   (Soft Delete 된 공지 제외)
         2. category 가 있으면 AND category = %s
         3. ORDER BY post_date DESC, created_at DESC  (최신 공지가 위로)
         4. LIMIT %s
@@ -360,10 +354,9 @@ def update_notice(notice_id: str, body: NoticeUpdate):
 def delete_notice(notice_id: str):
     """공지 Soft Delete (관리자 전용)
 
-    [5/1 Soft Delete 규약]
-        실제 DELETE 하지 않고 deleted_at 에 현재 시각을 채운다.
-        이후 모든 조회(list/get)는 deleted_at IS NULL 로 필터하므로
-        사용자 화면에서는 사라지지만 DB 레코드는 보존된다.
+    실제 DELETE 하지 않고 deleted_at 에 현재 시각을 채운다.
+    이후 모든 조회(list/get)는 deleted_at IS NULL 로 필터하므로
+    사용자 화면에서는 사라지지만 DB 레코드는 보존된다.
 
     동작:
         1. UPDATE notices SET deleted_at = NOW()

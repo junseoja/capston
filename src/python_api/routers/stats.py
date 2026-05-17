@@ -4,30 +4,11 @@
 # 담당 엔드포인트:
 #   GET /stats/{user_id}?mode=weekly|monthly&start=YYYY-MM-DD&end=YYYY-MM-DD
 #
-# [추가 2026-05-10]
-# 이유:
-#   StatsPage.jsx 가 주간/월간/시간대/카테고리 통계를 mock 데이터로 표시하고 있어,
-#   routine_completions 기반 실제 통계 API가 필요했다.
-#
 # 계산 정책:
 #   repeat_cycle 이 현재 자유 문자열("매일", "월, 수" 등)이므로 요일 스케줄을
 #   DB에서 안전하게 정규화하기 전까지는 "활성 루틴 전체 × 기간 일수"를 목표량으로 계산한다.
 # ============================================================
-#
-# ────────────────────────────────────────────────────────────────────
-# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
-# ────────────────────────────────────────────────────────────────────
-# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
-# 날짜: 2026-05-11
-# 기대효과:
-#   - PyMySQL 풀(2026-05-10) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
-#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
-#   - SELECT-only 라우터지만 풀 반환 시 깨끗한 트랜잭션 상태 보장
-# 장점:
-#   - except 블록 rollback 추가만으로 로직 변경 없이 안전성 확보
-#   - 미래 통계 캐시 INSERT/UPDATE 도입에 안전
-#   - 7개 라우터 일괄 패턴화로 유지보수 비용 최소
-# ────────────────────────────────────────────────────────────────────
+# 조회 실패 경로도 rollback 후 커넥션을 반환해 풀 재사용 상태를 깨끗하게 유지한다.
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -44,16 +25,8 @@ KST = timezone(timedelta(hours=9))
 def _kst_today() -> date:
     """KST 기준 오늘 날짜.
 
-    [수정 2026-05-17]
-    원인:
-        date.today() 는 FastAPI 컨테이너/서버의 로컬 타임존을 따른다.
-        서버가 UTC 로 실행되면 한국 시간 자정 이후에도 통계 기본 기간과
-        최신 연속 달성일 계산이 하루 늦게 잡힐 수 있었다.
-    이유:
-        서비스 화면과 루틴 달성 판단은 한국 사용자 기준 날짜(KST)로 통일해야 한다.
-    작동원리:
-        timezone(+09:00)을 명시한 datetime.now(KST) 에서 date() 만 추출한다.
-        이 helper 를 통계 기본 시작일/종료일, 최신 streak 비교, 365일 조회 기준에 공통 적용한다.
+    서비스 화면과 루틴 달성 판단은 한국 사용자 기준 날짜로 통일한다.
+    기본 기간 계산, 최신 streak 비교, 365일 조회 기준이 모두 이 값을 사용한다.
     """
     return datetime.now(KST).date()
 
@@ -102,8 +75,6 @@ def _calculate_streaks(completion_dates):
             current = 1
     best = max(best, current)
 
-    # [수정 2026-05-17] 최신 streak 도 KST 오늘과 비교한다.
-    # 원인/이유/작동원리는 _kst_today() 주석 참고.
     latest = current if sorted_dates[-1] == _kst_today() else 0
     return {"best_streak": best, "latest_streak": latest}
 
@@ -142,21 +113,10 @@ def get_stats(
 ):
     """상세 통계 조회.
 
-    [추가 2026-05-10]
-    이유:
-        StatsPage.jsx 의 mock 데이터(82%, 고정 루틴명, 고정 카테고리)를 제거하고,
-        DB의 routines/routine_completions 로 실제 달성률을 계산하기 위함.
-
     반환:
         total, chart, routine_stats, category_stats, best_streak/latest_streak.
     """
-    # [수정 2026-05-17] 주간/월간 기본 범위 산정 기준을 KST 로 통일한다.
-    # 원인:
-    #   기존 date.today() 는 서버 타임존을 따라 UTC 환경에서 한국 날짜와 달라질 수 있었다.
-    # 이유:
-    #   사용자가 보는 "이번 주/이번 달" 통계는 한국 시간 기준이어야 루틴 완료 상태와 맞다.
-    # 작동원리:
-    #   _kst_today() 로 현재 KST 날짜를 구한 뒤 기존 weekly/monthly 계산식을 그대로 적용한다.
+    # 주간/월간 기본 범위 산정 기준은 KST 오늘 날짜다.
     today = _kst_today()
     default_start = today - timedelta(days=today.weekday()) if mode == "weekly" else today.replace(day=1)
     default_end = default_start + timedelta(days=6) if mode == "weekly" else (
@@ -198,14 +158,7 @@ def get_stats(
             )
             completion_rows = cursor.fetchall()
 
-            # [수정 2026-05-17] DB CURDATE() 대신 Python 에서 계산한 KST 기준일을 전달한다.
-            # 원인:
-            #   CURDATE() 는 MySQL 서버 타임존에 의존하므로 FastAPI 의 KST 기준과 다시 어긋날 수 있다.
-            # 이유:
-            #   streak 계산용 최근 365일 조회도 화면의 "오늘"과 같은 날짜 기준을 써야 한다.
-            # 작동원리:
-            #   today 는 이미 KST 날짜이므로 today - 365일을 cutoff 로 만들고,
-            #   SQL 은 completed_at >= %s 파라미터만 비교한다.
+            # streak 계산용 최근 365일 조회도 화면의 "오늘"과 같은 KST 기준을 쓴다.
             streak_cutoff = today - timedelta(days=365)
             cursor.execute(
                 """SELECT DISTINCT DATE(completed_at) AS completed_date
@@ -270,14 +223,12 @@ def get_stats(
             "latest_streak": streaks["latest_streak"],
         }
     except HTTPException:
-        # [수정 2026-05-11 #18] 400 등도 트랜잭션 정리 후 재전파
         try:
             conn.rollback()
         except Exception:
             pass
         raise
     except Exception as e:
-        # [수정 2026-05-11 #18] SELECT-only 라우터지만 일관 패턴 유지
         try:
             conn.rollback()
         except Exception:

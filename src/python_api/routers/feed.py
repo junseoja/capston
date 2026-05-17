@@ -4,7 +4,7 @@
 # 담당 엔드포인트:
 #   POST   /feed/             : 피드 게시물 생성
 #   POST   /feed/image        : 피드 이미지 추가
-#   POST   /feed/with-images  : [신규 #16 2026-05-11] 피드 + 이미지 N건 단일 트랜잭션 생성
+#   POST   /feed/with-images  : 피드 + 이미지 N건 단일 트랜잭션 생성
 #   GET    /feed/             : 전체 피드 목록 조회 (최신순, 좋아요/댓글 수 포함)
 #   GET    /feed/{feed_id}    : 특정 피드 상세 조회 (이미지, 댓글 포함)
 #   DELETE /feed/{feed_id}    : 피드 게시물 삭제
@@ -17,23 +17,9 @@
 #   Express feed.js 라우터를 통해 프론트엔드와 연결 완료
 #   FeedPage.jsx에서 GET /feed로 피드 목록 조회
 #   App.jsx에서 POST /feed로 피드 생성 (상세 루틴 완료 시 피드 업로드)
-#   파일 업로드는 Express multer가 디스크에 저장 후 URL을 POST /feed/image로 전달
+#   파일 업로드는 Express multer-s3가 S3에 저장하고 URL을 전달
 # ============================================================
-#
-# ────────────────────────────────────────────────────────────────────
-# [수정 2026-05-11] 신규 #18 — 라우터 트랜잭션 정합성 일괄 점검
-# ────────────────────────────────────────────────────────────────────
-# 오류 번호: 신규 #18 (2026-05-11 종합 리뷰 식별)
-# 날짜: 2026-05-11
-# 기대효과:
-#   - PyMySQL 풀(2026-05-10 도입) 환경에서 미정리 트랜잭션이 다음 요청에 새는 문제 차단
-#   - 5/2 like.py 1205 락 타임아웃 패턴 재발 방지
-#   - 신규 #16(POST /feed/with-images 분산 트랜잭션) 도입 전 사전 정리
-# 장점:
-#   - except 블록에 try/except rollback 추가만으로 로직 변경 없이 안전성 확보
-#   - 풀 반환 시 깨끗한 트랜잭션 상태 보장 (다음 요청에 영향 없음)
-#   - 파일 단위 패턴 일관성으로 리뷰/유지보수 비용 최소
-# ────────────────────────────────────────────────────────────────────
+# 모든 실패 경로는 rollback 후 커넥션을 반환해 풀 재사용 상태를 깨끗하게 유지한다.
 
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
@@ -57,24 +43,9 @@ class FeedCreate(BaseModel):
 class ImageCreate(BaseModel):
     """피드 이미지 추가 요청 데이터 스키마"""
     feed_id: str                        # UUID v7 (feeds.feed_id FK)
-    file_url: str                       # 업로드된 이미지/영상 URL (Express uploads/ 경로)
+    file_url: str                       # 업로드된 이미지/영상 URL (S3 퍼블릭 URL)
     file_type: Optional[str] = ""      # 파일 MIME 타입 (예: "image/jpeg", "video/mp4")
 
-
-# ────────────────────────────────────────────────────────────────────
-# [추가 2026-05-11] 신규 #16 — 피드 + 이미지 단일 트랜잭션 통합 엔드포인트
-# ────────────────────────────────────────────────────────────────────
-# 오류 번호: 신규 #16 (2026-05-11 종합 리뷰 식별)
-# 날짜: 2026-05-11
-# 기대효과:
-#   - Express 가 createFeed → addFeedImage × N 회를 호출하던 다단 구조를 단일 호출로 통합
-#   - 이미지 INSERT 중 어느 한 건이 실패해도 feeds 행까지 ROLLBACK → orphan 피드 행 제거
-#   - 정상 흐름의 HTTP 라운드트립 (1 + N) → 1 회로 축소
-# 장점:
-#   - DB 레벨 트랜잭션으로 정합성 보장 (Express 의 best-effort cleanup 보다 강함)
-#   - Express 코드 단순화: 단일 호출 + 실패 시 S3 cleanup 만 분기
-#   - 기존 POST /feed/ 와 POST /feed/image 는 유지 (레거시 호환 + 단순 시나리오용)
-# ────────────────────────────────────────────────────────────────────
 
 class FeedImagePayload(BaseModel):
     """단일 트랜잭션 INSERT 대상 이미지 1건 (file_url + MIME 타입)"""
@@ -113,22 +84,7 @@ def create_feed(body: FeedCreate):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # ────────────────────────────────────────────────────────────
-            # [추가 2026-05-10] 피드 생성 전 completion/routine/user 관계 검증.
-            # ────────────────────────────────────────────────────────────
-            # 이유:
-            #   Express 는 세션에서 user_id 를 주입하지만 routine_id/completion_id 는
-            #   프론트가 보낸 multipart 필드다. FastAPI 가 관계를 확인하지 않으면
-            #   사용자가 타인의 completion_id 로 피드를 만들거나, 서로 다른 루틴/완료 기록을
-            #   억지로 연결해 MyPage/Stats 의 인증 게시글·갤러리·달성률 데이터를 오염시킬 수 있다.
-            #
-            # 동작:
-            #   routine_completions 에서 completion_id + routine_id + user_id 가 모두 일치하고,
-            #   완료 기록 자체가 취소되지 않은(deleted_at IS NULL) 경우에만 feeds INSERT 를 허용한다.
-            #
-            # 결과:
-            #   피드는 반드시 "현재 로그인 유저가 방금 만든 본인 완료 기록"에만 연결된다.
-            # ────────────────────────────────────────────────────────────
+            # completion_id/routine_id는 클라이언트 입력이므로 세션 user_id와의 관계를 검증한다.
             cursor.execute(
                 """SELECT completion_id
                 FROM routine_completions
@@ -153,14 +109,12 @@ def create_feed(body: FeedCreate):
         conn.commit()
         return {"success": True, "feed_id": new_uuid}  # 이미지 추가에 feed_id 필요
     except HTTPException:
-        # [수정 2026-05-11 #18] HTTPException 도 트랜잭션 미정리 가능 — rollback 후 재전파
         try:
             conn.rollback()
         except Exception:
             pass
         raise
     except Exception as e:
-        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리 — 풀 반환 시 다음 요청 오염 차단
         try:
             conn.rollback()
         except Exception:
@@ -178,7 +132,7 @@ def add_feed_image(body: ImageCreate):
 
     피드 생성 후 첨부 파일을 추가할 때 호출.
     파일당 한 번씩 호출하며, 여러 파일이면 여러 번 호출.
-    file_url은 Express multer가 디스크에 저장한 파일의 경로 (예: /uploads/xxx.jpg).
+    file_url은 Express가 S3에 업로드한 파일의 퍼블릭 URL.
 
     Args:
         body (ImageCreate): 이미지 데이터 (feed_id, file_url, file_type)
@@ -201,7 +155,6 @@ def add_feed_image(body: ImageCreate):
         conn.commit()
         return {"success": True}
     except Exception as e:
-        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리
         try:
             conn.rollback()
         except Exception:
@@ -211,23 +164,11 @@ def add_feed_image(body: ImageCreate):
     finally:
         conn.close()
 
-# ── [추가 2026-05-11 신규 #16] 피드 + 이미지 단일 트랜잭션 (POST /feed/with-images) ──
+# ── 피드 + 이미지 단일 트랜잭션 (POST /feed/with-images) ──────────────────────
 
 @router.post("/with-images")
 def create_feed_with_images(body: FeedWithImagesCreate):
     """피드 + 첨부 이미지 N개를 단일 트랜잭션으로 일괄 생성.
-
-    [추가 2026-05-11 #16]
-    오류 번호: 신규 #16 (Express ↔ FastAPI 분산 트랜잭션 부재)
-    날짜: 2026-05-11
-    기대효과:
-        - feeds + feed_images N건을 하나의 트랜잭션으로 묶어 ROLLBACK 단위 통일
-        - 이미지 INSERT 도중 실패 시 feeds 행까지 자동 ROLLBACK → orphan 피드 제거
-        - Express → FastAPI 호출 횟수: (1 + N) → 1
-    장점:
-        - DB 레벨 정합성 보장으로 Express 의 best-effort 분리보다 강함
-        - 단일 conn.commit() 시점까지 외부에서 행이 보이지 않아 race condition 차단
-        - 기존 POST /feed/ 와 POST /feed/image 엔드포인트는 그대로 유지 (롤백/레거시 호환)
 
     동작:
         1. routine_completions 소유권 검증 (POST /feed/ 와 동일)
@@ -294,7 +235,7 @@ def create_feed_with_images(body: FeedWithImagesCreate):
             pass
         raise
     except Exception as e:
-        # [신규 #16] 어느 단계든 실패 시 feeds + feed_images INSERT 모두 무효화
+        # 어느 단계든 실패하면 feeds + feed_images INSERT를 모두 무효화한다.
         try:
             conn.rollback()
         except Exception:
@@ -306,32 +247,8 @@ def create_feed_with_images(body: FeedWithImagesCreate):
 
 # ── 전체 피드 목록 조회 (GET /feed/) ─────────────────────────────────────────
 
-# ─────────────────────────────────────────────────────────────────────────────
-# [수정 2026-05-03] 신규 #10 + 신규 #11 동시 해결
-# ─────────────────────────────────────────────────────────────────────────────
-# 기존 문제:
-#   1) Express GET /feed 가 본 엔드포인트로 피드 목록을 받은 뒤,
-#      각 피드마다 GET /feed/{feed_id} (이미지+댓글) 와 GET /like/{feed_id}/{uid}
-#      를 추가 호출하여 N+1 쿼리 발생 — 피드 100개 시 HTTP 호출 201회.
-#   2) LIMIT 절 없이 전체 피드를 한 번에 반환 — 피드 1000개 시 페이로드 폭증.
-#
-# 해결:
-#   본 엔드포인트에 user_id / cursor / limit 쿼리 파라미터를 추가하여
-#   - 피드 + 현재 사용자 좋아요 상태(LEFT JOIN feed_likes) + 카운트 = 단일 쿼리
-#   - 이미지는 페이지 단위 피드 ID 목록으로 한 번의 IN 쿼리
-#   - 댓글은 응답에서 제외 (모달 열 때 GET /comment/{feed_id} 별도 호출)
-#   - cursor "<created_at_iso>_<feed_id>" 형태로 안정적인 페이지네이션
-#
-# 하위 호환:
-#   모든 신규 파라미터는 optional + 기본값 보유.
-#   user_id 미전달 시 liked 는 항상 false 로 채움.
-#   cursor 미전달 시 첫 페이지부터 limit 만큼 반환.
-#
-# 응답 형식 변경 (구버전: list, 신버전: dict):
-#   기존: 피드 배열만 반환
-#   신규: { feeds: [...], next_cursor: "<...>" | null }
-#   → Express getFeeds() 와 routes/feed.js 가 동시에 갱신되므로 호환 OK.
-# ─────────────────────────────────────────────────────────────────────────────
+# 목록 조회는 user_id / cursor / limit으로 피드 메타, 좋아요 상태, 카운트, 이미지를
+# 페이지 단위로 조회한다. 댓글은 모달을 열 때 /comment/{feed_id}에서 별도로 가져온다.
 
 # ── 헬퍼: cursor 직렬화/역직렬화 ──
 # cursor 문자열은 "<created_at_iso>_<feed_id>" 형태.
@@ -375,12 +292,6 @@ def get_feeds(
     users, routines 테이블과 JOIN하여 닉네임, 루틴 제목, 카테고리 함께 반환.
     feed_likes, feed_comments와 LEFT JOIN + COUNT로 좋아요/댓글 수도 포함.
 
-    [수정 2026-05-03]
-        - user_id / cursor / limit 쿼리 파라미터 추가 (모두 optional)
-        - 좋아요 상태(liked)를 단일 쿼리에 결합 → N+1 제거
-        - 이미지를 페이지 단위 IN 쿼리 1회로 일괄 조회
-        - 응답을 { feeds, next_cursor } dict 로 변경
-
     Returns:
         dict: {
             "feeds": [
@@ -402,11 +313,6 @@ def get_feeds(
 
     conn = get_connection()
     try:
-        # ────────────────────────────────────────────────────────────────
-        # [수정 2026-05-01] Soft Delete: routines/users LEFT JOIN + COALESCE fallback
-        # [수정 2026-05-03] N+1 제거를 위해 좋아요 상태(liked) 를 동일 쿼리에 결합
-        #                   + 커서 기반 페이지네이션 적용
-        # ────────────────────────────────────────────────────────────────
         # 좋아요 상태 결합 방식:
         #   LEFT JOIN feed_likes fl_me ON fl_me.feed_id=f.feed_id
         #                              AND fl_me.user_id=:user_id
@@ -443,10 +349,8 @@ def get_feeds(
             """
             params = [user_id]
 
-            # [추가 2026-05-17] 신고 제재로 Soft Delete 된 피드 제외.
-            # feeds.deleted_at IS NULL 을 항상 WHERE 에 둔다 (5/1 Soft Delete 정책을
-            # feeds 까지 확장 — report.py process_report 가 UPDATE deleted_at 함).
-            # cursor 조건은 그 뒤에 AND 로 이어붙인다.
+            # 신고 제재로 Soft Delete 된 피드는 목록에서 제외한다.
+            # cursor 조건은 deleted_at 필터 뒤에 AND로 이어붙인다.
             base_sql += " WHERE f.deleted_at IS NULL"
             if parsed_cursor:
                 base_sql += " AND (f.created_at, f.feed_id) < (%s, %s)"
@@ -488,7 +392,7 @@ def get_feeds(
 
         return {"feeds": feeds, "next_cursor": next_cursor}
     except Exception as e:
-        # [수정 2026-05-11 #18] SELECT-only 라우터지만 미래 INSERT/UPDATE 추가 대비 일관 패턴
+        # 조회 라우트도 실패 시 열린 트랜잭션을 정리한다.
         try:
             conn.rollback()
         except Exception:
@@ -526,11 +430,7 @@ def get_feed_detail(feed_id: str):
     try:
         with conn.cursor() as cursor:
             # ── 피드 기본 정보 조회 ──
-            # [수정 2026-05-01] Soft Delete 적용:
-            #   - users / routines INNER JOIN → LEFT JOIN
-            #     루틴이 삭제됐어도(피드 보존 정책), 게시자가 탈퇴했어도 피드 상세는 열려야 함.
-            #   - COALESCE 로 닉네임/루틴 제목 fallback
-            #   - f.* 가 모든 feeds 컬럼을 그대로 가져오므로, 추가로 routine_title/category 만 명시.
+            # 루틴 삭제/회원 탈퇴 후에도 피드는 열릴 수 있어 LEFT JOIN과 fallback 라벨을 사용한다.
             cursor.execute(
                 """SELECT f.*,
                         COALESCE(u.nickname, '(탈퇴한 사용자)') AS nickname,
@@ -541,7 +441,6 @@ def get_feed_detail(feed_id: str):
                 LEFT JOIN users u ON f.user_id = u.user_id
                 LEFT JOIN routines r ON f.routine_id = r.routine_id
                 WHERE f.feed_id = %s AND f.deleted_at IS NULL""",
-                # [추가 2026-05-17] 제재(Soft Delete)된 피드는 상세도 404 처리
                 (feed_id,)
             )
             feed = cursor.fetchone()
@@ -558,9 +457,7 @@ def get_feed_detail(feed_id: str):
             images = cursor.fetchall()
 
             # ── 댓글 목록 조회 (작성 순서대로) ──
-            # [수정 2026-05-01] users LEFT JOIN + 닉네임 fallback
-            #   탈퇴한 사용자의 댓글이라도 표시되도록 LEFT JOIN.
-            #   nickname 은 COALESCE 로 "(탈퇴한 사용자)" fallback 처리.
+            # 탈퇴한 사용자의 댓글도 표시되도록 LEFT JOIN과 fallback 라벨을 사용한다.
             cursor.execute(
                 """SELECT fc.*,
                           COALESCE(u.nickname, '(탈퇴한 사용자)') AS nickname
@@ -577,14 +474,12 @@ def get_feed_detail(feed_id: str):
         feed["comments"] = comments
         return feed
     except HTTPException:
-        # [수정 2026-05-11 #18] 404 등도 트랜잭션 정리 후 재전파
         try:
             conn.rollback()
         except Exception:
             pass
         raise  # HTTPException(404)은 그대로 전달, 아래 except에서 잡지 않도록
     except Exception as e:
-        # [수정 2026-05-11 #18] 미정리 트랜잭션 정리
         try:
             conn.rollback()
         except Exception:
@@ -635,7 +530,6 @@ def delete_feed(
 
         return {"success": True}
     except Exception as e:
-        # [수정 2026-05-11 #18] DELETE 도 INSERT/UPDATE 와 동일하게 트랜잭션 정리
         try:
             conn.rollback()
         except Exception:

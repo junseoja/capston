@@ -1,7 +1,6 @@
 // ============================================================
 // 공지사항(Notice) 관련 Express 라우터
 // ============================================================
-// 작성일: 2026-05-16
 // 담당 라우트:
 //   POST   /notice            : 공지 작성   (로그인 + 관리자)
 //   GET    /notice            : 공지 목록   (로그인)
@@ -19,8 +18,8 @@
 //     (requireAuth 가 req.user 주입 → requireAdmin 이 login_id==="admin" 검증)
 //
 // 에러 처리:
-//   기존 feed.js 패턴과 동일 — try/catch 후 next(error) 로
-//   글로벌 에러 핸들러(#3)에 위임. fetchJson 이 FastApiError 표준화.
+//   try/catch 후 next(error)로 app.js 글로벌 에러 핸들러에 위임한다.
+//   FastAPI 통신 오류는 database.js의 fetchJson이 FastApiError로 표준화한다.
 // ============================================================
 
 const express = require("express");

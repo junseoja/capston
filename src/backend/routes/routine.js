@@ -9,10 +9,6 @@
 // 보안:
 //   모든 라우트 세션 쿠키로 로그인 여부 확인
 //   DELETE: user_id를 FastAPI에 함께 전달하여 본인 루틴만 삭제 가능하도록 검증
-//
-// [리팩터링] 세션 인증 코드 반복 제거 (README 4월 18일 #12)
-//   기존에 라우트마다 복붙되어 있던 4줄 세션 확인 블록을
-//   requireAuth 미들웨어로 교체. req.user.user_id 로 유저 ID 사용.
 // ============================================================
 
 const express = require("express");
@@ -31,9 +27,6 @@ const requireAuth = require("../middleware/requireAuth");
  * body: { title, category, time_slot, routine_mode, goal, repeat_cycle, description }
  * user_id는 requireAuth가 req.user에 실어 주므로 클라이언트에서 전달하지 않음
  */
-// [리팩터링 #1] try/catch + next(err) 추가
-//   - 기존: FastAPI 호출 실패 시 에러가 Express 기본 핸들러로 흘러 HTML 500 반환
-//   - 이후: next(error) 로 글로벌 에러 핸들러(#3)에 전달 → JSON 응답 보장
 router.post("/routine", requireAuth, async (req, res, next) => {
     try {
         const result = await createRoutine({ user_id: req.user.user_id, ...req.body });

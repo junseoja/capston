@@ -2,13 +2,9 @@
 // 마이페이지(MyPage) 관련 Express 라우터
 // ============================================================
 // 담당 라우트:
+//   GET /mypage         : 유저 + summary + gallery 통합 조회
 //   GET /mypage/summary : 핵심 지표 조회
 //   GET /mypage/gallery : 내 인증 갤러리 조회
-//
-// [추가 2026-05-10]
-// 이유:
-//   프론트 MyPage.jsx 의 mock 데이터를 실제 DB 통계/갤러리 데이터로 전환하기 위해
-//   React 가 FastAPI 를 직접 호출하지 않고 기존 인증 구조처럼 Express 를 경유하게 한다.
 // ============================================================
 
 const express = require("express");
@@ -18,9 +14,7 @@ const requireAuth = require("../middleware/requireAuth");
 
 router.get("/mypage", requireAuth, async (req, res, next) => {
     try {
-        // [추가 2026-05-10] 화면 단위 통합 API.
-        // 이유: MyPage.jsx 에서 /me, /mypage/summary, /mypage/gallery 를 각각 호출하던
-        // 왕복 비용을 줄이고, 한 번의 응답으로 user/summary/gallery 를 모두 받기 위함.
+        // 화면 단위 통합 API: user/summary/gallery를 한 번에 가져온다.
         const limit = parseInt(req.query.gallery_limit, 10) || 9;
         const overview = await getMypageOverview(req.user.user_id, limit);
         return res.json({ success: true, ...overview });

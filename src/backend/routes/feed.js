@@ -6,11 +6,8 @@
 //   GET    /feed          : 전체 피드 목록 조회 (이미지 + 현재 유저 좋아요 상태 포함)
 //   DELETE /feed/:feed_id : 피드 삭제 (세션 인증 + 본인 소유 검증)
 //
-// 파일 업로드 (2026-05-05 변경):
-//   - 기존: multer.diskStorage → src/backend/uploads/ 로컬 저장
-//   - 현재: multer-s3 → AWS S3 직접 업로드 (퍼블릭 읽기 버킷)
-//   - 사유: 팀원 간 RDS 공유 시 "내 PC 이미지가 다른 PC에서 깨지는" 문제 해결.
-//           README 미구현 항목("피드 이미지 → S3 등 클라우드 스토리지 전환 고려") 해소.
+// 파일 업로드:
+//   - multer-s3로 AWS S3에 직접 업로드
 //   - DB 의 feed_images.file_url 에는 S3 퍼블릭 URL 전체 문자열을 저장
 //     (예: https://my-bucket.s3.ap-northeast-2.amazonaws.com/feed/171.../abc.jpg)
 // ============================================================
@@ -24,16 +21,14 @@ const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const {
     createFeed,
     addFeedImage,
-    // [추가 2026-05-11 #16] 단일 트랜잭션 통합 호출
     createFeedWithImages,
     getFeeds,
     getFeedDetail,
     deleteFeed,
 } = require("../database");
-// [리팩터링 #12] 세션 인증 4줄 복붙을 미들웨어 한 줄로 대체
 const requireAuth = require("../middleware/requireAuth");
 
-// ── [추가 2026-05-05] S3 클라이언트 초기화 ───────────────────────────────────
+// ── S3 클라이언트 초기화 ─────────────────────────────────────────────────────
 // 환경변수 4개(.env): AWS_REGION, AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 // 누락 시 서버 기동은 되지만 첫 업로드/삭제에서 실패 → 부팅 시 경고만 출력.
 const AWS_REGION = process.env.AWS_REGION || "ap-northeast-2";
@@ -98,22 +93,6 @@ async function deleteS3Object(key) {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────
-// [수정 2026-05-11] 신규 #17 — S3 URL 검증 강화
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: 신규 #17 (S3 URL 검증이 호스트네임 suffix 만 체크)
-// 날짜: 2026-05-11
-// 기대효과:
-//   - 임의 버킷의 객체 삭제 차단 (".amazonaws.com" suffix 만 통과하던 기존 약점 해소)
-//   - "..": "feed/../../etc/passwd" 류 path traversal 시도 reject
-//   - 화이트리스트 prefix(`feed/`, `profile/`) 외 키는 삭제 대상에서 제외
-//     → 향후 클라이언트가 file_url 을 직접 보내도 임의 객체 삭제 불가
-// 장점:
-//   - 환경변수 AWS_S3_BUCKET / AWS_REGION 의 정확한 조합과만 매칭 → 다른 버킷 보호
-//   - 단일 함수에 집중된 검증 → IAM 정책과 별개로 코드 레벨 방어 추가
-//   - 화이트리스트 미스 시 null 반환 → 호출자(deleteFeed) 의 cleanup 흐름 그대로 유지
-// ────────────────────────────────────────────────────────────────────
-
 // multer-s3 의 key 생성 규칙(`feed/<timestamp>-...`)과 일치.
 // 향후 프로필 사진 등이 추가되면 prefix 만 늘리면 됨.
 const ALLOWED_S3_KEY_PREFIXES = ["feed/", "profile/"];
@@ -169,21 +148,6 @@ function extractS3Key(fileUrl) {
 
 // ── 피드 생성 (POST /feed) ───────────────────────────────────────────────────
 
-// ────────────────────────────────────────────────────────────────────
-// [수정 2026-05-11] 신규 #16 — 분산 트랜잭션 단일 호출 통합
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: 신규 #16 (Express ↔ FastAPI 분산 트랜잭션 부재)
-// 날짜: 2026-05-11
-// 기대효과:
-//   - 기존: createFeed → addFeedImage × N 회 호출 → 중간 실패 시 feeds orphan 가능
-//   - 신규: createFeedWithImages 단일 호출 → FastAPI 가 한 트랜잭션에서 INSERT 후 부분
-//     실패 시 ROLLBACK → orphan 피드 행 제거
-//   - HTTP 라운드트립 (1 + N) → 1 로 축소
-// 장점:
-//   - DB 레벨 트랜잭션으로 정합성 보장 (기존 best-effort cleanup 보다 강함)
-//   - Express 분기 단순화: "성공이면 끝, 실패면 S3 cleanup" 두 갈래만 남음
-//   - 기존 createFeed / addFeedImage 함수는 유지 → 미사용 시 향후 제거 가능
-// ────────────────────────────────────────────────────────────────────
 /**
  * POST /feed
  *
@@ -226,9 +190,7 @@ router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, ne
     }
 
     try {
-        // [수정 2026-05-11 #16] 단일 트랜잭션 호출로 통합
-        //   - feeds + feed_images N건이 FastAPI 측 단일 트랜잭션에서 처리됨
-        //   - 어느 INSERT 라도 실패하면 FastAPI 가 ROLLBACK → orphan 행 없음
+        // feeds + feed_images N건은 FastAPI 측 단일 트랜잭션에서 처리된다.
         const result = await createFeedWithImages({
             user_id: req.user.user_id,
             routine_id,
@@ -260,20 +222,8 @@ router.post("/feed", requireAuth, upload.array("files", 10), async (req, res, ne
 
 // ── 전체 피드 목록 조회 (GET /feed) ──────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// [수정 2026-05-03] N+1 제거 + 커서 기반 페이지네이션
-// ─────────────────────────────────────────────────────────────────────────────
-// 배경 (README 기술부채 #10, #11):
-//   기존 구현은 피드 1건마다 getFeedDetail + checkLike 두 번씩 호출 →
-//   N개 피드면 1 + 2N 회의 HTTP/DB 라운드트립 발생 (N+1 안티패턴).
-//   또한 LIMIT 없이 전 행을 반환해 피드 수 누적 시 응답 폭증.
-//
-// 변경:
-//   - FastAPI GET /feed/ 가 user_id / cursor / limit 쿼리를 받아
-//     단일 SQL JOIN 으로 이미지·좋아요 상태·페이지네이션을 모두 처리.
-//   - Express 는 인증 정보와 쿼리 파라미터만 전달하는 얇은 패스스루로 정리.
-//   - 댓글은 list 응답에서 제거 — 모달 진입 시 별도 엔드포인트로 페치.
-// ─────────────────────────────────────────────────────────────────────────────
+// FastAPI GET /feed/는 user_id / cursor / limit 쿼리로 피드 메타,
+// 이미지, 좋아요 상태, 카운트, 페이지네이션을 묶어 반환한다.
 router.get("/feed", requireAuth, async (req, res, next) => {
     try {
         const limit = parseInt(req.query.limit, 10) || 20;

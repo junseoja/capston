@@ -2,9 +2,9 @@
 // Express 백엔드 진입점 (app.js)
 // ============================================================
 // 역할:
-//   - 포트 3000에서 HTTP 서버 실행
-//   - React 프론트(localhost:5173)의 요청을 받아 FastAPI(localhost:8000)로 중계
-//   - 세션 관리(httpOnly 쿠키)를 이 서버에서 담당
+//   - React 프론트엔드의 요청을 받는 공개 API 계층
+//   - httpOnly 세션 쿠키, CORS, 라우터 마운트, 공통 에러 응답 담당
+//   - 실제 DB 작업은 database.js를 통해 FastAPI 내부 API로 위임
 //
 // 실행 방법:
 //   cd src/backend
@@ -20,6 +20,7 @@
 //   /feed (POST, GET, DELETE /feed/:feed_id)           → feedRouter
 //   /like (POST /like)                                 → likeRouter
 //   /comment (POST, GET /:feed_id, DELETE /:comment_id) → commentRouter
+//   /mypage, /stats, /notice, /report                  → 화면/관리 API
 // ============================================================
 
 require("dotenv").config(); // .env 파일을 process.env에 로드 (가장 먼저 실행)
@@ -29,13 +30,8 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 
 const PORT = process.env.PORT || 3000;
-// [수정 2026-05-17 / 배포 준비] CORS 다중 origin 지원.
-// 오류번호: 배포 준비 (배포 후 로컬 동시 테스트 불가 문제)
-// 날짜: 2026-05-17
-// 기대효과: FRONTEND_URL 을 콤마로 여러 개 지정 가능.
-//   예) FRONTEND_URL=http://localhost:5173,https://my-app.vercel.app
-//   → 배포 후에도 로컬 개발 서버에서 동시에 붙어 테스트 가능.
-// 장점: 기존 단일 값도 그대로 동작(콤마 없으면 1개짜리 배열) → 후방 호환.
+// FRONTEND_URL은 콤마로 여러 origin을 받을 수 있다.
+// 예: FRONTEND_URL=http://localhost:5173,https://my-app.vercel.app
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 const ALLOWED_ORIGINS = FRONTEND_URL.split(",")
     .map((o) => o.trim())
@@ -67,7 +63,6 @@ const mypageRouter = require("./routes/mypage");
 // 통계 라우터: GET /stats
 const statsRouter = require("./routes/stats");
 
-// [추가 2026-05-16] 관리자 페이지 라우터
 // 공지 라우터: POST/GET/PATCH/DELETE /notice
 const noticeRouter = require("./routes/notice");
 // 신고 라우터: POST/GET /report, PATCH /report/process, GET /report/:id
@@ -80,8 +75,7 @@ const app = express();
 // CORS 설정: 허용된 프론트 origin 목록(ALLOWED_ORIGINS)만 통과
 // credentials: true → 쿠키 포함 요청(fetch credentials: "include") 허용
 //   - 와일드카드(*) 는 credentials 와 함께 못 쓰므로 명시 목록 사용
-//   - [수정 2026-05-17] 다중 origin: 콤마 분리된 ALLOWED_ORIGINS 중 하나면 허용.
-//     origin 이 없는 요청(서버간 호출, 헬스체크, curl)은 통과(!origin).
+//   - origin 이 없는 서버간 호출, 헬스체크, curl 요청은 통과시킴
 app.use(
     cors({
         origin(origin, callback) {
@@ -100,18 +94,8 @@ app.use(express.json());
 // 쿠키 파싱 미들웨어 → req.cookies.sessionId 처럼 쿠키 값에 접근 가능
 app.use(cookieParser());
 
-// [추가 2026-05-10] Express 요청 처리 시간 측정.
-//
-// 이유:
-//   React → Express → FastAPI → MySQL 구조를 유지하면서 성능을 높이려면
-//   어느 API가 실제로 느린지 먼저 숫자로 확인해야 한다.
-//
-// 동작:
-//   모든 요청의 시작/종료 시간을 측정하고, SLOW_REQUEST_MS 이상 걸린 요청만 로그로 남긴다.
-//   빠른 요청까지 전부 찍으면 개발 로그가 너무 커지므로 기본값은 500ms 이상만 기록한다.
-//
-// 결과:
-//   Express 자체 병목인지, FastAPI/DB 대기인지, 특정 화면 API가 느린지 추적할 수 있다.
+// 요청 시간을 측정하고 기준값 이상인 요청만 로그에 남긴다.
+// Express 자체 지연과 FastAPI/DB 대기 시간을 분리해 추적하기 위한 운영 로그다.
 app.use((req, res, next) => {
     const startedAt = process.hrtime.bigint();
     res.on("finish", () => {
@@ -125,11 +109,8 @@ app.use((req, res, next) => {
     next();
 });
 
-// [제거 2026-05-05] /uploads 정적 서빙 — 피드 이미지를 S3 로 이전.
-// 기존: app.use("/uploads", express.static(...))  → 로컬 디스크의 업로드 파일 서빙
-// 변경: routes/feed.js 가 multer-s3 로 S3 에 직접 업로드, DB 의 file_url 은 S3 퍼블릭 URL.
-//       프론트(FeedPage.jsx getImageUrl) 는 http* 로 시작하는 URL 을 그대로 통과시키므로
-//       이미지 표시는 추가 코드 변경 없이 동작.
+// 신규 피드 파일은 routes/feed.js에서 S3로 직접 업로드한다.
+// uploads 디렉터리는 자리표시자만 유지하며 정적 서빙하지 않는다.
 
 // ── 라우터 등록 ──────────────────────────────────────────────────────────────
 
@@ -167,29 +148,19 @@ app.use("/", likeRouter);
 // - DELETE /comment/:comment_id  : 댓글 삭제
 app.use("/", commentRouter);
 
-// [추가 2026-05-10] 마이페이지/통계 실제 데이터 라우트.
-// 이유: MyPage.jsx / StatsPage.jsx 의 mock 값을 DB 기반 API로 대체하기 위함.
-// 설명: 두 라우터 모두 requireAuth 로 세션 user_id 를 주입한 뒤 FastAPI 에 전달한다.
+// 마이페이지/통계 라우트는 requireAuth로 세션 user_id를 주입한 뒤 FastAPI에 전달한다.
 app.use("/", mypageRouter);
 app.use("/", statsRouter);
 
-// [추가 2026-05-16] 관리자 페이지 라우터 마운트.
-// 공지/신고 — 각 라우터 내부에서 requireAuth(+requireAdmin) 체이닝으로 보호.
+// 공지/신고 관리 라우트는 각 라우터 내부에서 requireAuth와 requireAdmin으로 보호한다.
 app.use("/", noticeRouter);
 app.use("/", reportRouter);
 
 // ── 글로벌 에러 핸들러 ───────────────────────────────────────────────────────
-// 해결하는 에러 (README 4월 18일 #3 — 글로벌 에러 핸들러 없음):
-//   - 기존에는 라우터에서 throw된 에러가 Express 기본 핸들러로 떨어져
-//     HTML 500 페이지가 클라이언트에 반환됨
-//     → 프론트의 res.json()이 SyntaxError 로 크래시하던 문제
-//   - Express 5는 async 핸들러의 throw / reject를 자동으로 next(err)로 넘겨줌
-//     → 여기 한 블록으로 모든 라우트의 미처리 에러를 JSON 500 응답으로 통일
-//
+// 모든 라우터의 미처리 오류를 JSON 응답으로 통일한다.
 // FastApiError 처리:
 //   - 4xx (409 아이디 중복 등): 원래 상태코드 그대로 전달
 //   - 5xx 또는 status=0 (FastAPI 자체 다운/네트워크 실패): 502 Bad Gateway 로 변환
-//     → "Express 서버 문제"가 아니라 "업스트림 FastAPI 문제"임을 명시
 //
 // 주의:
 //   - Express는 error handler를 "파라미터 4개짜리 함수"로 판별하므로

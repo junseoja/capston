@@ -1,7 +1,6 @@
 # ============================================================
 # 게시글 신고(Report) 관련 API 라우터
 # ============================================================
-# 작성일: 2026-05-16
 # 담당 엔드포인트:
 #   POST   /report/                : 신고 접수 (일반 사용자)
 #   GET    /report/                : 신고 목록 (관리자) — feed_id 별 그룹 집계
@@ -14,16 +13,15 @@
 #             report_category ENUM 6종, status ENUM(pending/completed),
 #             Soft Delete(deleted_at) O
 #   feeds   : 제재 시 함께 Soft Delete 대상
-#   (docs/migrations-2026-05-13-admin-challenge.sql 참고)
 #
 # 호출 흐름:
 #   - 신고: React FeedPage(🚩) → Express(report.js) → 이 라우터 → MySQL
 #   - 관리: React AdminPage     → Express(report.js, require_admin) → 이 라우터 → MySQL
 #
-# 기존 규약 준수 (notice.py / feed.py 패턴 그대로):
+# 현재 규약:
 #   - UUID v7 PK (uuid7str)
-#   - 트랜잭션 정합성 (5/11 #18): try / except 2종 / rollback / finally close
-#   - Soft Delete (5/1): 조회는 deleted_at IS NULL, 삭제는 UPDATE deleted_at
+#   - 실패 경로는 rollback 후 conn.close()
+#   - 조회는 deleted_at IS NULL, 제재는 feeds.deleted_at 갱신
 #   - 관리자 권한은 Express report.js 의 require_admin 에서 검증 (FastAPI 는 안 함)
 #
 # ────────────────────────────────────────────────────────────
@@ -38,7 +36,7 @@
 #    (a) 해당 게시물의 모든 pending 신고를 completed 로 전환
 #    (b) 그 게시물(feeds) 자체를 Soft Delete
 #    둘 중 하나만 성공하면 데이터가 어긋나므로 반드시 단일 트랜잭션.
-#    (feed.py 의 create_feed_with_images #16 트랜잭션 패턴과 같은 사상)
+#    (feed.py 의 create_feed_with_images 트랜잭션 패턴과 같은 사상)
 # ────────────────────────────────────────────────────────────
 
 from fastapi import APIRouter, HTTPException, Query
@@ -51,7 +49,7 @@ from uuid_extensions import uuid7str
 router = APIRouter(prefix="/report", tags=["report"])
 
 # reports.report_category 가 DB ENUM 이므로 사전 검증용 화이트리스트.
-# 프론트 FeedPage(Stage 2-5) 신고 모달의 6개 분류와 정확히 일치해야 한다.
+# 프론트 신고 모달의 6개 분류와 정확히 일치해야 한다.
 ALLOWED_REPORT_CATEGORIES = {
     "욕설/비방", "부적절한 홍보", "도용/저작권",
     "스팸/도배", "음란/혐오", "기타",
@@ -64,8 +62,8 @@ class ReportCreate(BaseModel):
     """신고 접수 요청 (POST /report/)
 
     Express report.js 가 세션에서 reporter_user_id 를 주입.
-    target_user_id(작성자) 는 2026-05-17 부터 요청값으로 받지 않고,
-    이 라우터가 feed_id 기준으로 feeds.user_id 를 직접 조회해 확정한다.
+    target_user_id(작성자)는 요청값으로 받지 않고,
+    이 라우터가 feed_id 기준으로 feeds.user_id를 직접 조회해 확정한다.
     """
     feed_id: str                       # 신고된 게시글 UUID v7
     reporter_user_id: str              # 신고한 사용자 (세션 주입)
@@ -118,18 +116,7 @@ def create_report(body: ReportCreate):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # [수정 2026-05-17] feed_id 기준 실제 게시글 작성자 조회.
-            # 원인:
-            #   이전에는 Express/프론트가 전달한 target_user_id 를 INSERT 에 사용했다.
-            #   클라이언트 입력은 조작 가능하므로 reports.target_user_id 가
-            #   실제 feeds.user_id 와 달라지는 데이터 불일치가 발생할 수 있었다.
-            # 이유:
-            #   신고의 대상자는 "요청자가 주장한 사용자"가 아니라
-            #   "신고된 feed_id 의 실제 작성자"여야 한다. 따라서 DB 를 진실 공급원으로 삼는다.
-            # 작동원리:
-            #   1) feeds 에서 feed_id 와 deleted_at IS NULL 조건으로 활성 게시글을 찾는다.
-            #   2) 조회된 feeds.user_id 를 target_user_id 변수에 담는다.
-            #   3) 아래 INSERT 는 이 변수만 사용하므로 클라이언트가 target_user_id 를 보내도 무시된다.
+            # 신고 대상자는 요청자가 보낸 값이 아니라 feed_id의 실제 작성자로 확정한다.
             cursor.execute(
                 """SELECT user_id
                     FROM feeds
@@ -263,17 +250,7 @@ def list_reports(
                     f.content                                    AS feed_content,
                     -- 피드가 이미 Soft Delete 됐는지 (관리자 참고용)
                     (f.deleted_at IS NOT NULL)                   AS feed_deleted,
-                    -- [수정 2026-05-17] 처리 완료 목록에서 관리자 코멘트를 함께 내려준다.
-                    -- 원인:
-                    --   AdminPage 는 r.admin_comment 를 읽어 상세 모달에 표시하지만
-                    --   기존 SELECT 가 admin_comment 를 반환하지 않아 항상 빈 문자열로 보였다.
-                    -- 이유:
-                    --   PATCH /report/process 가 reports.admin_comment 를 저장하므로
-                    --   GET /report 목록도 같은 필드를 포함해야 처리 사유를 확인할 수 있다.
-                    -- 작동원리:
-                    --   목록은 feed_id 단위 GROUP BY 이므로 일반 컬럼을 그대로 SELECT 할 수 없다.
-                    --   같은 처리 작업에서 같은 admin_comment 가 일괄 저장되는 구조라
-                    --   MAX(r.admin_comment) 로 그룹 대표값을 안정적으로 뽑아 응답에 포함한다.
+                    -- 목록은 feed_id 단위 GROUP BY라 처리 사유는 그룹 대표값으로 내려준다.
                     MAX(r.admin_comment)                         AS admin_comment,
                     -- 신고자들을 JSON 배열로 집계 (프론트 reporters 와 매핑)
                     JSON_ARRAYAGG(
@@ -392,7 +369,7 @@ def process_report(body: ReportProcess):
         (a)만 되고 (b)가 실패하면 → "처리 완료"인데 게시물은 살아있음 (모순)
         (b)만 되고 (a)가 실패하면 → 게시물은 삭제됐는데 신고는 계속 pending
         둘 다 성공 or 둘 다 롤백 이어야 데이터가 일관됨.
-        (feed.py create_feed_with_images #16 과 같은 사상)
+        (feed.py create_feed_with_images 와 같은 트랜잭션 사상)
 
     동작 순서:
         1. 대상 게시물에 pending 신고가 실제로 있는지 확인 (없으면 404)
@@ -413,7 +390,7 @@ def process_report(body: ReportProcess):
     참고:
         피드의 좋아요/댓글/이미지는 Soft Delete 이므로 함께 정리 안 됨.
         피드 조회 라우터들이 이미 deleted_at IS NULL 필터를 하므로
-        사용자 화면에서는 게시물이 사라진다 (5/1 규약 덕분에 자동).
+        사용자 화면에서는 게시물이 사라진다.
     """
     conn = get_connection()
     try:
