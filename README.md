@@ -480,6 +480,7 @@ users
 | email | VARCHAR(255) | 이메일 (UNIQUE) |
 | profile_img | TEXT | 프로필 이미지 |
 | created_at | DATETIME | 가입일 |
+| deleted_at | DATETIME | [추가 2026-05-01] 회원 탈퇴 시각. NULL=활성, NOT NULL=탈퇴 |
 
 ### routines
 
@@ -495,6 +496,7 @@ users
 | repeat_cycle | VARCHAR(255) | 반복 주기 (예: "매일", "월, 수, 금") |
 | description | TEXT | 루틴 설명 |
 | created_at | DATETIME | 생성일 |
+| deleted_at | DATETIME | [추가 2026-05-01] 루틴 삭제 시각. NULL=활성, NOT NULL=삭제됨 |
 
 ### sessions
 
@@ -513,6 +515,7 @@ users
 | user_id | CHAR(36) | NO | FK | — | 유저 외래키 |
 | completed_at | DATETIME | YES | — | CURRENT_TIMESTAMP | 완료 시간 |
 | proof_text | TEXT | YES | — | NULL | 상세 루틴 인증 글 |
+| deleted_at | DATETIME | YES | — | NULL | [추가 2026-05-01] 완료 취소 시각. NULL=활성, NOT NULL=취소됨 |
 
 ### feeds
 

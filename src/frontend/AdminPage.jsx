@@ -416,12 +416,12 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                     </select>
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <div style={{ flex: 1 }}>
-                         <label style={{ fontSize: '11px', color: '#999', marginLeft: '5px' }}>시작일</label>
-                         <input type="date" value={challengeForm.startDate} onChange={(e) => setChallengeForm({...challengeForm, startDate: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #ddd' }} />
+                        <label style={{ fontSize: '11px', color: '#999', marginLeft: '5px' }}>시작일</label>
+                        <input type="date" value={challengeForm.startDate} onChange={(e) => setChallengeForm({...challengeForm, startDate: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #ddd' }} />
                       </div>
                       <div style={{ flex: 1 }}>
-                         <label style={{ fontSize: '11px', color: '#999', marginLeft: '5px' }}>종료일</label>
-                         <input type="date" value={challengeForm.endDate} onChange={(e) => setChallengeForm({...challengeForm, endDate: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #ddd' }} />
+                        <label style={{ fontSize: '11px', color: '#999', marginLeft: '5px' }}>종료일</label>
+                        <input type="date" value={challengeForm.endDate} onChange={(e) => setChallengeForm({...challengeForm, endDate: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #ddd' }} />
                       </div>
                     </div>
                     <textarea placeholder="챌린지 상세 설명" value={challengeForm.description} onChange={(e) => setChallengeForm({...challengeForm, description: e.target.value})} style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd', minHeight: '100px', resize: 'none' }} />

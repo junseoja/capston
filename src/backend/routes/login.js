@@ -33,6 +33,36 @@ const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY; // [추가 2026-05-10] Fa
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // [추가] 백엔드 기본 이메일 형식 검사
 const ALLOWED_GENDERS = ["남", "여", "기타"]; // [추가] DB ENUM과 동일한 허용 성별 목록
 
+// [추가 2026-05-17 / 신규 #19 회원가입 비밀번호 정책]
+// 오류번호: 5/11 종합 리뷰 신규 #19 (회원가입 비밀번호 정책 부재)
+// 날짜: 2026-05-17
+// 기대효과: 프론트(SignupPage.validatePassword)가 검증하던 비번 정책을
+//          백엔드에서도 동일하게 강제 → curl/직접 API 호출 우회 차단.
+// 장점: 약한 비밀번호 가입 자체를 막아 계정 탈취 위험 감소.
+//       프론트와 규칙을 1:1로 맞춰(8~16자/공백X/영문·숫자·특수 각 1+)
+//       사용자가 프론트 통과 후 백엔드에서 또 막히는 불일치 없음.
+// SignupPage.jsx 의 SPECIAL_CHAR_REGEX 와 동일한 특수문자 집합.
+const PASSWORD_SPECIAL_REGEX = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/;
+
+/**
+ * 회원가입 비밀번호 정책 검증.
+ * 유효하면 "" 반환, 위반 시 사용자에게 보낼 메시지 문자열 반환.
+ * (프론트 SignupPage.validatePassword 와 규칙 완전 일치)
+ */
+function validateSignupPassword(pw) {
+    if (typeof pw !== "string" || !pw) return "비밀번호를 입력하세요.";
+    if (pw.length < 8 || pw.length > 16) {
+        return "비밀번호는 8자 이상 16자 이하로 입력하세요.";
+    }
+    if (/\s/.test(pw)) return "비밀번호에는 공백을 사용할 수 없습니다.";
+    if (!/[A-Za-z]/.test(pw)) return "비밀번호에는 영문이 최소 1개 이상 포함되어야 합니다.";
+    if (!/\d/.test(pw)) return "비밀번호에는 숫자가 최소 1개 이상 포함되어야 합니다.";
+    if (!PASSWORD_SPECIAL_REGEX.test(pw)) {
+        return "비밀번호에는 특수문자가 최소 1개 이상 포함되어야 합니다.";
+    }
+    return "";
+}
+
 // ── 회원가입 (POST /signup) ───────────────────────────────────────────────────
 
 /**
@@ -55,6 +85,13 @@ router.post("/signup", async (req, res, next) => {
 
         if (!id || !password) {
             return res.status(400).json({ success: false, message: "아이디와 비밀번호를 입력하세요." });
+        }
+
+        // [추가 2026-05-17 / 신규 #19] 비밀번호 정책 백엔드 강제.
+        // 프론트 검증을 우회한 직접 API 호출(curl 등)도 약한 비번을 막는다.
+        const pwError = validateSignupPassword(password);
+        if (pwError) {
+            return res.status(400).json({ success: false, message: pwError });
         }
 
         // [추가] 프론트 외의 클라이언트가 잘못된 body를 보내더라도
