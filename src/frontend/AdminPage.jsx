@@ -23,7 +23,7 @@
 // ============================================================
 // [수정 2026-05-16 / 관리자 백엔드 연결]
 // 오류/변경 번호: 5/12~5/13 의 공지/신고 mock(localStorage·in-memory)
-//                → 실제 백엔드(Express /notice, /report) 연결
+//                 → 실제 백엔드(Express /notice, /report) 연결
 // 날짜: 2026-05-16
 // 사유: notices/reports 가 가짜 데이터라 새로고침/다른 기기에서 안 보였음.
 // 기대효과: 공지 작성/수정/삭제와 신고 조회/제재가 DB 에 영속.
@@ -40,8 +40,8 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
   // 백엔드 GET /report 응답(feed_id 그룹 집계)을 기존 AdminPage 렌더가
   // 기대하는 구조(id/feedId/user/postContent/reporters/reportCount...)로 변환.
   // 백엔드: { feed_id, report_count, representative_id, author_nickname,
-  //          feed_content, reporters:[{reporter_user_id,report_category,
-  //          report_detail,created_at}], ... }
+  //           feed_content, reporters:[{reporter_user_id,report_category,
+  //           report_detail,created_at}], ... }
   const mapReportRow = (r) => {
     // reporters 가 JSON 문자열로 올 수도(드라이버별) → 안전 파싱
     let reporters = r.reporters;
@@ -103,15 +103,18 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportTab]);
 
-  // ── [챌린지 관리 상태] ──
+  // ── [챌린지 관리 상태 - 사용자 ChallengePage 데이터 구조와 완벽 동기화] ──
   const [challenges, setChallenges] = useState([
-    { id: 1, title: "30일 미라클 모닝", category: "생활습관", participants: 128, status: "진행중", startDate: "2026-05-01", endDate: "2026-05-30", description: "매일 아침 6시 기상 인증을 통해 갓생을 시작합니다.", progress: 75 },
-    { id: 2, title: "하루 1만보 걷기", category: "운동", participants: 256, status: "진행중", startDate: "2026-05-10", endDate: "2026-06-10", description: "건강한 신체를 위해 매일 1만보를 걷고 인증합니다.", progress: 42 }
+    { id: 1, title: "7일 미라클 모닝 챌린지", category: "미라클 모닝", participants: 42, status: "진행중", startDate: "2026-05-10", endDate: "2026-05-16", description: "매일 아침 정해진 시간에 일어나 하루를 시작하는 챌린지입니다.", totalDays: 7, progress: 75 },
+    { id: 2, title: "하루 30분 운동 챌린지", category: "운동", participants: 108, status: "진행중", startDate: "2026-05-10", endDate: "2026-05-30", description: "매일 30분 이상 운동하며 건강한 습관을 만드는 챌린지입니다.", totalDays: 21, progress: 42 },
+    { id: 3, title: "물 2L 마시기 챌린지", category: "건강", participants: 67, status: "진행중", startDate: "2026-05-12", endDate: "2026-05-25", description: "매일 충분한 수분을 섭취하며 생활 습관을 개선하는 챌린지입니다.", totalDays: 14, progress: 60 },
+    { id: 4, title: "하루 1시간 집중 공부 챌린지", category: "공부", participants: 89, status: "진행중", startDate: "2026-05-11", endDate: "2026-05-24", description: "매일 1시간 이상 집중해서 공부하는 습관을 만드는 챌린지입니다.", totalDays: 14, progress: 50 }
   ]);
   const [selectedChallenge, setSelectedChallenge] = useState(null); 
   const [isChallengeModalOpen, setIsChallengeModalOpen] = useState(false); 
   const [editingChallenge, setEditingChallenge] = useState(null); 
 
+  // 폼 스펙 정규화 (유저 측 필드 구조인 startDate, endDate 와 매칭)
   const [challengeForm, setChallengeForm] = useState({
     title: "", category: "운동", startDate: "", endDate: "", description: ""
   });
@@ -125,7 +128,7 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
 
   const pendingCount = reports.filter(r => r.status === "pending").length;
 
-  // ── [챌린지 핸들러] ──
+  // ── [챌린지 핸들러 - 로직 최적화 고도화] ──
   const handleOpenAddModal = () => {
     setEditingChallenge(null);
     setChallengeForm({ title: "", category: "운동", startDate: "", endDate: "", description: "" });
@@ -150,9 +153,15 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
       return;
     }
 
+    // 날짜 연산을 통해 totalDays 계산 구현 (유저 패널 인터페이스 동기화용)
+    const start = new Date(challengeForm.startDate);
+    const end = new Date(challengeForm.endDate);
+    const diffTime = Math.abs(end - start);
+    const calculatedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
     if (editingChallenge) {
       setChallenges(challenges.map(c => 
-        c.id === editingChallenge.id ? { ...c, ...challengeForm } : c
+        c.id === editingChallenge.id ? { ...c, ...challengeForm, totalDays: calculatedDays } : c
       ));
       alert("챌린지가 수정되었습니다.");
     } else {
@@ -161,6 +170,7 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
         ...challengeForm,
         participants: 0,
         status: "진행중",
+        totalDays: calculatedDays,
         progress: 0
       };
       setChallenges([newChallenge, ...challenges]);
@@ -326,7 +336,7 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
 
             <div className="mypage-stats" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "15px", margin: "25px 0" }}>
               <StatCard title="진행 중 챌린지" value={`${challenges.length}개`} colorVar="primary" />
-              <StatCard title="총 참여 인원" value="384명" colorVar="success" />
+              <StatCard title="총 참여 인원" value={`${challenges.reduce((acc, c) => acc + c.participants, 0)}명`} colorVar="success" />
               <StatCard title="오늘의 인증 수" value="152건" colorVar="warning" />
               <StatCard title="평균 달성률" value="78%" colorVar="primary-2" />
             </div>
@@ -337,9 +347,9 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                   <tr style={{ fontSize: '13px', color: '#6b7280' }}>
                     <th style={{ padding: "16px 20px" }}>챌린지명</th>
                     <th>카테고리</th>
-                    <th>기간</th>
+                    <th>기간 (총 일수)</th>
                     <th style={{ textAlign: 'center' }}>참여자</th>
-                    <th style={{ textAlign: 'center' }}>진행도</th>
+                    <th style={{ textAlign: 'center' }}>평균 진행도</th>
                     <th style={{ padding: "16px 20px", textAlign: 'right' }}>관리</th>
                   </tr>
                 </thead>
@@ -348,7 +358,7 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                     <tr key={c.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                       <td style={{ padding: "16px 20px", fontWeight: "800", fontSize: '14px', color: '#111' }}>{c.title}</td>
                       <td><span style={{ fontSize: '11px', background: '#f0f2ff', color: '#4f46e5', padding: '4px 8px', borderRadius: '4px', fontWeight: '800' }}>{c.category}</span></td>
-                      <td style={{ fontSize: '12px', color: '#888' }}>{c.startDate} ~ {c.endDate}</td>
+                      <td style={{ fontSize: '12px', color: '#888' }}>{c.startDate.replace(/-/g, '.')} ~ {c.endDate.replace(/-/g, '.')} ({c.totalDays}일간)</td>
                       <td style={{ textAlign: 'center', fontWeight: "800" }}>{c.participants}명</td>
                       <td style={{ textAlign: 'center' }}>
                         <div style={{ width: '60px', background: '#eee', height: '6px', borderRadius: '3px', margin: '0 auto' }}>
@@ -383,7 +393,7 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                       {["김루틴", "이갓생", "박미라클", "최열정", "정꾸준", "강도전"].map((user, i) => (
                         <div key={i} style={{ padding: "12px", borderBottom: "1px solid #eee", fontSize: "13px", display: "flex", justifyContent: "space-between", background: 'white', borderRadius: '8px', marginBottom: '8px' }}>
                           <span style={{ fontWeight: "700" }}>{user}</span>
-                          <span style={{ fontWeight: "800", color: "#10b981" }}>85% 성공</span>
+                          <span style={{ fontWeight: "800", color: "#10b981" }}>총 {selectedChallenge.totalDays}일 중 {Math.round(selectedChallenge.totalDays * 0.8)}일 성공</span>
                         </div>
                       ))}
                     </div>
@@ -391,12 +401,12 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                   <div style={{ background: "#f8f9fa", padding: "20px", borderRadius: "16px" }}>
                     <h4 style={{ fontSize: "14px", fontWeight: "800", marginBottom: "15px", color: "#4f46e5" }}>📸 실시간 인증 현황</h4>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", maxHeight: "300px", overflowY: "auto", paddingRight: "5px" }}>
-                      {[1, 2, 3, 4, 5, 6].map(i => (
+                      {[1, 2, 3].map(i => (
                         <div key={i} style={{ background: "white", padding: "10px", borderRadius: "12px", boxShadow: "0 2px 5px rgba(0,0,0,0.05)" }}>
                           <div style={{ width: "100%", height: "80px", background: "#f0f0f0", borderRadius: "8px", marginBottom: "8px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", color: "#999" }}>인증 미디어 영역</div>
                           <div style={{ fontSize: "11px", fontWeight: "800" }}>사용자_{i}</div>
-                          <div style={{ fontSize: "9px", color: "#bbb", marginBottom: '5px' }}>05-12 08:30</div>
-                          <div style={{ fontSize: '10px', color: '#666', lineHeight: '1.4' }}>오늘도 기분 좋은 기상 완료!</div>
+                          <div style={{ fontSize: "9px", color: "#bbb", marginBottom: '5px' }}>2026.05.13 07:15</div>
+                          <div style={{ fontSize: '10px', color: '#666', lineHeight: '1.4' }}>오늘도 기분 좋은 기상 인증 완료!</div>
                         </div>
                       ))}
                     </div>
@@ -410,10 +420,16 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                 <div style={{ background: 'white', padding: '30px', borderRadius: '24px', width: '450px', boxShadow: '0 15px 40px rgba(0,0,0,0.2)' }}>
                   <h3 style={{ fontWeight: "900", fontSize: "18px", marginBottom: "20px", textAlign: "center" }}>{editingChallenge ? "📝 챌린지 정보 수정" : "🏆 새 챌린지 개설"}</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                    <input type="text" placeholder="챌린지 제목" value={challengeForm.title} onChange={(e) => setChallengeForm({...challengeForm, title: e.target.value})} style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd', outline: 'none' }} />
-                    <select value={challengeForm.category} onChange={(e) => setChallengeForm({...challengeForm, category: e.target.value})} style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd' }}>
-                      <option value="운동">운동</option><option value="생활습관">생활습관</option><option value="독서">독서</option><option value="학습">학습</option>
+                    <input type="text" placeholder="챌린지 제목 (예: 7일 미라클 모닝 챌린지)" value={challengeForm.title} onChange={(e) => setChallengeForm({...challengeForm, title: e.target.value})} style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd', outline: 'none' }} />
+                    
+                    {/* 카테고리를 사용자 ChallengePage 매칭 필터 셀렉트 박스로 완벽 동기화 */}
+                    <select value={challengeForm.category} onChange={(e) => setChallengeForm({...challengeForm, category: e.target.value})} style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd', fontWeight: 'bold' }}>
+                      <option value="미라클 모닝">미라클 모닝</option>
+                      <option value="운동">운동</option>
+                      <option value="건강">건강</option>
+                      <option value="공부">공부</option>
                     </select>
+
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <div style={{ flex: 1 }}>
                         <label style={{ fontSize: '11px', color: '#999', marginLeft: '5px' }}>시작일</label>
@@ -424,7 +440,7 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                         <input type="date" value={challengeForm.endDate} onChange={(e) => setChallengeForm({...challengeForm, endDate: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #ddd' }} />
                       </div>
                     </div>
-                    <textarea placeholder="챌린지 상세 설명" value={challengeForm.description} onChange={(e) => setChallengeForm({...challengeForm, description: e.target.value})} style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd', minHeight: '100px', resize: 'none' }} />
+                    <textarea placeholder="챌린지 상세 설명 내용을 입력하세요." value={challengeForm.description} onChange={(e) => setChallengeForm({...challengeForm, description: e.target.value})} style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd', minHeight: '100px', resize: 'none' }} />
                     <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                       <button className="routine-save-btn" onClick={handleSaveChallenge} style={{ flex: 2, padding: '15px' }}>{editingChallenge ? "수정 완료" : "챌린지 등록하기"}</button>
                       <button onClick={() => setIsChallengeModalOpen(false)} style={{ flex: 1, border: 'none', background: '#eee', borderRadius: '12px', fontWeight: '800', cursor: 'pointer' }}>취소</button>
@@ -484,7 +500,7 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                           </div>
                         </div>
                       </td>
-                      <td>
+                      <td style={{ margin: 0 }}>
                         <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '800', backgroundColor: '#e6f7ff', color: '#1890ff', border: '1px solid #91d5ff' }}>
                           {getMostFrequentReason(report.reporters).match(/\[(.*?)\]/)?.[1] || "기타"}
                         </span>
