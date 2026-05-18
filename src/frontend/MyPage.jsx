@@ -15,7 +15,7 @@
 //   2026-05-02 frontend 브랜치 UI 통합 (갓생 지수 + 갤러리 추가)
 // ============================================================
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { EXPRESS_URL } from "./config";
 
@@ -38,7 +38,7 @@ function MyPage() {
 
     // [추가 2026-05-12 / frontend 머지 4/7]
     // 출처: origin/frontend commits a2c8b03/ba6ac25 "마이페이지 갤러리 클릭 시 상세 게시글 모달 연동"
-    //                          832d3bf "반응형 1차, 마이페이지 피드 삭제 관리"
+    //           832d3bf "반응형 1차, 마이페이지 피드 삭제 관리"
     // 사유: 갤러리 클릭 시 큰 이미지 모달 + 편집 모드(다중 선택 삭제) 신기능 통합.
     // 기대효과:
     //   1) 갤러리 썸네일 클릭 → 같은 페이지에서 큰 이미지 확인 (피드로 이탈 안 함)
@@ -52,6 +52,13 @@ function MyPage() {
     const [isEditMode, setIsEditMode] = useState(false);
     const [selectedFeedIds, setSelectedFeedIds] = useState([]);
     const [deleting, setDeleting] = useState(false);
+
+    // ── [추가] 인스타그램형 프로필 편집 상태 관리 ─────────────────────────────────────
+    const [isProfileEdit, setIsProfileEdit] = useState(false);
+    const [editNickname, setEditNickname] = useState("");
+    const [editBio, setEditBio] = useState("오늘도 나만의 루틴으로 채워가는 하루 ✨");
+    const [previewAvatar, setPreviewAvatar] = useState(null); // 프리뷰 아바타 이미지 주소
+    const fileInputRef = useRef(null); // 파일 탐색기 트리거용 Ref
 
     useEffect(() => {
         fetchMyInfo();
@@ -71,6 +78,9 @@ function MyPage() {
                 setUser(data.user);
                 setSummary(data.summary);
                 setGalleryItems(data.gallery || []);
+                if (data.user?.nickname) {
+                    setEditNickname(data.user.nickname);
+                }
             }
         } catch (error) {
             console.error("마이페이지 데이터 로딩 실패:", error);
@@ -86,9 +96,9 @@ function MyPage() {
      * 사유: 다중 선택된 갤러리 게시물을 DELETE /feed/:feed_id 로 일괄 삭제.
      * 기대효과: 사용자가 옛 인증 게시물을 한 번에 정리 가능.
      * 장점:
-     *   - dev 의 백엔드 DELETE /feed/{feed_id} 를 그대로 활용(추가 API 작업 0).
-     *   - Promise.allSettled 로 일부 실패해도 나머지는 진행 → 부분 성공 허용.
-     *   - 삭제 후 galleryItems 를 prev.filter 로 즉시 갱신해 재조회 없이 UI 반영.
+     * - dev 의 백엔드 DELETE /feed/{feed_id} 를 그대로 활용(추가 API 작업 0).
+     * - Promise.allSettled 로 일부 실패해도 나머지는 진행 → 부분 성공 허용.
+     * - 삭제 후 galleryItems 를 prev.filter 로 즉시 갱신해 재조회 없이 UI 반영.
      */
     const handleToggleEditMode = () => {
         // 편집 모드를 끌 때 누적된 선택을 초기화하여 다음 진입 시 깨끗한 상태 보장
@@ -152,6 +162,36 @@ function MyPage() {
         }
     };
 
+    // ── [추가] 아바타 사진 클릭 시 이미지 변경 파일 탐색기 연동 로직 ───────────────────
+    const handleAvatarClick = () => {
+        if (!isProfileEdit) return; // 프로필 편집 모드 활성화 상태일 때만 파일 탐색기 작동
+        fileInputRef.current.click();
+    };
+
+    const handleFileChange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const imageUrl = URL.createObjectURL(file);
+            setPreviewAvatar(imageUrl); // 가상 프리뷰 데이터 반영
+        }
+    };
+
+    const handleSaveProfile = () => {
+        if (!editNickname.trim()) {
+            alert("이름(닉네임)을 입력해주세요.");
+            return;
+        }
+        setUser((prev) => ({ ...prev, nickname: editNickname }));
+        setIsProfileEdit(false);
+        alert("프로필 정보 변경이 성공적으로 저장되었습니다.");
+    };
+
+    const handleCancelProfile = () => {
+        setIsProfileEdit(false);
+        setEditNickname(user.nickname);
+        setPreviewAvatar(null); // 프리뷰 데이터 리셋
+    };
+
     if (loading) return <div className="mypage">로딩 중...</div>;
     if (!user) return <div className="mypage">유저 정보를 불러올 수 없습니다.</div>;
 
@@ -187,32 +227,94 @@ function MyPage() {
                     boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                 }}
             >
+                {/* 사진 파일 탐색기 숨김 요소 */}
+                <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    style={{ display: "none" }} 
+                    accept="image/*"
+                    onChange={handleFileChange}
+                />
+
+                {/* 프로필 아바타 (위치 보존, 편집 활성화 시 클릭 가능 안내 오버레이 노출) */}
                 <div
                     className="profile-avatar"
+                    onClick={handleAvatarClick}
                     style={{
                         width: "72px",
                         height: "72px",
                         borderRadius: "50%",
-                        background: "linear-gradient(135deg, #4f46e5, #818cf8)",
-                        color: "white",
+                        background: previewAvatar ? `url(${previewAvatar}) center/cover no-repeat` : "linear-gradient(135deg, #4f46e5, #818cf8)",
+                        color: previewAvatar ? "transparent" : "white",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         fontSize: "28px",
                         fontWeight: "800",
                         flexShrink: 0,
-                        boxShadow: "0 4px 10px rgba(79, 70, 229, 0.2)",
+                        boxShadow: "0 4px 10px rgba(79, 70, 229, 0.25)",
+                        cursor: isProfileEdit ? "pointer" : "default",
+                        position: "relative"
                     }}
                 >
-                    {user.nickname?.charAt(0)}
+                    {!previewAvatar && (isProfileEdit ? editNickname.charAt(0) : user.nickname?.charAt(0))}
+                    {isProfileEdit && (
+                        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)", color: "white", fontSize: "10px", textAlign: "center", padding: "3px 0", borderRadius: "0 0 50px 50px", fontWeight: "bold" }}>변경</div>
+                    )}
                 </div>
-                <div className="profile-info" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                    <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "900", color: "#111827" }}>
-                        {user.nickname}
-                    </h1>
-                    <p style={{ margin: "4px 0 0 0", color: "#6b7280", fontSize: "14px", fontWeight: "600" }}>
-                        오늘도 나만의 루틴으로 채워가는 하루 ✨
-                    </p>
+
+                {/* 프로필 인포레이션 영역 (우상단에 인스타그램 테마 '프로필 편집' 배치 고정) */}
+                <div className="profile-info" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flexGrow: 1 }}>
+                    {!isProfileEdit ? (
+                        <>
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", justifyContent: "space-between" }}>
+                                <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "900", color: "#111827" }}>
+                                    {user.nickname}
+                                </h1>
+                                <button
+                                    onClick={() => setIsProfileEdit(true)}
+                                    style={{
+                                        border: "1px solid #dbdbdb",
+                                        background: "#ffffff",
+                                        padding: "5px 12px",
+                                        borderRadius: "8px",
+                                        fontSize: "12px",
+                                        fontWeight: "700",
+                                        color: "#262626",
+                                        cursor: "pointer",
+                                        boxShadow: "0 1px 2px rgba(0,0,0,0.03)"
+                                    }}
+                                >
+                                    프로필 편집
+                                </button>
+                            </div>
+                            <p style={{ margin: "4px 0 0 0", color: "#6b7280", fontSize: "14px", fontWeight: "600", textAlign: "left" }}>
+                                {editBio}
+                            </p>
+                        </>
+                    ) : (
+                        /* 프로필 편집 인라인 레이아웃 전환 상태 */
+                        <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
+                            <input 
+                                type="text"
+                                value={editNickname}
+                                onChange={(e) => setEditNickname(e.target.value)}
+                                style={{ width: "92%", padding: "5px 8px", fontSize: "14px", fontWeight: "bold", border: "1px solid #dbdbdb", borderRadius: "6px" }}
+                                placeholder="이름을 입력하세요"
+                            />
+                            <input 
+                                type="text"
+                                value={editBio}
+                                onChange={(e) => setEditBio(e.target.value)}
+                                style={{ width: "92%", padding: "5px 8px", fontSize: "13px", border: "1px solid #dbdbdb", borderRadius: "6px", color: "#4b5563" }}
+                                placeholder="소개글을 입력하세요"
+                            />
+                            <div style={{ display: "flex", gap: "6px", marginTop: "2px" }}>
+                                <button onClick={handleSaveProfile} style={{ border: "none", background: "#4f46e5", color: "white", padding: "4px 12px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}>저장</button>
+                                <button onClick={handleCancelProfile} style={{ border: "1px solid #dbdbdb", background: "#fff", color: "#4b5563", padding: "4px 12px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}>취소</button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -301,11 +403,11 @@ function MyPage() {
                 className="mypage-stats"
                 style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", padding: "0 24px" }}
             >
-                    {[
-                        { label: "총 루틴 수", value: routineCount, unit: "개", color: "#4f46e5" },
-                        { label: "연속 달성", value: continuousDays, unit: "일", color: "#ef4444" },
-                        { label: "인증 게시글", value: feedCount, unit: "개", color: "#f59e0b" },
-                    ].map((stat, idx) => (
+                {[
+                    { label: "총 루틴 수", value: routineCount, unit: "개", color: "#4f46e5" },
+                    { label: "연속 달성", value: continuousDays, unit: "일", color: "#ef4444" },
+                    { label: "인증 게시글", value: feedCount, unit: "개", color: "#f59e0b" },
+                ].map((stat, idx) => (
                     <div
                         key={idx}
                         style={{
@@ -336,10 +438,6 @@ function MyPage() {
                     <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "900", color: "#111827" }}>
                         📸 내 인증 갤러리
                     </h2>
-                    {/* [추가 2026-05-12 / frontend 머지 4/7 - 편집 토글 + 선택 삭제]
-                        사유: 갤러리에서 직접 게시물을 정리할 수 있는 UI 진입점.
-                        기대효과: "관리" → 다중 선택 → "선택 삭제" 흐름으로 1탭 안에서 완결.
-                        장점: 편집 모드 OFF 시에는 카운트만 보여 깔끔. */}
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                         <span style={{ color: "#6b7280", fontSize: "14px", fontWeight: "800" }}>
                             총 {galleryItems.length}개
@@ -402,114 +500,100 @@ function MyPage() {
                     </div>
                 ) : (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
-                    {/* === 갤러리 상세 모달은 grid 닫은 뒤에 렌더 (아래) === */}
-                    {galleryItems.map((item) => {
-                        // [추가 2026-05-12 / frontend 머지 4/7 - 클릭 분기 + 선택 표시]
-                        // 사유: 편집 모드면 선택 토글, 평시면 상세 모달 오픈.
-                        // 기대효과: 같은 썸네일이 모드에 따라 두 가지 동작 제공 → 화면 추가 없음.
-                        // 장점: 선택된 항목은 ✓ 오버레이 + 외곽선으로 즉시 식별 가능.
-                        const isSelected = selectedFeedIds.includes(item.feed_id);
-                        return (
-                        <div
-                            key={item.image_id}
-                            onClick={() => {
-                                if (isEditMode) {
-                                    handleToggleSelect(item.feed_id);
-                                } else {
-                                    setSelectedItem(item);
-                                }
-                            }}
-                            style={{
-                                position: "relative",
-                                width: "100%",
-                                paddingBottom: "100%",
-                                overflow: "hidden",
-                                borderRadius: "20px",
-                                cursor: "pointer",
-                                backgroundColor: "#e5e7eb",
-                                transition: "all 0.2s ease",
-                                outline: isSelected ? "3px solid #4f46e5" : "none",
-                                outlineOffset: isSelected ? "-3px" : 0,
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.transform = "scale(0.95)";
-                                e.currentTarget.style.boxShadow = "0 8px 15px rgba(0,0,0,0.1)";
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.transform = "scale(1)";
-                                e.currentTarget.style.boxShadow = "none";
-                            }}
-                        >
-                            {item.file_type?.startsWith("video/") ? (
-                                <video
-                                    src={getFileUrl(item.file_url)}
-                                    muted
-                                    playsInline
-                                    preload="metadata"
-                                    style={{
-                                        position: "absolute",
-                                        top: 0,
-                                        left: 0,
-                                        width: "100%",
-                                        height: "100%",
-                                        objectFit: "cover",
-                                    }}
-                                />
-                            ) : (
-                                <img
-                                    src={getFileUrl(item.file_url)}
-                                    alt="인증샷"
-                                    loading="lazy"
-                                    decoding="async"
-                                    style={{
-                                        position: "absolute",
-                                        top: 0,
-                                        left: 0,
-                                        width: "100%",
-                                        height: "100%",
-                                        objectFit: "cover",
-                                    }}
-                                />
-                            )}
-                            {/* 편집 모드일 때만 선택 체크 오버레이 표시 */}
-                            {isEditMode && (
+                        {galleryItems.map((item) => {
+                            const isSelected = selectedFeedIds.includes(item.feed_id);
+                            return (
                                 <div
+                                    key={item.image_id}
+                                    onClick={() => {
+                                        if (isEditMode) {
+                                            handleToggleSelect(item.feed_id);
+                                        } else {
+                                            setSelectedItem(item);
+                                        }
+                                    }}
                                     style={{
-                                        position: "absolute",
-                                        top: "8px",
-                                        right: "8px",
-                                        width: "26px",
-                                        height: "26px",
-                                        borderRadius: "50%",
-                                        background: isSelected ? "#4f46e5" : "rgba(255,255,255,0.85)",
-                                        color: isSelected ? "white" : "#111827",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        fontSize: "14px",
-                                        fontWeight: 900,
-                                        boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+                                        position: "relative",
+                                        width: "100%",
+                                        paddingBottom: "100%",
+                                        overflow: "hidden",
+                                        borderRadius: "20px",
+                                        cursor: "pointer",
+                                        backgroundColor: "#e5e7eb",
+                                        transition: "all 0.2s ease",
+                                        outline: isSelected ? "3px solid #4f46e5" : "none",
+                                        outlineOffset: isSelected ? "-3px" : 0,
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.transform = "scale(0.95)";
+                                        e.currentTarget.style.boxShadow = "0 8px 15px rgba(0,0,0,0.1)";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = "scale(1)";
+                                        e.currentTarget.style.boxShadow = "none";
                                     }}
                                 >
-                                    {isSelected ? "✓" : ""}
+                                    {item.file_type?.startsWith("video/") ? (
+                                        <video
+                                            src={getFileUrl(item.file_url)}
+                                            muted
+                                            playsInline
+                                            preload="metadata"
+                                            style={{
+                                                position: "absolute",
+                                                top: 0,
+                                                left: 0,
+                                                width: "100%",
+                                                height: "100%",
+                                                objectFit: "cover",
+                                            }}
+                                        />
+                                    ) : (
+                                        <img
+                                            src={getFileUrl(item.file_url)}
+                                            alt="인증샷"
+                                            loading="lazy"
+                                            decoding="async"
+                                            style={{
+                                                position: "absolute",
+                                                top: 0,
+                                                left: 0,
+                                                width: "100%",
+                                                height: "100%",
+                                                objectFit: "cover",
+                                            }}
+                                        />
+                                    )}
+                                    {isEditMode && (
+                                        <div
+                                            style={{
+                                                position: "absolute",
+                                                top: "8px",
+                                                right: "8px",
+                                                width: "26px",
+                                                height: "26px",
+                                                borderRadius: "50%",
+                                                background: isSelected ? "#4f46e5" : "rgba(255,255,255,0.85)",
+                                                color: isSelected ? "white" : "#111827",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                fontSize: "14px",
+                                                fontWeight: 900,
+                                                boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+                                            }}
+                                        >
+                                            {isSelected ? "✓" : ""}
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
-                        );
-                    })}
+                            );
+                        })}
                     </div>
                 )}
             </div>
 
-            {/* ── [추가 2026-05-12 / frontend 머지 4/7 - 갤러리 상세 이미지 모달] ──
-                출처: origin/frontend commits a2c8b03, ba6ac25.
-                사유: 썸네일 클릭 시 풀스크린에 가까운 큰 이미지로 즉시 확인.
-                기대효과:
-                  - 좌측 배경 클릭 또는 우상단 × 버튼으로 닫기.
-                  - "피드에서 보기" 버튼으로 해당 게시물 페이지로 점프(기존 navigate 동작 흡수).
-                장점:
-                  - 댓글/좋아요는 FeedPage 모달이 더 풍부하므로 중복 구현하지 않음 → 책임 분리.
-                  - 인라인 스타일 자체완결 → 5단계 App.css 전에도 동작. */}
+            {/* 갤러리 상세 모달 */}
             {selectedItem && (
                 <div
                     style={{
