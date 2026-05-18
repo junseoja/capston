@@ -53,6 +53,9 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
   // 피드별 현재 보고 있는 미디어 인덱스
   const [currentMediaIndexes, setCurrentMediaIndexes] = useState({});
 
+  // [추가] 인스타그램식 더보기 드롭다운 토글을 위한 상태 (메뉴가 열릴 피드 ID 혹은 "modal" 문자열 저장)
+  const [showMenuId, setShowMenuId] = useState(null);
+
   // [추가 2026-05-13 / frontend 머지 Stage 2-5] 신고 모달 상태 3종
   // 출처: origin/frontend FeedPage
   // 사유: 기존 window.prompt 신고를 카테고리+상세 사유 모달로 고도화하기 위한 상태.
@@ -80,8 +83,8 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
    * fetchFeeds - Express GET /feed에서 한 페이지(PAGE_SIZE)만큼의 피드를 조회.
    *
    * [수정 2026-05-03]
-   *   기존: 전체 피드를 한 번에 조회 + 각 피드별로 상세/좋아요 추가 호출 (N+1)
-   *   현재: cursor 기반 페이지네이션 — Express 가 FastAPI 의 단일 JOIN 결과를 그대로 전달
+   *    기존: 전체 피드를 한 번에 조회 + 각 피드별로 상세/좋아요 추가 호출 (N+1)
+   *    현재: cursor 기반 페이지네이션 — Express 가 FastAPI 의 단일 JOIN 결과를 그대로 전달
    *
    * @param {string|null} cursor - 다음 페이지 cursor (null 이면 첫 페이지)
    * @param {boolean} reset      - true 면 기존 목록을 비우고 새로 시작
@@ -413,8 +416,8 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
    * 기대효과: window.prompt 로 사유 입력 후 상위 onReportPost(post, reason) 콜백 호출.
    *           App.jsx 의 reports 상태에 누적되어 AdminPage 에 표시됨.
    * 장점: 신고 UI 와 데이터 관리를 분리 → FeedPage 는 UI 만 담당, App 이 단일 신고 데이터 저장소.
-   *        백엔드 API 가 아직 없어도 프론트만으로 신고 흐름 시연 가능.
-   *        (백엔드 신고 API 가 추가되면 onReportPost 안에서 fetch 만 호출하면 됨)
+   *         백엔드 API 가 아직 없어도 프론트만으로 신고 흐름 시연 가능.
+   *         (백엔드 신고 API 가 추가되면 onReportPost 안에서 fetch 만 호출하면 됨)
    */
   // [수정 2026-05-13 / frontend 머지 Stage 2-5]
   // 출처: origin/frontend FeedPage (commit 98693c1 등)
@@ -430,6 +433,7 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
     }
     // 모달을 띄움 — 실제 신고 전송은 handleFinalReport 가 담당.
     setReportModalPost(post);
+    setShowMenuId(null); // 모달 오픈 시 열려있던 드롭다운 닫기
   };
 
   // 모달의 "신고하기" 버튼 → 카테고리 + 상세 사유 결합 → 상위 onReportPost 호출.
@@ -444,6 +448,7 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
     setReportModalPost(null);
     setReportCategory("");
     setReportDetail("");
+    setShowMenuId(null);
   };
 
   // ── 유틸리티 ──────────────────────────────────────────────────────────────
@@ -564,9 +569,9 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
             const currentMedia = post.images?.[currentMediaIndex] ?? null;
 
             return (
-              <article key={post.feed_id} className="instagram-feed-card">
-                {/* 상단: 닉네임 + 루틴 제목 + 카테고리 + (추가) 신고 버튼 */}
-                <div className="instagram-feed-top">
+              <article key={post.feed_id} className="instagram-feed-card" style={{ position: "relative", overflow: "visible" }}>
+                {/* 상단: 닉네임 + 루틴 제목 + 카테고리 + (수정) 인스타식 ... 버튼 및 드롭다운 */}
+                <div className="instagram-feed-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div className="instagram-feed-info-row">
                     <span className="instagram-feed-author">
                       {post.nickname}
@@ -587,20 +592,31 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
                       </span>
                     )}
                   </div>
-                  {/* [추가 2026-05-12 / frontend 머지 2/7 - 신고 버튼(카드)]
-                      사유: 게시물 우측 상단에 신고 진입점 노출.
-                      기대효과: 본문 열지 않아도 즉시 신고 가능.
-                      장점: 본인 게시물에는 노출하지 않아 자기신고 차단(UX).
-                      스타일: 5단계 App.css 에서 .feed-report-button 클래스 정의 예정. */}
+                  
+                  {/* [수정형 인스타그램식 더보기 드롭다운 메뉴 적용] */}
                   {post.user_id !== currentUser?.user_id && (
-                    <button
-                      type="button"
-                      className="feed-report-button"
-                      onClick={() => handleReportClick(post)}
-                      aria-label="이 게시물 신고"
-                    >
-                      🚩 신고
-                    </button>
+                    <div style={{ position: "relative" }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowMenuId(showMenuId === post.feed_id ? null : post.feed_id)}
+                        style={{ border: "none", background: "none", fontSize: "20px", cursor: "pointer", color: "#262626", padding: "0 4px" }}
+                        aria-label="더보기 메뉴 열기"
+                      >
+                        ⋮
+                      </button>
+
+                      {showMenuId === post.feed_id && (
+                        <div style={{ position: "absolute", top: "25px", right: "0", background: "white", border: "1px solid #dbdbdb", borderRadius: "8px", boxShadow: "0 2px 12px rgba(0,0,0,0.15)", zIndex: 100 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleReportClick(post)}
+                            style={{ border: "none", background: "none", color: "#ed4956", padding: "12px 20px", fontSize: "14px", fontWeight: "700", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            신고하기
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -817,30 +833,44 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
             {/* 오른쪽: 게시물 정보 + 댓글 */}
             <div className="feed-modal-right">
               <div className="feed-modal-post-info">
-                <div className="feed-modal-meta-row">
-                  <span className="feed-modal-nickname">
-                    {selectedPost.nickname}
-                  </span>
-                  <span className="feed-modal-divider">•</span>
-                  <span className="feed-modal-routine">
-                    {selectedPost.routine_title}
-                  </span>
-                  <span className="feed-modal-category">
-                    {selectedPost.category}
-                  </span>
-                  {/* [추가 2026-05-12 / frontend 머지 2/7 - 신고 버튼(모달)]
-                      사유: 모달 헤더 우측에서도 신고 가능하도록 카드와 동일 진입점 제공.
-                      기대효과: 사진 확대해서 본 뒤 그대로 신고 흐름으로 연결.
-                      장점: 카드와 같은 핸들러 재사용 → 신고 동작 일관성 보장. */}
+                <div className="feed-modal-meta-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", overflow: "visible" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <span className="feed-modal-nickname">
+                      {selectedPost.nickname}
+                    </span>
+                    <span className="feed-modal-divider">•</span>
+                    <span className="feed-modal-routine">
+                      {selectedPost.routine_title}
+                    </span>
+                    <span className="feed-modal-category">
+                      {selectedPost.category}
+                    </span>
+                  </div>
+                  
+                  {/* [수정형 상세 모달 내 인스타식 더보기 드롭다운 적용] */}
                   {selectedPost.user_id !== currentUser?.user_id && (
-                    <button
-                      type="button"
-                      className="feed-modal-report-button"
-                      onClick={() => handleReportClick(selectedPost)}
-                      aria-label="이 게시물 신고"
-                    >
-                      🚩 신고
-                    </button>
+                    <div style={{ position: "relative" }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowMenuId(showMenuId === "modal" ? null : "modal")}
+                        style={{ border: "none", background: "none", fontSize: "20px", cursor: "pointer", color: "#262626", padding: "0 4px" }}
+                        aria-label="더보기 메뉴 열기"
+                      >
+                        ⋮
+                      </button>
+
+                      {showMenuId === "modal" && (
+                        <div style={{ position: "absolute", top: "25px", right: "0", background: "white", border: "1px solid #dbdbdb", borderRadius: "8px", boxShadow: "0 2px 12px rgba(0,0,0,0.15)", zIndex: 100 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleReportClick(selectedPost)}
+                            style={{ border: "none", background: "none", color: "#ed4956", padding: "12px 20px", fontSize: "14px", fontWeight: "700", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            신고하기
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -955,6 +985,7 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
             setReportModalPost(null);
             setReportCategory("");
             setReportDetail("");
+            setShowMenuId(null);
           }}
         >
           <div
@@ -1010,7 +1041,7 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
                 borderRadius: "10px",
                 border: "1px solid #e5e7eb",
                 fontSize: "14px",
-                resize: "vertical",
+                resize: "none",
                 fontFamily: "inherit",
               }}
             />
@@ -1022,6 +1053,7 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
                   setReportModalPost(null);
                   setReportCategory("");
                   setReportDetail("");
+                  setShowMenuId(null);
                 }}
                 style={{
                   flex: 1,
