@@ -25,7 +25,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { EXPRESS_URL } from "./config";
-import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom"; // [수정] useLocation 추가
 import "../css/App.css";
 import HomePage from "./HomePage";
 import LoginPage from "./LoginPage";
@@ -42,7 +42,7 @@ import ChallengePage from "./ChallengePage";
 // [추가 2026-05-12 / frontend 머지 7/7]
 // 출처: origin/frontend commits 8c9c6a2 / 62d5017 / f387027 / 56bc7cc
 // 사유: 1단계에서 추가한 관리자 페이지 컴포넌트를 라우트 등록 및 권한 가드 적용.
-// 기대효과: 로그인 시 id="admin" 이면 /admin 으로 진입, 일반 유저는 접근 차단.
+// 기대효과: 로그인 시 id="admin" 이면 /admin 으로 진입, 일반 유자는 접근 차단.
 // 장점: 다른 보호 라우트와 동일한 isLoggedIn 가드 패턴 + 추가 관리자 권한 가드 한 줄로 처리.
 import AdminPage from "./AdminPage";
 // [추가 2026-05-13 / frontend 머지 Stage 2-7]
@@ -57,6 +57,9 @@ function App() {
     // useNavigate: URL 이동을 프로그래밍적으로 처리 (예: 로그인 후 "/" 로 이동)
     // BrowserRouter 내부에서만 사용 가능 (main.jsx에서 감싸줌)
     const navigate = useNavigate();
+
+    // [추가] useLocation: 현재 브라우저의 URL 경로 정보를 가져옴 (관리자 페이지 상단바 제외용)
+    const location = useLocation();
 
     // ── 전역 상태 ────────────────────────────────────────────────────────────
 
@@ -77,8 +80,8 @@ function App() {
     // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
     // 출처: origin/frontend-cy commit a5075ce "feat: 챌린지 피드 기능 수정"
     // 사유: 챌린지 인증을 프론트 mock 피드에 합쳐 보여주기 위한 상태.
-    //       챌린지 인증 시 "피드에 업로드" 체크 → uploadChallengeProofToFeed 가 이 배열에 추가 →
-    //       FeedPage 가 extraMockPosts 로 받아 자체 백엔드 피드와 합쳐 표시.
+    //      챌린지 인증 시 "피드에 업로드" 체크 → uploadChallengeProofToFeed 가 이 배열에 추가 →
+    //      FeedPage 가 extraMockPosts 로 받아 자체 백엔드 피드와 합쳐 표시.
     // 기대효과: 챌린지 인증 흐름의 피드 노출이 즉시 가능 (백엔드 챌린지 피드 API 미구현 상태에서 데모용).
     // 장점: 백엔드 챌린지 피드 API 가 추가되면 이 상태 + 핸들러만 제거하면 됨 (격리됨).
     // TODO: 추후 챌린지 피드 백엔드 API 연동 시 제거 가능
@@ -174,14 +177,14 @@ function App() {
      * fetchRoutines - Express /routine에서 루틴 목록을 가져와 상태 업데이트
      *
      * useCallback으로 메모이제이션:
-     *   RoutinePage에 onRoutineChange 콜백 props로 전달할 때 불필요한 리렌더 방지
-     *   의존성 배열 []이므로 컴포넌트 생명주기 동안 동일한 함수 참조 유지
+     * RoutinePage에 onRoutineChange 콜백 props로 전달할 때 불필요한 리렌더 방지
+     * 의존성 배열 []이므로 컴포넌트 생명주기 동안 동일한 함수 참조 유지
      *
      * 필드 매핑 (DB 컬럼명 → 컴포넌트 prop 이름):
-     *   routine_id   → id
-     *   time_slot    → time
-     *   routine_mode → routineMode
-     *   repeat_cycle → repeat
+     * routine_id   → id
+     * time_slot    → time
+     * routine_mode → routineMode
+     * repeat_cycle → repeat
      *
      * [수정] 이제 루틴 목록만 가져오지 않고
      * GET /completion/today도 함께 읽어서 오늘 완료 상태를 복원함.
@@ -311,10 +314,10 @@ function App() {
      * handleLogin - LoginPage에서 로그인 성공 콜백으로 호출됨
      *
      * 처리 순서:
-     *   1. 로그인 상태 전환 (isLoggedIn = true)
-     *   2. 현재 유저 정보 fetch (currentUser 채움)
-     *   3. 루틴 목록 fetch
-     *   4. 홈("/")으로 이동
+     * 1. 로그인 상태 전환 (isLoggedIn = true)
+     * 2. 현재 유저 정보 fetch (currentUser 채움)
+     * 3. 루틴 목록 fetch
+     * 4. 홈("/")으로 이동
      */
     // [수정 2026-05-12 / frontend 머지 7/7]
     // 출처: origin/frontend 의 onLogin("ADMIN" | "USER") 분기
@@ -526,9 +529,9 @@ function App() {
      * [백엔드 주의] 완료 취소는 FastAPI를 직접 호출하지 말고,
      * 반드시 Express DELETE /completion/:completion_id 경유로 호출해야 함.
      * 이유:
-     *   1. Express가 세션 쿠키로 로그인 유저를 확인하고
-     *   2. 백엔드에서 session.user_id를 함께 전달하여
-     *   3. FastAPI가 WHERE completion_id=? AND user_id=? 로 본인 기록만 삭제하도록 검증함
+     * 1. Express가 세션 쿠키로 로그인 유저를 확인하고
+     * 2. 백엔드에서 session.user_id를 함께 전달하여
+     * 3. FastAPI가 WHERE completion_id=? AND user_id=? 로 본인 기록만 삭제하도록 검증함
      * 따라서 프론트에서는 완료 시 completion_id를 함께 보관해야
      * 나중에 안전하게 완료 취소 API를 연결할 수 있음.
      *
@@ -585,16 +588,16 @@ function App() {
      * 출처: origin/frontend src/App.jsx (commit f387027)
      * 사유: 사용자가 신고한 게시물을 reports 큐에 누적 → AdminPage 에 노출.
      * 기대효과: 한 사람이 같은 게시물을 여러 번 신고하면 reporters 배열에 누적 +
-     *           reportCount 증가, 새 게시물이면 새 항목 생성.
+     * reportCount 증가, 새 게시물이면 새 항목 생성.
      * 장점:
-     *   - 백엔드 신고 API 가 없어도 프론트 단독으로 신고 흐름 완결.
-     *   - 백엔드 API 가 추가되면 fetch 호출 한 줄만 더하면 됨.
+     * - 백엔드 신고 API 가 없어도 프론트 단독으로 신고 흐름 완결.
+     * - 백엔드 API 가 추가되면 fetch 호출 한 줄만 더하면 됨.
      */
     // [수정 2026-05-16 / 관리자 백엔드 연결]
     // 오류/변경 번호: 5/12 7/7 의 in-memory reports 누적 → 실제 백엔드(POST /report) 전환
     // 날짜: 2026-05-16
     // 사유:
-    //   기존엔 신고를 App.jsx 메모리 배열에만 쌓아 새로고침하면 사라지고,
+    //   기존엔 신고을 App.jsx 메모리 배열에만 쌓아 새로고침하면 사라지고,
     //   다른 기기/관리자 화면에서 안 보였음. 백엔드 report 라우터 완성으로 DB 영속.
     // 기대효과:
     //   FeedPage 🚩 → POST /report → reports 테이블 저장 → AdminPage 가 GET /report 로 조회.
@@ -638,10 +641,10 @@ function App() {
      * handleDeleteConfirm - AdminPage 의 onDeleteConfirm 콜백.
      * 출처: origin/frontend src/App.jsx handleConfirmDelete (commit 62d5017)
      * 사유: 관리자가 신고를 처리하면 (1) 신고 상태를 "completed" 로 전환,
-     *       (2) 해당 게시물 작성자에게 deleteNotifications 알림 추가.
+     * (2) 해당 게시물 작성자에게 deleteNotifications 알림 추가.
      * 기대효과: HomePage 에 모달 표시 + AdminPage 에서 처리 완료 탭으로 이동.
      * 장점: dev 의 DELETE /feed/:feed_id 백엔드 호출도 함께 트리거하여
-     *       실제 게시물도 제거 (실패해도 알림은 보냄).
+     * 실제 게시물도 제거 (실패해도 알림은 보냄).
      */
     // [수정 2026-05-16 / 관리자 백엔드 연결]
     // 오류/변경 번호: 5/12 7/7 의 DELETE /feed + in-memory 처리
@@ -701,10 +704,10 @@ function App() {
      * 사유: ChallengePage 에서 "피드에 업로드" 체크 시 호출되어 챌린지 인증을 mock 피드로 노출.
      * 기대효과: 백엔드 챌린지 피드 API 미구현 상태에서도 데모/시연 가능.
      * 장점:
-     *   - 파일이 없으면 미리 차단 (alert) → 빈 피드 생성 방지.
-     *   - 게시물에 source_type: "challenge" + challenge_id/title/category 메타 첨부 →
-     *     FeedPage 가 챌린지 배지 표시 및 좋아요/댓글 비활성 처리 가능.
-     *   - mockPost.feed_id 를 `challenge-feed-${Date.now()}` 로 두어 진짜 피드와 충돌 없음.
+     * - 파일이 없으면 미리 차단 (alert) → 빈 피드 생성 방지.
+     * - 게시물에 source_type: "challenge" + challenge_id/title/category 메타 첨부 →
+     * FeedPage 가 챌린지 배지 표시 및 좋아요/댓글 비활성 처리 가능.
+     * - mockPost.feed_id 를 `challenge-feed-${Date.now()}` 로 두어 진짜 피드와 충돌 없음.
      * TODO: 추후 백엔드 챌린지 피드 API 추가 시 fetch 호출로 교체.
      */
     const uploadChallengeProofToFeed = async ({
@@ -749,12 +752,12 @@ function App() {
      * handleLogout - 로그아웃 처리
      *
      * 처리 순서:
-     *   1. Express POST /logout 요청 → DB에서 세션 삭제 + 쿠키 제거
-     *   2. 프론트 상태 초기화 (isLoggedIn, routines, currentUser)
-     *   3. 로그인 페이지("/login")로 이동
+     * 1. Express POST /logout 요청 → DB에서 세션 삭제 + 쿠키 제거
+     * 2. 프론트 상태 초기화 (isLoggedIn, routines, currentUser)
+     * 3. 로그인 페이지("/login")로 이동
      *
      * NOTE: 2단계는 서버 요청 실패 시에도 수행 (try/catch 구조)
-     *       → 서버가 꺼져있어도 프론트에서는 로그아웃됨
+     * → 서버가 꺼져있어도 프론트에서는 로그아웃됨
      */
     const handleLogout = async () => {
         try {
@@ -798,8 +801,9 @@ function App() {
 
     return (
         <div className="app">
-            {/* 로그인 상태일 때만 상단 네비게이션 바 표시 */}
-            {isLoggedIn && (
+            {/* [수정형 조건부 렌더링 적용]
+                로그인 상태이면서 동시에 현재 URL 경로가 관리자(/admin)가 아닐 때만 일반 네비게이션 바를 표시합니다. */}
+            {isLoggedIn && !location.pathname.startsWith("/admin") && (
                 <header className="topbar">
                     {/* 로고 + 현재 월 표시 */}
                     <div className="logo">Routine Mate 🌙 {month}월</div>

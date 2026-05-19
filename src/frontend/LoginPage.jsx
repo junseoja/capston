@@ -8,7 +8,7 @@
 //
 // Props:
 //   onLogin    - 로그인 성공 시 호출할 콜백 (App.jsx의 handleLogin)
-//               isLoggedIn = true + fetchRoutines + navigate("/") 처리
+//                isLoggedIn = true + fetchRoutines + navigate("/") 처리
 //   onGoSignup - 회원가입 버튼 클릭 시 호출 (App.jsx의 navigate("/signup"))
 // ============================================================
 
@@ -22,20 +22,39 @@ function LoginPage({ onLogin, onGoSignup }) {
     // 비밀번호 입력값 상태
     const [password, setPassword] = useState("");
 
+    // ── [추가] 디자인 맞춤형 모달 및 알림 팝업 전용 상태 관리 ─────────────────────
+    // "LOGIN" (기본 로그인), "FIND_MODAL" (아이디/비밀번호 찾기 창)
+    const [viewMode, setViewMode] = useState("LOGIN");
+
+    // 아이디 찾기 필드 상태
+    const [findIdName, setFindIdName] = useState("");
+    const [findIdEmail, setFindIdEmail] = useState("");
+
+    // 비밀번호 찾기 필드 상태
+    const [findPwName, setFindPwName] = useState("");
+    const [findPwId, setFindPwId] = useState("");
+    const [findPwEmail, setFindPwEmail] = useState("");
+
+    // 찾기 결과용 가상 알림창(Alert Box) 제어 상태
+    const [alertPopup, setAlertPopup] = useState({
+        isOpen: false,
+        message: ""
+    });
+
     // ── 로그인 요청 함수 ──────────────────────────────────────────────────────
 
     /**
      * handleLogin - Express POST /login에 아이디/비밀번호 전송
      *
      * 처리 흐름:
-     *   1. Express /login으로 POST 요청
-     *   2. 성공 → 서버가 Set-Cookie로 sessionId 쿠키 발급
-     *   3. onLogin() 호출 → App.jsx에서 isLoggedIn = true + 루틴 fetch + navigate("/")
+     * 1. Express /login으로 POST 요청
+     * 2. 성공 → 서버가 Set-Cookie로 sessionId 쿠키 발급
+     * 3. onLogin() 호출 → App.jsx에서 isLoggedIn = true + 루틴 fetch + navigate("/")
      *
      * credentials: "include" 필수:
-     *   서버가 Set-Cookie 헤더로 내려주는 sessionId를 브라우저가 저장하려면
-     *   요청에 credentials 옵션이 "include"여야 함
-     *   (Express에서도 cors({ credentials: true })가 설정되어 있어야 동작)
+     * 서버가 Set-Cookie 헤더로 내려주는 sessionId를 브라우저가 저장하려면
+     * 요청에 credentials 옵션이 "include"여야 함
+     * (Express에서도 cors({ credentials: true })가 설정되어 있어야 동작)
      */
     const handleLogin = async () => {
         try {
@@ -78,47 +97,206 @@ function LoginPage({ onLogin, onGoSignup }) {
         }
     };
 
+    // ── [추가] 스크린샷 형태 검증 및 알림창 전송 로직 ──────────────────────────────
+
+    // 아이디 대조용 가상 검증 핸들러
+    const handleFindId = () => {
+        if (!findIdName || !findIdEmail) {
+            alert("이름과 이메일을 입력해주세요.");
+            return;
+        }
+
+        if (findIdName === "홍길동" && findIdEmail === "test@test.com") {
+            setAlertPopup({
+                isOpen: true,
+                message: "사용자의 아이디는 [ gildong123 ] 입니다."
+            });
+        } else {
+            setAlertPopup({
+                isOpen: true,
+                message: "일치하는 회원 정보가 없습니다."
+            });
+        }
+    };
+
+    // 비밀번호 가상 검증 핸들러
+    const handleFindPassword = () => {
+        if (!findPwName || !findPwId || !findPwEmail) {
+            alert("이름, 아이디, 이메일을 모두 입력해주세요.");
+            return;
+        }
+
+        if (findPwName === "홍길동" && findPwId === "gildong123" && findPwEmail === "test@test.com") {
+            setAlertPopup({
+                isOpen: true,
+                message: "비밀번호 재설정 이메일이 정상 발송되었습니다."
+            });
+        } else {
+            setAlertPopup({
+                isOpen: true,
+                message: "일치하는 회원 정보가 없습니다."
+            });
+        }
+    };
+
+    // 창 닫기 및 필드값 클리어
+    const handleCloseFindModal = () => {
+        setViewMode("LOGIN");
+        setFindIdName("");
+        setFindIdEmail("");
+        setFindPwName("");
+        setFindPwId("");
+        setFindPwEmail("");
+        setAlertPopup({ isOpen: false, message: "" });
+    };
+
     // ── 렌더링 ────────────────────────────────────────────────────────────────
 
     return (
-        <div className="login-page">
-            <div className="login-card">
-                <h1 className="login-title">로그인</h1>
-                <p className="login-subtitle">계정에 로그인하고 루틴을 시작해보세요.</p>
+        <div className="login-page" style={{ position: "relative" }}>
+            <div className="login-card" style={{ overflow: "hidden" }}>
+                {viewMode === "LOGIN" ? (
+                    <>
+                        <h1 className="login-title">로그인</h1>
+                        <p className="login-subtitle">계정에 로그인하고 루틴을 시작해보세요.</p>
 
-                <div className="login-form">
-                    {/* 아이디 입력
-                        onKeyDown: Enter 키 입력 시 handleLogin 실행 (UX 개선) */}
-                    <input
-                        type="text"
-                        placeholder="아이디를 입력하세요"
-                        value={id}
-                        onChange={(e) => setId(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-                    />
+                        <div className="login-form">
+                            {/* 아이디 입력
+                                onKeyDown: Enter 키 입력 시 handleLogin 실행 (UX 개선) */}
+                            <input
+                                type="text"
+                                placeholder="아이디를 입력하세요"
+                                value={id}
+                                onChange={(e) => setId(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                            />
 
-                    {/* 비밀번호 입력
-                        type="password": 입력값이 마스킹되어 화면에 보이지 않음
-                        onKeyDown: Enter 키 입력 시 handleLogin 실행 */}
-                    <input
-                        type="password"
-                        placeholder="비밀번호를 입력하세요"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-                    />
+                            {/* 비밀번호 입력
+                                type="password": 입력값이 마스킹되어 화면에 보이지 않음
+                                onKeyDown: Enter 키 입력 시 handleLogin 실행 */}
+                            <input
+                                type="password"
+                                placeholder="비밀번호를 입력하세요"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                            />
 
-                    <button onClick={handleLogin}>로그인</button>
-                </div>
+                            <button onClick={handleLogin}>로그인</button>
 
-                {/* 회원가입 페이지 이동 링크
-                    cursor: "pointer" 스타일로 클릭 가능함을 시각적으로 표시 */}
-                <p className="login-footer">
-                    아직 회원이 아니신가요?
-                    <span onClick={onGoSignup} style={{ cursor: "pointer" }}>
-                        {" "}회원가입{" "}
-                    </span>
-                </p>
+                            {/* 찾기 전용 링크 링크 추가 */}
+                            <div className="find-trigger-links" style={{ display: "flex", justifyContent: "center", gap: "12px", marginTop: "14px", fontSize: "14px", color: "#777" }}>
+                                <span onClick={() => setViewMode("FIND_MODAL")} style={{ cursor: "pointer", textDecoration: "underline" }}>아이디 / 비밀번호 찾기</span>
+                            </div>
+                        </div>
+
+                        {/* 회원가입 페이지 이동 링크
+                            cursor: "pointer" 스타일로 클릭 가능함을 시각적으로 표시 */}
+                        <p className="login-footer">
+                            아직 회원이 아니신가요?
+                            <span onClick={onGoSignup} style={{ cursor: "pointer" }}>
+                                {" "}회원가입{" "}
+                            </span>
+                        </p>
+                    </>
+                ) : (
+                    /* [추가] 로그인 페이지의 텍스트 상자 및 버튼 스타일을 완벽하게 계승한 찾기 레이아웃 */
+                    <div className="login-form" style={{ textAlign: "left", position: "relative" }}>
+
+                        {/* 상단 스크린샷 버전 흰색 바탕 헤더 및 X 버튼 */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eee", paddingBottom: "15px", margin: "-10px -10px 20px -10px" }}>
+                            <span style={{ fontSize: "18px", fontWeight: "bold", color: "#2B3A78" }}>아이디/비밀번호 찾기</span>
+                            <span onClick={handleCloseFindModal} style={{ cursor: "pointer", fontSize: "22px", color: "#555", fontWeight: "bold" }}>✕</span>
+                        </div>
+
+                        {/* 1. 아이디 찾기 단락 */}
+                        <div style={{ marginBottom: "35px" }}>
+                            <h3 style={{ fontSize: "15px", color: "#2B3A78", fontWeight: "bold", marginBottom: "12px" }}>아이디 찾기</h3>
+                            <input
+                                type="text"
+                                placeholder="이름을 입력하세요"
+                                value={findIdName}
+                                onChange={(e) => setFindIdName(e.target.value)}
+                                style={{ marginBottom: "10px", borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                            />
+                            <input
+                                type="email"
+                                placeholder="이메일 주소를 입력하세요"
+                                value={findIdEmail}
+                                onChange={(e) => setFindIdEmail(e.target.value)}
+                                style={{ marginBottom: "14px", borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                            />
+                            {/* 그라데이션 라운드 입체 버튼 디자인 반영 */}
+                            <button
+                                onClick={handleFindId}
+                                style={{ background: "linear-gradient(135deg, #6366f1 0%, #d946ef 100%)", color: "white", border: "none", borderRadius: "16px", padding: "10px 20px", fontWeight: "bold", cursor: "pointer", width: "auto" }}
+                            >
+                                아이디 찾기
+                            </button>
+                        </div>
+
+                        {/* 2. 비밀번호 찾기 단락 */}
+                        <div style={{ marginBottom: "10px" }}>
+                            <h3 style={{ fontSize: "15px", color: "#2B3A78", fontWeight: "bold", marginBottom: "12px" }}>비밀번호 찾기</h3>
+                            <input
+                                type="text"
+                                placeholder="이름을 입력하세요"
+                                value={findPwName}
+                                onChange={(e) => setFindPwName(e.target.value)}
+                                style={{ marginBottom: "10px", borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                            />
+                            <input
+                                type="text"
+                                placeholder="아이디를 입력하세요"
+                                value={findPwId}
+                                onChange={(e) => setFindPwId(e.target.value)}
+                                style={{ marginBottom: "10px", borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                            />
+                            <input
+                                type="email"
+                                placeholder="이메일 주소를 입력하세요"
+                                value={findPwEmail}
+                                onChange={(e) => setFindPwEmail(e.target.value)}
+                                style={{ marginBottom: "14px", borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                            />
+                            {/* 그라데이션 라운드 입체 버튼 디자인 반영 */}
+                            <button
+                                onClick={handleFindPassword}
+                                style={{ background: "linear-gradient(135deg, #6366f1 0%, #d946ef 100%)", color: "white", border: "none", borderRadius: "16px", padding: "10px 20px", fontWeight: "bold", cursor: "pointer", width: "auto" }}
+                            >
+                                비밀번호 찾기
+                            </button>
+                        </div>
+
+                        {/* [수정제안 전형] 상단에 "알림" 헤더가 들어가 구조화된 세련된 인앱 알림 상자 팝업 */}
+                        {alertPopup.isOpen && (
+                            <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(255,255,255,0.95)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "20px", zIndex: 10 }}>
+                                <div style={{ border: "1px solid #e2e8f0", padding: "0", borderRadius: "16px", width: "90%", boxShadow: "0 15px 35px rgba(0,0,0,0.1)", backgroundColor: "#fff", overflow: "hidden" }}>
+
+                                    {/* 알림 팝업 전용 헤더 상단부 */}
+                                    <div style={{ backgroundColor: "#2B3A78", color: "white", padding: "12px 20px", fontSize: "15px", fontWeight: "bold", textAlign: "left" }}>
+                                        알림
+                                    </div>
+
+                                    {/* 알림 본문 텍스트부 */}
+                                    <div style={{ padding: "30px 20px", textAlign: "center" }}>
+                                        <p style={{ fontSize: "14px", color: "#333", whiteSpace: "pre-line", lineHeight: "1.6", margin: "0 0 20px 0", fontWeight: "500" }}>
+                                            {alertPopup.message}
+                                        </p>
+                                        <button
+                                            onClick={() => setAlertPopup({ ...alertPopup, isOpen: false })}
+                                            style={{ backgroundColor: "#2B3A78", color: "white", border: "none", padding: "9px 32px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", width: "auto", fontSize: "14px" }}
+                                        >
+                                            확인
+                                        </button>
+                                    </div>
+
+                                </div>
+                            </div>
+                        )}
+
+                    </div>
+                )}
             </div>
         </div>
     );
