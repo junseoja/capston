@@ -266,183 +266,151 @@ DB 인덱스 권장안은 `docs/performance-indexes-2026-05-10.sql`에 정리되
 
 ---
 
-## 🚀 서버 실행 방법
+## 🚀 실행 가이드
 
-### 빠른 실행 순서
+현재 저장소는 **개발용(dev)** 과 **배포/검증용(prod)** Docker 흐름을 분리해서 사용합니다.
 
-#### 1. 의존성 설치
+- `dev`: 코드 bind mount + hot reload. 코드 수정 시 이미지 재빌드 불필요
+- `prod`: 코드를 이미지에 포함한 self-contained 이미지. 코드 수정 시 이미지 재빌드 필요
+
+### 실행 파일 역할
+
+| 파일 | 용도 |
+|---|---|
+| `start.sh` | 호스트 직접 실행(dev). FastAPI + Express + React를 한 번에 시작 |
+| `start-docker.sh` | 개발용 Docker 실행(dev). 현재 `docker-compose.yml` 사용 |
+| `docker-compose.yml` | 개발용 compose. bind mount + watch/reload 유지 |
+| `Dockerfile.frontend` | 개발용 프런트 이미지 |
+| `Dockerfile.backend` | 개발용 백엔드 이미지 |
+| `Dockerfile.python_api` | 개발용 FastAPI 이미지 |
+| `docker-compose.prod.yml` | prod 스타일 로컬 검증용 compose. bind mount 없음 |
+| `Dockerfile.frontend.prod` | self-contained 프런트 prod 이미지 |
+| `Dockerfile.backend.prod` | self-contained Express prod 이미지 |
+| `Dockerfile.python_api.prod` | self-contained FastAPI prod 이미지 |
+| `server.sh` | cloudflared Named Tunnel 공개 서빙 보조 스크립트 |
+
+### 1. 공통 사전 준비
+
+1. `.env` 파일 3개를 만든 뒤 값을 채웁니다.
 
 ```bash
-npm install
-cd src/backend && npm install
-cd ../python_api
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+cp .env.example .env
+cp src/backend/.env.example src/backend/.env
+cp src/python_api/.env.example src/python_api/.env
 ```
 
-#### 2. `.env` 파일 3개 설정
+2. 런타임 권장 버전
 
-- 프로젝트 루트 `.env`
-- `src/backend/.env`
-- `src/python_api/.env`
+- Node.js: `20.x` 이상 `23` 미만
+- npm: `10.x` 이상
+- Python: `3.12+`
+- Docker Desktop: 최신 버전 권장
 
-위 값들을 모두 채운 뒤 실행하세요.
+`package.json` 과 `src/backend/package.json` 에도 `engines.node >=20 <23` 를 명시했습니다.
 
-#### 3. 한번에 실행 (추천)
+### 2. Dev: 호스트 직접 실행
+
+가장 빠른 개발 루프가 필요할 때 사용합니다. 코드 수정 시 즉시 반영됩니다.
 
 ```bash
-chmod +x start.sh  # 최초 1회만
+chmod +x start.sh
 ./start.sh
 ```
 
-#### 4. 개별 실행
+개별 실행이 필요하면:
 
-**React 프론트엔드 (포트 5173)**
 ```bash
+# frontend
+npm install
 npm run dev
-```
 
-**Node.js Express 서버 (포트 3000)**
-```bash
+# backend
 cd src/backend
-node app.js
-```
+npm install
+npm run dev
 
-**Python FastAPI 서버 (포트 8000)**
-```bash
+# python_api
 cd src/python_api
-source venv/bin/activate   # Mac/Linux
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 uvicorn app:app --reload --port 8000
 ```
 
-```bash
-cd src/python_api
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\venv\Scripts\Activate.ps1
-python -m uvicorn app:app --reload --port 8000
-```
-
-#### 5. 접속 주소
+접속 주소:
 
 - React: `http://localhost:5173`
 - Express: `http://localhost:3000`
 - FastAPI: `http://localhost:8000`
 
----
+### 3. Dev: Docker 실행
 
-## 🐳 Docker 로 실행하기 (권장 — 2026-05-07 도입)
-
-### 왜 Docker 인가
-
-기존 방식은 팀원마다 Node 버전 / Python 버전 / OS 의존성이 달라 "내 PC 에선 됐는데" 류 디버깅에 시간이 자주 들어갔다. Docker 컨테이너는 실행 환경 자체를 코드와 함께 git 으로 공유해 이 문제를 차단한다.
-
-핵심 효과:
-
-- Node 20 / Python 3.12 / uvicorn / multer-s3 등 모든 의존성 버전이 컨테이너 안에 못박힘
-- 팀원은 Docker Desktop 한 가지만 깔면 끝 — 별도로 Node/Python/npm/pip 설치 불필요
-- 코드는 호스트 폴더에 그대로 → IDE / git 워크플로우는 평소대로
-- AWS RDS / S3 는 컨테이너 외부 그대로 사용
-
-### 사전 준비
-
-| 항목 | 비고 |
-|---|---|
-| Docker Desktop 설치 | https://docker.com/products/docker-desktop · Mac/Windows 자동 감지 |
-| Windows: WSL2 백엔드 | Docker Desktop 설치 시 자동 권장 — Hyper-V 보다 빠름 |
-| `.env` 파일 3개 | 루트 / `src/backend/` / `src/python_api/` — `.env.example` 복사 후 값 입력 |
-| AWS / RDS 자격증명 | 슬랙 DM 으로 별도 전달 (절대 git 에 안 올라감) |
-
-### 빠른 실행 (팀원용)
+팀원 간 OS 차이를 줄이면서도, 코드 수정 시 재빌드 없이 개발할 때 사용합니다.
 
 ```bash
-# 최초 1회
-git clone <repo>
-cd capston-main
-cp .env.example .env
-cp src/backend/.env.example src/backend/.env
-cp src/python_api/.env.example src/python_api/.env
-# 위 3개 파일에 슬랙 DM 받은 자격증명 입력
-
-# 매번 작업 시작 시
-./start-docker.sh           # 또는 docker compose up
+chmod +x start-docker.sh
+./start-docker.sh
 ```
 
-브라우저: `http://localhost:5173`
-
-> 💡 Windows 팀원은 WSL2 터미널에서 `./start-docker.sh` 실행 권장. PowerShell/CMD 에선 `docker compose up` 직접 실행.
-
-### 매일 작업 흐름
+또는:
 
 ```bash
-# 아침 (백그라운드 실행)
+docker compose up
+```
+
+이 모드의 특징:
+
+- `docker-compose.yml` 이 호스트 코드를 컨테이너에 bind mount 합니다.
+- `vite dev`, `nodemon --legacy-watch`, `uvicorn --reload` 를 사용합니다.
+- 코드만 바꿀 때는 `docker compose up --build` 가 필요 없습니다.
+
+자주 쓰는 명령:
+
+```bash
 docker compose up -d
-
-# 작업 중 — 평소대로 IDE 로 코드 수정
-#   - 호스트의 ./src 가 컨테이너 /app/src 에 마운트되어 있어
-#     수정 즉시 Vite/Node --watch/uvicorn --reload 가 자동 반영
-#   - git add / commit / push 도 평소대로
-
-# 로그 보기 (필요 시)
-docker compose logs -f                   # 모든 서비스
-docker compose logs -f backend           # 특정 서비스만
-
-# 컨테이너 안 쉘 진입 (디버깅)
+docker compose logs -f
 docker compose exec backend sh
-docker compose exec python_api bash
-
-# 일과 종료
+docker compose exec python_api sh
 docker compose down
 ```
 
-### 의존성 변경 후 재빌드 (가끔 필요)
+### 4. Prod: self-contained 이미지 로컬 검증
 
-새 npm/pip 패키지를 추가하거나 Dockerfile 을 수정한 경우:
-
-```bash
-git pull origin dev
-docker compose up --build               # 이미지 다시 만든 뒤 시작
-```
-
-코드만 수정한 경우엔 `--build` 불필요 (볼륨 마운트로 자동 반영).
-
-### 정리 명령
+배포 전, “볼륨 마운트 없이도 컨테이너가 스스로 뜨는지” 확인할 때 사용합니다.
 
 ```bash
-docker compose down                      # 컨테이너만 정리
-docker compose down -v                   # 컨테이너 + named volume 까지 (node_modules 재생성됨)
-docker compose down --rmi all -v         # 모든 이미지/볼륨 완전 삭제 (다음 실행 시 처음부터 빌드)
+docker compose -f docker-compose.prod.yml up --build
 ```
 
-### 컨테이너 구성
+이 모드의 특징:
 
-| 서비스 | 이미지 | 포트 | 역할 |
-|---|---|---|---|
-| `frontend` | node:20-alpine | 5173 | Vite dev 서버 (React) |
-| `backend` | node:20-alpine | 3000 | Express (인증/세션/S3 업로드) |
-| `python_api` | python:3.12-slim | 8000 | FastAPI (DB CRUD) |
+- `docker-compose.prod.yml` 은 bind mount를 사용하지 않습니다.
+- 각 `*.prod` Dockerfile 이 소스코드까지 이미지 안에 포함합니다.
+- 코드 수정 후에는 이미지를 다시 빌드해야 반영됩니다.
 
-컨테이너 간 통신은 docker compose 내부 DNS 사용:
+검증 포인트:
 
-- 브라우저 → frontend(5173), backend(3000) — 호스트 포트로 접근
-- backend → python_api — `http://python_api:8000` (서비스명)
-- python_api → AWS RDS, backend → AWS S3 — 인터넷 통해 외부 접속
+- 프런트 정적 빌드가 정상 생성되는지
+- Express 가 `PYTHON_API=http://python_api:8000` 으로 FastAPI 와 통신하는지
+- FastAPI 가 `.env` 기반으로 RDS 에 연결되는지
+- 다른 컴퓨터/CI/PaaS 에서도 같은 이미지로 재현 가능한지
 
-### 트러블슈팅
+### 5. Docker 트러블슈팅
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `port 5173 already in use` | 다른 앱이 포트 점유 | 해당 앱 종료 또는 `docker-compose.yml` 의 `ports:` 변경 |
-| `AWS S3 환경변수 누락` 경고 | `src/backend/.env` 누락/오타 | `.env` 파일 확인, 4줄 정확히 입력 후 `docker compose restart backend` |
-| 코드 수정해도 반영 안 됨 | 볼륨 마운트 문제 (특히 Windows) | `docker compose down && up` 으로 재시작 |
-| `Cannot connect to Docker daemon` | Docker Desktop 미실행 | Docker Desktop 앱 실행 후 다시 시도 |
-| 첫 실행이 너무 오래 걸림 | 이미지 다운로드 + 의존성 설치 | 정상 — 1~3분 (이후 캐시) |
-| `permission denied` (sh 실행 시) | `start-docker.sh` 실행 권한 | `chmod +x start-docker.sh` |
-| Windows 줄바꿈으로 sh 깨짐 | CRLF 변환 | 본 저장소는 `.gitattributes` 로 LF 강제 — 보통 자동 해결 |
+| `Cannot connect to Docker daemon` | Docker Desktop 미실행 | Docker Desktop 을 켠 뒤 다시 실행 |
+| `port 5173 already in use` | 다른 앱이 포트 점유 | 기존 프로세스 종료 또는 compose 포트 변경 |
+| 코드 수정이 dev 컨테이너에 반영되지 않음 | 파일 감시/볼륨 문제 | `docker compose down && docker compose up` 재시작 |
+| prod 이미지에 수정이 반영되지 않음 | self-contained 이미지 특성 | `docker compose -f docker-compose.prod.yml up --build` 재빌드 |
+| 로그인 후 새로고침 시 세션이 풀림 | `NODE_ENV`, HTTPS, 쿠키 정책 문제 | 배포 시 `NODE_ENV=production`, `FRONTEND_URL` 정확히 설정 |
 
-### Docker 안 쓰고 싶은 팀원용 — 기존 방식
+### 6. 어떤 모드를 언제 쓰나
 
-`./start.sh` 또는 위의 "서버 실행 방법" 섹션의 개별 실행 그대로 사용 가능. Docker 와 병행 가능.
+- 평소 개발: `./start.sh` 또는 `./start-docker.sh`
+- 팀원 환경 통일 + hot reload: `docker compose up`
+- 배포 전 이미지 검증: `docker compose -f docker-compose.prod.yml up --build`
+- 실제 배포: `docs/deploy.md` 의 prod Dockerfile 기준 절차 사용
 
 ---
 
@@ -3973,6 +3941,123 @@ server:  { allowedHosts: true, host: true },               // dev 도 터널 통
 
 ---
 
+## 🔧 2026-05-19 작업 내역
+
+### 1. 이번 세션 개요
+
+5/18 까지의 작업 결과를 기준으로 **README 전체 + 백엔드(Express/FastAPI) + 프론트(React) 코드를 재분석**하여 잔여 미해결 항목을 통합 정리. 코드 수정은 없음(분석/리포트 세션). challenge 영역은 별도 팀원 작업 범위로 제외.
+
+| 결과물 | 내용 |
+|---|---|
+| 신규 P0 발견 2건 | `mypage.py _load_gallery` Soft Delete 필터 누락 / `comment.py` 댓글 작성자 INNER JOIN |
+| 신규 P1~P3 발견 | LoginPage 아이디·비번 찾기 하드코딩, 회원 탈퇴/비번 변경/프로필 수정 엔드포인트 부재, body parser 100KB, 루틴 중복 fetch 등 |
+| 우선순위 통합 표 | 기존 잔여 부채(#11, #12·#13·#14·#15 신규, #19 신규) + 신규 발견을 P0/P1/P2/P3 4계층으로 재분류 |
+
+---
+
+### 2. 신규 P0 발견 — 4단 분석
+
+#### 2-1. `mypage.py:145` 갤러리 Soft Delete 필터 누락
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `_load_gallery` 쿼리가 `f.user_id = %s` 조건만 사용. 5/17 도입한 `feeds.deleted_at` 필터가 없어 **삭제된 피드의 이미지가 마이페이지 갤러리에 노출됨**. 5/18 `delete_feed` Soft Delete 전환으로 `feed_images` 가 보존되는 이상 갤러리에 잔존 |
+| 수정 후 방식 | `WHERE f.user_id = %s AND f.deleted_at IS NULL` 추가. 동일 패턴인 `get_feeds`/`get_feed_detail` 와 일관 |
+| 기대 효과 | 삭제 피드 이미지 노출 차단. 신고 제재로 Soft Delete 된 피드도 작성자 화면에서 자동 비공개 |
+| 문제점 | 단일 라인 추가, 정상 흐름 영향 없음 |
+
+#### 2-2. `comment.py:110` 댓글 작성자 INNER JOIN
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `SELECT fc.*, u.nickname, u.profile_img FROM feed_comments fc JOIN users u ON fc.user_id = u.user_id` — **`users.deleted_at IS NULL` 필터 없음 + INNER JOIN**. 회원 탈퇴 엔드포인트가 향후 추가되어 `users.deleted_at` 이 채워지는 순간, 탈퇴 회원의 댓글이 통째로 응답에서 사라짐 |
+| 수정 후 방식 | `LEFT JOIN users u ON fc.user_id = u.user_id AND u.deleted_at IS NULL` + `SELECT COALESCE(u.nickname, '탈퇴한 회원') AS nickname` |
+| 기대 효과 | 회원 탈퇴 기능 도입 후에도 댓글 트리 보존 (스레드 맥락 유지) |
+| 문제점 | 현재는 탈퇴 엔드포인트가 없어 실제 영향은 0 — 단 P1 회원 탈퇴 엔드포인트 추가 직전엔 반드시 선행 필요 |
+
+---
+
+### 3. 미해결 항목 통합 우선순위 표 (challenge 영역 제외)
+
+#### 🚨 P0 — 데이터 무결성/보안 (운영 진입 전 필수)
+
+| # | 분류 | 항목 | 위치 | 비고 |
+|---|---|---|---|---|
+| 1 | 데이터 무결성 | 갤러리 Soft Delete 필터 누락 | `mypage.py:145` `_load_gallery` | 2026-05-19 신규 발견 |
+| 2 | 데이터 유실 | 댓글 작성자 INNER JOIN | `comment.py:110` | 2026-05-19 신규 발견 / 회원 탈퇴 도입 직전 필수 |
+| 3 | 보안 | AWS RDS admin 비번 회전 | AWS 콘솔 | 5/11 P0 후속 — git history 잔존 |
+| 4 | 보안 | git history `.env` 영구 제거 | filter-repo + force push | 5/11 잔여 |
+| 5 | 보안 | feed 이미지 추가 ownership 미검증 | `feed.py add_feed_image` | 타인 피드에 이미지 첨부 가능 |
+
+#### 🟠 P1 — 사용자 가시 기능 누락
+
+| # | 분류 | 항목 | 위치 | 비고 |
+|---|---|---|---|---|
+| 6 | 기능 | 아이디/비번 찾기 하드코딩 | `LoginPage.jsx:109, 129` | `홍길동`/`test@test.com` 데모용 그대로 |
+| 7 | 기능 | 회원 탈퇴 엔드포인트 부재 | FastAPI/Express | `users.deleted_at` 컬럼 준비됨 |
+| 8 | 기능 | 비밀번호 변경 엔드포인트 부재 | FastAPI/Express | MyPage 호출처 없음 |
+| 9 | 기능 | 프로필 수정 엔드포인트 부재 | FastAPI/Express | 5/16 인스타 스타일 UI 만 추가됨 |
+| 10 | 검증 | 회원가입 비번 정책 부재 (신규 #19) | `user.py UserCreate` | bcrypt prefix/length validator 없음 |
+| 11 | 검증 | body parser 100KB 한계 | `src/backend/app.js` | 대용량 페이로드 거부 |
+| 12 | 버그 | 신규 루틴 추가 시 인증 루틴 표시 사라짐 | HomePage 화면 동작 | 5/x 기존 잔여 |
+
+#### 🟡 P2 — 성능
+
+| # | 분류 | 항목 | 위치 | 비고 |
+|---|---|---|---|---|
+| 13 | 성능 | 이미지 압축/썸네일 (신규 #12) | S3 업로드 경로 | Sharp/Pillow + WebP 미적용 |
+| 14 | 성능 | 세션 검증 LRU 캐시 (신규 #13) | `requireAuth` | DB 조회 매 요청 — 60s TTL 캐시 |
+| 15 | 성능 | 루틴 중복 fetch | `App.jsx:195` ↔ `RoutinePage.jsx:55` | 페이지 진입마다 두 번 호출 + 필드 mismatch |
+| 16 | 성능 | 600줄+ 단일 컴포넌트 분할 | FeedPage / App / HomePage / AdminPage / MyPage / SignupPage | 렌더 비용 + 유지보수 |
+
+#### 🟢 P3 — 운영/안정성
+
+| # | 분류 | 항목 | 위치 | 비고 |
+|---|---|---|---|---|
+| 17 | 운영 | 로깅 인프라 (신규 #14) | pino + structlog + traceId | slow-sql 외 구조화 로그 없음 |
+| 18 | 운영 | 에러 모니터링 (신규 #15) | Sentry | 미적용 |
+| 19 | 보안 | Rate limiting (#11) | Express 미들웨어 | 의존성 전무 |
+| 20 | 안정성 | `report.py` GROUP BY 불완전 | `report.py:269` | ONLY_FULL_GROUP_BY 모드 시 에러 |
+| 21 | 안정성 | FeedPage 좋아요 응답 무검증 | `FeedPage.jsx:224~232` | 실패 응답도 정상 처리 |
+| 22 | 운영 | Soft Delete 영구 삭제 배치 | 미수립 | 30일 경과 후 hard delete 정책 |
+
+#### 🔧 정리/일관성 (Minor)
+
+| # | 항목 | 위치 |
+|---|---|---|
+| 23 | `/check-duplicate` 만 fetchJson 미사용 | `login.js:305~342` |
+| 24 | `addFeedImage` dead code | `database.js:291~300` |
+| 25 | `build-output.txt` git 추적 제거 | 루트 |
+| 26 | `package.json` `dev`/`start` 스크립트 부재 | `src/backend/` |
+| 27 | 세션 비활성 타임아웃 (`last_activity` 갱신) | `requireAuth` (#13 LRU 캐시와 함께) |
+
+---
+
+### 4. 권장 처리 순서
+
+| 순서 | 항목 | 이유 |
+|---|---|---|
+| 1 | P0 #1·#2 (mypage Soft Delete 필터 / comment LEFT JOIN) | 단일 쿼리 수정, 정상 흐름 영향 0, 운영 진입 전 필수 |
+| 2 | P0 #5 (`add_feed_image` ownership) | 권한 우회 가능성 차단 |
+| 3 | P1 #6 (LoginPage 하드코딩 제거) | 데모용 코드 → 실제 엔드포인트 또는 비활성화 |
+| 4 | P1 #7·#8·#9 (탈퇴/비번/프로필 엔드포인트) | P0 #2 선행 후 진행 |
+| 5 | P1 #10 (회원가입 비번 정책) + P1 #11 (body parser) | Pydantic validator + Express express.json limit 조정 |
+| 6 | P2 #14 (세션 LRU 캐시) → #15 (루틴 중복 fetch) | 성능 체감, 작은 변경 |
+| 7 | P2 #13 (이미지 압축/썸네일) → #16 (컴포넌트 분할) | 큰 변경, PR 분할 |
+| 8 | P3 #17·#18·#19 (로깅/Sentry/Rate limit) | 운영 인프라, 배포 직전 |
+| 9 | P0 #3·#4 (RDS 비번 회전 / git history) | 사용자 결정 영역 |
+| 10 | Minor #23~#27 | 한 PR 로 묶기 |
+
+---
+
+### 5. 변경 파일 목록 (1개)
+
+| 파일 | 변경 |
+|---|---|
+| `README.md` | 본 작업 섹션 추가 + 미구현 체크리스트 신규 P0 2건 추가 |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
@@ -4018,6 +4103,18 @@ server:  { allowedHosts: true, host: true },               // dev 도 터널 통
 - [ ] `src/backend/package.json` 에 `dev`/`start` 스크립트 추가 — 2026-05-11 신규 (Minor)
 - [ ] `login.js` `/check-duplicate` 의 `fetchJson` 헬퍼 통일 — 2026-05-11 신규 (Minor)
 - [ ] 세션 비활성 타임아웃 (`last_activity` 갱신) — 2026-05-11 신규 (#13 LRU 캐시와 함께)
+- [ ] `mypage.py _load_gallery` Soft Delete 필터 누락 (`f.deleted_at IS NULL`) — 2026-05-19 신규 P0
+- [ ] `comment.py` 댓글 작성자 INNER JOIN → LEFT JOIN + COALESCE 전환 — 2026-05-19 신규 P0 (회원 탈퇴 도입 직전 필수)
+- [ ] `feed.py add_feed_image` ownership 검증 — 2026-05-19 신규 P0
+- [ ] LoginPage 아이디/비번 찾기 하드코딩 제거 — 2026-05-19 신규 P1
+- [ ] 비밀번호 변경 엔드포인트 — 2026-05-19 신규 P1
+- [ ] 프로필 수정 엔드포인트 — 2026-05-19 신규 P1
+- [ ] Express body parser 100KB 한계 조정 — 2026-05-19 신규 P1
+- [ ] 루틴 중복 fetch (App.jsx ↔ RoutinePage.jsx) 통합 — 2026-05-19 신규 P2
+- [ ] `report.py:269` GROUP BY 불완전 (ONLY_FULL_GROUP_BY 위험) — 2026-05-19 신규 P3
+- [ ] FeedPage 좋아요 응답 무검증 — 2026-05-19 신규 P3
+- [ ] Soft Delete 영구 삭제 배치 정책 수립 (30일) — 2026-05-19 신규 P3
+- [ ] `database.js addFeedImage` dead code 제거 — 2026-05-19 신규 (Minor)
 ---
 
 ## 👥 팀원

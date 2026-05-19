@@ -1,153 +1,212 @@
-# 🚀 배포 가이드 (2026-05-17 작성)
+# 🚀 배포 가이드
 
-로컬 전용이던 Routine Mate 를 인터넷 주소로 접속 가능하게 배포하는 절차.
+이 문서는 **개발용 `docker-compose.yml` 이 아니라**, self-contained prod 이미지 기준으로
+Routine Mate 를 검증·배포하는 절차를 정리한 문서다.
 
-> 캡스톤 데모 기준 **가장 빠른 경로** (EC2 수동 세팅 대신 PaaS).
-> 디펜스 일정(~5/27) 안에 끝내려면 이 가이드대로 D5~7 에 진행 권장.
-
----
-
-## 0. 배포 아키텍처
-
-```
-브라우저
-  │  https
-  ▼
-[Vercel]  프론트(React/Vite)            ── my-app.vercel.app
-  │  https + credentials(쿠키)
-  ▼
-[Render]  백엔드(Express + FastAPI)     ── routine-mate-api.onrender.com
-  │  (컨테이너 내부 통신)
-  ▼
-[AWS RDS] MySQL  (기존 유지, 보안그룹만 수정)
-```
-
-| 부분 | 플랫폼 | 비용 |
-|---|---|---|
-| 프론트 | Vercel | 무료 |
-| 백엔드 | Render (또는 Railway) | 무료 티어 |
-| DB | 기존 AWS RDS | 기존 |
+개발용 Docker는 bind mount와 hot reload를 위해 존재하고, 배포용 Docker는
+코드까지 이미지에 포함해 다른 컴퓨터나 PaaS에서도 같은 결과를 재현하기 위해 존재한다.
 
 ---
 
-## 1. ⚠️ 배포 전 필수 선행 (이거 안 하면 사고)
+## 0. 배포용 파일 구조
 
-### 1-1. 🚨 RDS 비밀번호 회전 (Phase 1.5) — 절대 필수
+| 파일 | 역할 |
+|---|---|
+| `Dockerfile.frontend.prod` | React 정적 빌드 생성 + 정적 파일 서빙 |
+| `Dockerfile.backend.prod` | Express production 이미지 |
+| `Dockerfile.python_api.prod` | FastAPI production 이미지 |
+| `docker-compose.prod.yml` | self-contained prod 이미지 로컬 검증용 |
 
-`src/python_api/.env` 의 DB 비번은 **2026-05-11 GitHub 에 공개 노출된 이력**이 있음.
-그 상태로 글로벌 배포 = 전 세계가 DB 접근 가능.
-
-1. AWS RDS 콘솔 → 인스턴스 → "수정" → 새 마스터 비밀번호(16자+ 무작위) → "즉시 적용"
-2. `src/python_api/.env` 의 `DB_PASSWORD` 갱신
-3. 배포 플랫폼 환경변수에도 새 비번 반영
-4. `git status` 로 `.env` 가 추적 안 되는지 재확인
-
-### 1-2. 핵심 흐름 로컬 검증 완료 확인
-
-배포 환경은 로그 보기가 더 어렵다. **로컬(`./start.sh`)에서 로그인→공지→신고→제재→챌린지가
-다 동작하는 것**을 먼저 확인한 뒤 배포할 것. (안 되는 걸 올리면 인터넷에서 디버깅하게 됨)
+> 개발용 파일(`Dockerfile.frontend`, `Dockerfile.backend`, `Dockerfile.python_api`, `docker-compose.yml`)은 그대로 유지한다.
 
 ---
 
-## 2. AWS RDS 보안그룹 수정
+## 1. 배포 전 필수 점검
 
-배포 백엔드(Render)가 RDS 에 접속하려면 RDS 가 그 IP 를 허용해야 함.
+### 1-1. 환경변수 파일 준비
 
-1. AWS EC2 콘솔 → 보안 그룹 → RDS 가 쓰는 보안그룹 선택
-2. 인바운드 규칙 → MySQL/Aurora(3306) →
-   - Render 는 고정 IP 가 없을 수 있음 → 우선 `0.0.0.0/0`(전체 허용)으로 데모 진행 후,
-     디펜스 끝나면 제거하거나 Render 의 Static Outbound IP(유료) 사용 검토
-   - ⚠️ `0.0.0.0/0` + 강한 비번(1-1) 조합으로만 임시 허용. 데모 후 원복 권장.
+필수 `.env` 파일 3개:
 
-> RDS 엔드포인트(`DB_HOST`)는 **안 바뀐다**. 보안그룹만 수정.
+- 루트 `.env`
+- `src/backend/.env`
+- `src/python_api/.env`
 
----
+각 파일은 반드시 `.env.example` 기반으로 만들고, 배포 플랫폼에도 같은 값을 등록한다.
 
-## 3. 백엔드 배포 (Render)
+### 1-2. RDS / S3 접근 확인
 
-> Express + FastAPI 2개 서비스. `docker-compose.yml` 이 있으므로 두 가지 방법:
-> (A) Render 에 docker-compose 그대로 / (B) 서비스 2개 따로 생성.
-> Render 무료 티어는 compose 미지원일 수 있어 **(B) 서비스 2개 따로** 가 안전.
+외부 의존성:
 
-### 3-1. FastAPI 서비스
-1. Render → New → Web Service → GitHub 저장소 연결
-2. Root Directory: `src/python_api`
-3. Dockerfile: `Dockerfile.python_api` (또는 Environment: Docker)
-4. 환경변수 (Render Environment):
-   - `DB_HOST` `DB_USER` `DB_PASSWORD`(새 비번) `DB_NAME` `DB_PORT`
-   - `INTERNAL_API_KEY` (긴 랜덤 — Express 와 동일값)
-5. 배포 후 내부 URL 확인 (예: `routine-mate-fastapi.onrender.com`)
+- AWS RDS MySQL
+- AWS S3
 
-### 3-2. Express 서비스
-1. Render → New → Web Service → 같은 저장소
-2. Root Directory: `src/backend`
-3. Dockerfile: `Dockerfile.backend`
-4. 환경변수:
-   - `PORT` (Render 가 주는 포트 사용 — 보통 자동)
-   - `PYTHON_API=https://<3-1 에서 만든 FastAPI 도메인>`
-   - `INTERNAL_API_KEY` (3-1 과 동일값)
-   - `FRONTEND_URL=https://<4 에서 만들 Vercel 도메인>,http://localhost:5173`
-     (콤마로 로컬도 같이 — 배포 후 로컬 테스트 가능)
-   - **`NODE_ENV=production`** ← 이게 없으면 쿠키 sameSite 가 lax 라 로그인 실패
-   - AWS S3 변수 4종 (`AWS_REGION` 등)
-5. 배포 후 도메인 확인 (예: `routine-mate-api.onrender.com`)
+따라서 prod 이미지는 떠도, 아래가 틀리면 실제 서비스는 실패한다.
+
+- `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT`
+- `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- `INTERNAL_API_KEY`
+
+### 1-3. 로컬 기능 검증 선행
+
+배포 전에 최소 한 번은 아래를 로컬에서 확인한다.
+
+- 회원가입 / 로그인 / 로그아웃
+- 루틴 생성 / 완료 / 취소
+- 피드 업로드
+- 공지 / 신고 / 관리자 기능
 
 ---
 
-## 4. 프론트 배포 (Vercel)
+## 2. Prod 이미지 로컬 검증
 
-1. Vercel → New Project → GitHub 저장소 연결
-2. Framework Preset: Vite
-3. 환경변수 (Vercel Environment Variables):
-   - `VITE_EXPRESS_URL=https://<3-2 Express 도메인>`
-   - ⚠️ Vite 는 **빌드 시점**에 박으므로 반드시 배포 전에 등록
-4. Deploy → 도메인 확인 (예: `routine-mate.vercel.app`)
-5. 이 도메인을 3-2 의 `FRONTEND_URL` 에 반영했는지 재확인 (CORS)
+배포 전에 “이미지 자체가 독립적으로 뜨는지” 확인하는 단계다.
 
----
-
-## 5. 배포 후 점검 (D8 테스트)
-
-브라우저에서 Vercel 도메인 접속 후, 개발자도구(F12) Network 탭 보며:
-
-```
-□ 회원가입 → 비번 정책(8자+영숫자특수) 거부/통과 정상?
-□ 로그인 → Network 에서 Set-Cookie 응답 + 이후 요청에 Cookie 동봉?
-   (안 되면: NODE_ENV=production 확인 / sameSite none / HTTPS 확인)
-□ 새로고침 후에도 로그인 유지? (세션 쿠키 정상)
-□ 공지 작성(admin) → 다른 브라우저/시크릿에서 공지 모달 뜸?
-□ 피드 🚩 신고 → admin 신고 목록에 뜸 → 제재 → 피드 사라짐?
-□ CORS 에러 콘솔에 없나? (있으면 FRONTEND_URL 오타/누락)
+```bash
+docker compose -f docker-compose.prod.yml up --build
 ```
 
-### 가장 흔한 배포 실패 Top 3
+검증 포인트:
+
+- 프런트 이미지가 `dist/` 를 정상 생성하는지
+- Express 이미지가 `app.js`, `routes/`, `middleware/` 를 포함한 채 기동하는지
+- FastAPI 이미지가 `app.py`, `database.py`, `routers/` 를 포함한 채 기동하는지
+- `backend -> python_api` 내부 호출이 `http://python_api:8000` 으로 정상 연결되는지
+
+정리:
+
+```bash
+docker compose -f docker-compose.prod.yml down
+```
+
+> 이 흐름은 개발용 bind mount에 기대지 않기 때문에, “다른 컴퓨터/PaaS에서도 같은 이미지가 뜰 수 있는지”를 보는 가장 가까운 검증이다.
+
+---
+
+## 3. 서비스별 빌드 기준
+
+### 3-1. Frontend
+
+- Dockerfile: `Dockerfile.frontend.prod`
+- Build context: 저장소 루트
+- Build arg:
+  - `VITE_EXPRESS_URL`
+
+중요:
+
+- `VITE_EXPRESS_URL` 은 **빌드 시점 변수**다.
+- 잘못 넣으면 이미지는 떠도 브라우저가 잘못된 API 주소로 요청한다.
+
+예시:
+
+```bash
+docker build \
+  -f Dockerfile.frontend.prod \
+  --build-arg VITE_EXPRESS_URL=https://api.example.com \
+  .
+```
+
+### 3-2. Backend
+
+- Dockerfile: `Dockerfile.backend.prod`
+- Build context: `src/backend`
+- Runtime env:
+  - `PORT`
+  - `PYTHON_API`
+  - `INTERNAL_API_KEY`
+  - `FRONTEND_URL`
+  - `NODE_ENV`
+  - AWS S3 변수 4종
+  - 운영 로그/캐시 변수 (`SLOW_REQUEST_MS`, `STATS_CACHE_TTL_MS`)
+
+중요:
+
+- 실제 배포에서는 `NODE_ENV=production` 이어야 한다.
+- 그래야 세션 쿠키가 `secure:true`, `sameSite:none` 정책으로 동작한다.
+
+### 3-3. Python API
+
+- Dockerfile: `Dockerfile.python_api.prod`
+- Build context: `src/python_api`
+- Runtime env:
+  - `DB_HOST`
+  - `DB_USER`
+  - `DB_PASSWORD`
+  - `DB_NAME`
+  - `DB_PORT`
+  - `INTERNAL_API_KEY`
+  - `DB_POOL_SIZE`
+  - `DB_POOL_MAX_OVERFLOW`
+  - `SLOW_QUERY_MS`
+  - `SLOW_REQUEST_MS`
+
+---
+
+## 4. 실제 배포 시 권장 원칙
+
+### 4-1. 개발용 compose를 배포에 쓰지 않는다
+
+배포 환경에서는 아래 개발용 특성이 필요 없다.
+
+- bind mount
+- `vite dev`
+- `nodemon --legacy-watch`
+- `uvicorn --reload`
+
+배포는 반드시 prod Dockerfile 기준으로 한다.
+
+### 4-2. 프런트는 정적 빌드, 백엔드는 런타임 환경변수
+
+- 프런트:
+  - `VITE_EXPRESS_URL` 은 빌드 시점에 고정됨
+- 백엔드 / FastAPI:
+  - 환경변수는 런타임에 주입됨
+
+따라서 API 도메인이 바뀌면 프런트 이미지는 다시 빌드해야 한다.
+
+### 4-3. 서비스 분리는 이렇게 본다
+
+- `frontend`: 브라우저에 정적 파일 제공
+- `backend`: 공개 API, 세션 쿠키, CORS, S3 업로드
+- `python_api`: 내부 데이터 계층, Express 뒤에만 존재
+
+가능하면 `python_api` 는 외부에 직접 노출하지 않는 구성이 바람직하다.
+
+---
+
+## 5. 배포 후 체크리스트
+
+브라우저와 서버 로그를 함께 보면서 아래를 점검한다.
+
+```text
+□ 프런트 첫 화면 정상 렌더링
+□ 로그인 성공 후 Set-Cookie 발급
+□ 새로고침 후 세션 유지
+□ 루틴/완료/피드/댓글 API 정상 응답
+□ 공지/신고/관리자 기능 정상 동작
+□ CORS 오류 없음
+□ backend -> python_api 내부 호출 403 없음 (INTERNAL_API_KEY 일치)
+□ python_api -> RDS 연결 오류 없음
+□ backend -> S3 업로드 오류 없음
+```
+
+---
+
+## 6. 자주 막히는 지점
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| 로그인 되는데 새로고침하면 풀림 | 쿠키 미전송 | `NODE_ENV=production` 누락 / HTTPS 아님 / `sameSite` |
-| 콘솔에 CORS 에러 | `FRONTEND_URL` 에 Vercel 도메인 없음 | Express 환경변수에 정확한 도메인 추가(끝 슬래시 X) |
-| 백엔드 500 / DB 연결 실패 | RDS 보안그룹 / 비번 | 2번 보안그룹 + 1-1 새 비번 반영 확인 |
+| 프런트는 뜨는데 API 전부 실패 | `VITE_EXPRESS_URL` 잘못 빌드 | 프런트 이미지를 다시 빌드 |
+| 로그인 후 새로고침하면 풀림 | `NODE_ENV=production` 누락 / HTTPS 미구성 | 백엔드 환경변수와 HTTPS 확인 |
+| FastAPI 403 | `INTERNAL_API_KEY` 불일치 | `src/backend/.env` 와 `src/python_api/.env` 값 통일 |
+| FastAPI 500 / DB 연결 실패 | RDS 보안그룹 또는 DB 자격증명 문제 | RDS 접근 허용 + 환경변수 재확인 |
+| 피드 업로드 실패 | S3 자격증명/버킷 설정 오류 | 백엔드 AWS 변수 4종 재확인 |
 
 ---
 
-## 6. 코드 측 배포 준비 (2026-05-17 완료된 것)
+## 7. 메모
 
-이미 코드에 반영됨 (이 가이드대로 환경변수만 채우면 됨):
+- 일상 개발은 `docker-compose.yml`
+- 배포 전 이미지 검증은 `docker-compose.prod.yml`
+- 실제 배포는 `*.prod` Dockerfile 기준
 
-- `config.js` — `VITE_EXPRESS_URL` 환경변수
-- `app.js` — CORS 다중 origin (`FRONTEND_URL` 콤마 분리)
-- `login.js` — 세션 쿠키 `SESSION_COOKIE_OPTIONS`
-  (production → secure:true + sameSite:none, 로컬 → false + lax)
-- `.env.example` 3개 — 배포 변수 안내
-
-> 즉 **코드 수정 없이 환경변수만으로 로컬/배포 전환** 가능.
-
----
-
-## 7. 대안 / 참고
-
-- Render 무료 티어는 15분 무응답 시 슬립 → 첫 요청이 느림.
-  디펜스 직전 미리 한 번 호출해 깨워두기.
-- EC2 직접(nginx+Let's Encrypt)도 가능하나 처음이면 2~3일 더 소요 → 비권장.
-- 캡스톤 데모만 목적이면 **노트북에서 `./start.sh` 로 시연**도 충분히 유효한 대안
-  (배포가 안 풀리면 이 폴백을 디펜스 보험으로).
+즉, **dev와 prod를 분리해서 유지하되, prod 검증을 로컬에서도 먼저 할 수 있게 만든 구조**로 이해하면 된다.

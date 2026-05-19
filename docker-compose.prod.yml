@@ -1,0 +1,47 @@
+# ============================================================
+# Routine Mate — production-style compose
+# ============================================================
+# 목적:
+#   - 개발용 bind mount 없이 self-contained 이미지를 로컬에서 검증
+#   - 각 서비스가 자기 코드와 의존성을 이미지 안에 포함한 상태로 기동
+#
+# 사용:
+#   docker compose -f docker-compose.prod.yml up --build
+# ============================================================
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend.prod
+      args:
+        VITE_EXPRESS_URL: ${VITE_EXPRESS_URL:-http://localhost:3000}
+    container_name: routine_mate_frontend_prod
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./src/backend
+      dockerfile: ../../Dockerfile.backend.prod
+    container_name: routine_mate_backend_prod
+    env_file:
+      - ./src/backend/.env
+    environment:
+      PYTHON_API: http://python_api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - python_api
+
+  python_api:
+    build:
+      context: ./src/python_api
+      dockerfile: ../../Dockerfile.python_api.prod
+    container_name: routine_mate_python_api_prod
+    env_file:
+      - ./src/python_api/.env
+    ports:
+      - "8000:8000"

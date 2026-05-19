@@ -1,0 +1,22 @@
+# ============================================================
+# Routine Mate — Backend production image
+# ============================================================
+# 목적:
+#   - src/backend 코드를 이미지에 포함하는 self-contained Express 이미지
+#   - 개발용 nodemon/node --watch 대신 일반 node app.js 로 실행
+# ============================================================
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start"]

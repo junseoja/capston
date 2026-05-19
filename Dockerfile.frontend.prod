@@ -1,0 +1,39 @@
+# ============================================================
+# Routine Mate — Frontend production image
+# ============================================================
+# 목적:
+#   - 개발용 docker-compose 볼륨 마운트 없이도 단독 실행 가능한 self-contained 이미지
+#   - 빌드 시점에 VITE_EXPRESS_URL 을 주입해 정적 자산(dist)을 생성
+#   - 런타임에는 dist 만 서빙
+#
+# 사용:
+#   docker build -f Dockerfile.frontend.prod --build-arg VITE_EXPRESS_URL=https://api.example.com .
+# ============================================================
+
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+ARG VITE_EXPRESS_URL=http://localhost:3000
+ENV VITE_EXPRESS_URL=${VITE_EXPRESS_URL}
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY index.html vite.config.js ./
+COPY public ./public
+COPY src ./src
+
+RUN npm run build
+
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+RUN npm install -g serve@14.2.4
+
+COPY --from=builder /app/dist ./dist
+
+EXPOSE 5173
+
+CMD ["serve", "-s", "dist", "-l", "5173"]
