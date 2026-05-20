@@ -97,45 +97,96 @@ function LoginPage({ onLogin, onGoSignup }) {
         }
     };
 
-    // ── [추가] 스크린샷 형태 검증 및 알림창 전송 로직 ──────────────────────────────
+    // ────────────────────────────────────────────────────────────────────
+    // [수정 2026-05-20] 아이디/비번 찾기 Mock 제거 후 실제 백엔드 연결 (P0 #3)
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: P0 #3 (LoginPage Mock 하드코딩 → "홍길동/test@test.com" 만 동작)
+    // 날짜: 2026-05-20
+    // 기대 효과:
+    //   - 실제 회원이 아이디/임시비밀번호를 정상적으로 받을 수 있음
+    //   - 미일치 시 동일한 메시지로 사용자 정보 노출 차단
+    // 장점:
+    //   - 닉네임은 DB users.nickname 컬럼과 매칭 (실명 컬럼이 별도로 없음)
+    //   - 비밀번호 재설정 시 서버가 임시 비번을 즉시 발급 → 다음 로그인부터 사용 가능
+    //   - 이메일 발송 인프라 도입 시 응답에서 temp_password 만 제거하면 됨 (UI 변경 없음)
+    // ────────────────────────────────────────────────────────────────────
+    const [findIdLoading, setFindIdLoading] = useState(false);
+    const [findPwLoading, setFindPwLoading] = useState(false);
 
-    // 아이디 대조용 가상 검증 핸들러
-    const handleFindId = () => {
-        if (!findIdName || !findIdEmail) {
-            alert("이름과 이메일을 입력해주세요.");
+    const handleFindId = async () => {
+        const name = findIdName.trim();
+        const email = findIdEmail.trim();
+        if (!name || !email) {
+            alert("닉네임과 이메일을 입력해주세요.");
             return;
         }
-
-        if (findIdName === "홍길동" && findIdEmail === "test@test.com") {
+        if (findIdLoading) return;
+        setFindIdLoading(true);
+        try {
+            const res = await fetch(`${EXPRESS_URL}/find-id`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ nickname: name, email }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success && data.login_id) {
+                setAlertPopup({
+                    isOpen: true,
+                    message: `사용자의 아이디는 [ ${data.login_id} ] 입니다.`
+                });
+            } else {
+                setAlertPopup({
+                    isOpen: true,
+                    message: data.message || "일치하는 회원 정보가 없습니다."
+                });
+            }
+        } catch (error) {
+            console.error("아이디 찾기 요청 실패:", error);
             setAlertPopup({
                 isOpen: true,
-                message: "사용자의 아이디는 [ gildong123 ] 입니다."
+                message: "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
             });
-        } else {
-            setAlertPopup({
-                isOpen: true,
-                message: "일치하는 회원 정보가 없습니다."
-            });
+        } finally {
+            setFindIdLoading(false);
         }
     };
 
-    // 비밀번호 가상 검증 핸들러
-    const handleFindPassword = () => {
-        if (!findPwName || !findPwId || !findPwEmail) {
-            alert("이름, 아이디, 이메일을 모두 입력해주세요.");
+    const handleFindPassword = async () => {
+        const name = findPwName.trim();
+        const id = findPwId.trim();
+        const email = findPwEmail.trim();
+        if (!name || !id || !email) {
+            alert("닉네임, 아이디, 이메일을 모두 입력해주세요.");
             return;
         }
-
-        if (findPwName === "홍길동" && findPwId === "gildong123" && findPwEmail === "test@test.com") {
+        if (findPwLoading) return;
+        setFindPwLoading(true);
+        try {
+            const res = await fetch(`${EXPRESS_URL}/find-password`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ nickname: name, login_id: id, email }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success && data.temp_password) {
+                setAlertPopup({
+                    isOpen: true,
+                    message: `임시 비밀번호가 발급되었습니다.\n\n임시 비밀번호: ${data.temp_password}\n\n로그인 후 즉시 변경해주세요.`
+                });
+            } else {
+                setAlertPopup({
+                    isOpen: true,
+                    message: data.message || "일치하는 회원 정보가 없습니다."
+                });
+            }
+        } catch (error) {
+            console.error("비밀번호 재설정 요청 실패:", error);
             setAlertPopup({
                 isOpen: true,
-                message: "비밀번호 재설정 이메일이 정상 발송되었습니다."
+                message: "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
             });
-        } else {
-            setAlertPopup({
-                isOpen: true,
-                message: "일치하는 회원 정보가 없습니다."
-            });
+        } finally {
+            setFindPwLoading(false);
         }
     };
 

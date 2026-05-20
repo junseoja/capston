@@ -74,6 +74,48 @@ class PasswordUpdate(BaseModel):
     """비밀번호 업데이트 요청 데이터 스키마 (반드시 bcrypt 해시값을 받음)"""
     password: str  # bcrypt 해시 문자열 (~60자, "$2a$" 또는 "$2b$" 로 시작)
 
+# ────────────────────────────────────────────────────────────────────
+# [추가 2026-05-20] 프로필 수정 (P0 #2) 요청 스키마
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: P0 #2 (5/19 신규 / 5/20 종합 리뷰 재확인)
+# 날짜: 2026-05-20
+# 기대 효과:
+#   - 인스타 스타일 프로필 UI 가 입력한 nickname/bio 가 DB 에 영속 저장됨
+#   - 새로고침 후에도 동일하게 노출
+# 장점:
+#   - nickname / bio 는 Optional 이라 각각 단독 수정도 가능
+#   - 닉네임 길이/공백 정책은 회원가입과 동일하게 Express 가 사전 차단
+# ────────────────────────────────────────────────────────────────────
+class ProfileUpdate(BaseModel):
+    """프로필 수정 요청 데이터 스키마
+
+    프로필 사진(profile_img) 은 본 작업 범위 외 — 별도 S3 업로드 흐름에서 처리.
+    """
+    nickname: Optional[str] = None  # 새 닉네임 (None 이면 변경 안 함)
+    bio: Optional[str] = None       # 새 자기소개 (빈 문자열 = 삭제, None = 변경 안 함)
+
+# ────────────────────────────────────────────────────────────────────
+# [추가 2026-05-20] 아이디 찾기 / 비밀번호 재설정 요청 스키마 (P0 #3)
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: P0 #3 (LoginPage 아이디·비번 찾기 Mock 하드코딩)
+# 날짜: 2026-05-20
+# 기대 효과:
+#   - 실제 DB 회원 정보로 아이디 조회 / 비밀번호 재설정이 동작
+# 장점:
+#   - nickname + email 조합으로 본인 확인 (signup 시 입력값과 동일 컬럼 사용)
+#   - 비밀번호 재설정은 Express 가 bcrypt 해시로 받은 값을 그대로 저장하는 기존 패턴 유지
+# ────────────────────────────────────────────────────────────────────
+class FindLoginIdBody(BaseModel):
+    """아이디 찾기 요청 (닉네임 + 이메일 매칭)"""
+    nickname: str
+    email: str
+
+class VerifyForPasswordResetBody(BaseModel):
+    """비밀번호 재설정 전 본인 확인 (닉네임 + 아이디 + 이메일 매칭)"""
+    nickname: str
+    login_id: str
+    email: str
+
 # ── 회원가입 ─────────────────────────────────────────────────────────────────
 
 @router.post("/signup")
@@ -352,6 +394,188 @@ def update_password(user_id: str, body: PasswordUpdate):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+# ────────────────────────────────────────────────────────────────────
+# [추가 2026-05-20] 프로필 수정 (PATCH /user/profile/{user_id})
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: P0 #2 (프로필 수정 백엔드 부재)
+# 날짜: 2026-05-20
+# 기대 효과:
+#   - MyPage 인스타 스타일 편집 UI 가 저장 누른 nickname/bio 가 DB 에 영속 저장
+#   - 새로고침해도 변경값 유지
+# 장점:
+#   - 닉네임 중복은 UNIQUE 제약(IntegrityError 409) 로 자동 차단
+#   - 본인 인증은 Express requireAuth + 본인 user_id 사용으로 강제 (라우터 자체엔 권한 없음)
+#   - nickname 만 수정 / bio 만 수정 / 둘 다 수정 케이스 모두 단일 라우트로 처리
+# ────────────────────────────────────────────────────────────────────
+@router.patch("/profile/{user_id}")
+def update_profile(user_id: str, body: ProfileUpdate):
+    """프로필(닉네임/자기소개) 수정
+
+    Args:
+        user_id (str): 수정할 유저 UUID v7 (Express requireAuth 가 검증한 본인 user_id)
+        body (ProfileUpdate): {"nickname": str | None, "bio": str | None}
+
+    Returns:
+        dict: {"success": True, "user": {nickname, bio, ...}}  → 갱신된 유저 정보 일부 반환
+              {"success": False, "message": "..."} → 변경할 필드가 하나도 없거나 user_id 없음
+
+    Raises:
+        HTTPException 409: 닉네임 UNIQUE 제약 위반
+        HTTPException 500: DB 오류
+    """
+    fields = []
+    values: list = []
+    if body.nickname is not None:
+        # 닉네임은 Express 단에서 trim + 빈문자 검증을 이미 거친 값이 전달됨
+        fields.append("nickname = %s")
+        values.append(body.nickname)
+    if body.bio is not None:
+        # 빈 문자열은 "자기소개 삭제" 의미로 NULL 대신 빈 문자열을 그대로 저장한다.
+        # (NULL/'' 구분이 필요한 사용 사례가 생기면 그때 분기)
+        fields.append("bio = %s")
+        values.append(body.bio)
+
+    if not fields:
+        return {"success": False, "message": "변경할 필드가 없습니다."}
+
+    values.append(user_id)
+    sql = f"UPDATE users SET {', '.join(fields)} WHERE user_id = %s AND deleted_at IS NULL"
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, tuple(values))
+            affected = cursor.rowcount
+        conn.commit()
+
+        if affected == 0:
+            # 동일값 UPDATE 도 rowcount 0 이 될 수 있어 별도 SELECT 로 존재 여부 확인
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT user_id, nickname, bio FROM users WHERE user_id = %s AND deleted_at IS NULL",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+            if not row:
+                return {"success": False, "message": "존재하지 않는 user_id 입니다."}
+            return {"success": True, "user": row}
+
+        # 갱신 결과를 다시 읽어 응답에 포함 — 프론트가 그대로 user state 에 반영 가능
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT user_id, nickname, bio FROM users WHERE user_id = %s",
+                (user_id,)
+            )
+            row = cursor.fetchone()
+        return {"success": True, "user": row}
+    except pymysql.err.IntegrityError:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=409, detail="이미 사용 중인 닉네임입니다.")
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("🔴 오류:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+# ────────────────────────────────────────────────────────────────────
+# [추가 2026-05-20] 아이디 찾기 / 비밀번호 재설정 본인확인 (P0 #3)
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: P0 #3 (LoginPage 아이디·비번 찾기 Mock 하드코딩 제거)
+# 날짜: 2026-05-20
+# 기대 효과:
+#   - LoginPage 의 "홍길동 / test@test.com" 더미 매칭 제거 후 실제 DB 회원과 매칭
+#   - 비밀번호 재설정은 본 라우터에서 본인 확인만 수행하고, 실제 비번 교체는
+#     Express 가 bcrypt.hash 후 PATCH /user/password/{user_id} 로 위임 (기존 패턴 유지)
+# 장점:
+#   - 본인 확인 SQL 이 deleted_at IS NULL 조건으로 탈퇴 회원 차단
+#   - 응답에 user_id 만 노출 → 닉네임/이메일 같은 다른 PII 는 추가 노출하지 않음
+# ────────────────────────────────────────────────────────────────────
+@router.post("/find-login-id")
+def find_login_id(body: FindLoginIdBody):
+    """닉네임 + 이메일로 login_id 조회
+
+    Returns:
+        dict: {"success": True, "login_id": "..."} 또는 {"success": False}
+    """
+    nickname = (body.nickname or "").strip()
+    email = (body.email or "").strip()
+    if not nickname or not email:
+        return {"success": False, "message": "닉네임과 이메일을 입력하세요."}
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT login_id
+                FROM users
+                WHERE nickname = %s
+                  AND email = %s
+                  AND deleted_at IS NULL""",
+                (nickname, email)
+            )
+            row = cursor.fetchone()
+        if not row:
+            return {"success": False}
+        return {"success": True, "login_id": row["login_id"]}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("🔴 오류:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.post("/verify-for-password-reset")
+def verify_for_password_reset(body: VerifyForPasswordResetBody):
+    """닉네임 + 아이디 + 이메일 일치 여부 확인
+
+    Returns:
+        dict: {"success": True, "user_id": "..."} 또는 {"success": False}
+              user_id 는 Express 가 후속 PATCH /user/password/{user_id} 호출에만 사용한다.
+    """
+    nickname = (body.nickname or "").strip()
+    login_id = (body.login_id or "").strip()
+    email = (body.email or "").strip()
+    if not nickname or not login_id or not email:
+        return {"success": False, "message": "닉네임, 아이디, 이메일을 모두 입력하세요."}
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT user_id
+                FROM users
+                WHERE nickname = %s
+                  AND login_id = %s
+                  AND email = %s
+                  AND deleted_at IS NULL""",
+                (nickname, login_id, email)
+            )
+            row = cursor.fetchone()
+        if not row:
+            return {"success": False}
+        return {"success": True, "user_id": row["user_id"]}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("🔴 오류:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
 
 # ── 아이디 중복체크 ───────────────────────────────────────────────────────────
 

@@ -104,12 +104,30 @@ def get_comments(feed_id: str):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            # ────────────────────────────────────────────────────────────────────
+            # [수정 2026-05-20] 탈퇴 회원 댓글 누락 방지 — INNER JOIN → LEFT JOIN
+            # ────────────────────────────────────────────────────────────────────
+            # 오류 번호: P0 #1 (5/19 발견 / 5/20 종합 리뷰 재확인)
+            # 날짜: 2026-05-20
+            # 기대 효과:
+            #   - users.deleted_at 이 채워진 탈퇴 회원의 댓글이 응답에서 사라지지 않음
+            #   - 회원 탈퇴 엔드포인트가 추가돼도 기존 댓글 스레드 맥락이 유지됨
+            # 장점:
+            #   - LEFT JOIN + AND u.deleted_at IS NULL 조합으로 활성 회원 정보만 노출하되,
+            #     탈퇴 회원의 댓글 행 자체는 보존
+            #   - COALESCE 로 닉네임/프로필이 NULL 일 때 "(탈퇴한 회원)" 으로 안전한 기본값 표시
+            # ────────────────────────────────────────────────────────────────────
             cursor.execute(
-                """SELECT fc.*, u.nickname, u.profile_img
+                """SELECT
+                    fc.*,
+                    COALESCE(u.nickname, '(탈퇴한 회원)') AS nickname,
+                    u.profile_img
                 FROM feed_comments fc
-                JOIN users u ON fc.user_id = u.user_id    -- 작성자 닉네임/프로필 포함
+                LEFT JOIN users u
+                    ON fc.user_id = u.user_id
+                    AND u.deleted_at IS NULL                -- 활성 회원 정보만 노출, 탈퇴 회원 댓글 자체는 보존
                 WHERE fc.feed_id = %s
-                ORDER BY fc.created_at ASC""",             ## 오래된 댓글이 먼저
+                ORDER BY fc.created_at ASC""",              ## 오래된 댓글이 먼저
                 (feed_id,)
             )
             comments = cursor.fetchall()

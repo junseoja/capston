@@ -56,7 +56,17 @@ function MyPage() {
     // ── [추가] 인스타그램형 프로필 편집 상태 관리 ─────────────────────────────────────
     const [isProfileEdit, setIsProfileEdit] = useState(false);
     const [editNickname, setEditNickname] = useState("");
-    const [editBio, setEditBio] = useState("오늘도 나만의 루틴으로 채워가는 하루 ✨");
+    // ────────────────────────────────────────────────────────────────────
+    // [수정 2026-05-20] bio 초기값을 하드코딩에서 DB user.bio 기반으로 전환 (P0 #2)
+    // 오류 번호: P0 #2 (프로필 수정 백엔드 미연결로 새로고침 시 휘발)
+    // 날짜: 2026-05-20
+    // 기대 효과: 저장된 자기소개가 새로고침 후에도 동일하게 노출됨
+    // 장점: useEffect 로 user 로딩 완료 시 동기화 → 첫 렌더는 빈 값, 로딩 후 실제 값으로 채워짐
+    // ────────────────────────────────────────────────────────────────────
+    const DEFAULT_BIO = "오늘도 나만의 루틴으로 채워가는 하루 ✨";
+    const [editBio, setEditBio] = useState(DEFAULT_BIO);
+    // 저장 진행 중 플래그 — 중복 저장 클릭 방지
+    const [savingProfile, setSavingProfile] = useState(false);
     const [previewAvatar, setPreviewAvatar] = useState(null); // 프리뷰 아바타 이미지 주소
     const fileInputRef = useRef(null); // 파일 탐색기 트리거용 Ref
 
@@ -80,6 +90,17 @@ function MyPage() {
                 setGalleryItems(data.gallery || []);
                 if (data.user?.nickname) {
                     setEditNickname(data.user.nickname);
+                }
+                // ────────────────────────────────────────────────────────
+                // [추가 2026-05-20] bio 도 DB 값으로 동기화 (P0 #2)
+                // 이유: 새로고침 시 저장된 자기소개가 다시 보이도록 user.bio 사용
+                // 기대 효과: 미설정 회원은 기본 안내 문구, 설정 회원은 본인 작성 텍스트 노출
+                // 장점: 빈 문자열("자기소개 삭제") 케이스와 미입력(null) 케이스를 구분 처리
+                // ────────────────────────────────────────────────────────
+                if (data.user?.bio !== undefined && data.user?.bio !== null) {
+                    setEditBio(data.user.bio);
+                } else {
+                    setEditBio(DEFAULT_BIO);
                 }
             }
         } catch (error) {
@@ -176,19 +197,88 @@ function MyPage() {
         }
     };
 
-    const handleSaveProfile = () => {
-        if (!editNickname.trim()) {
+    // ────────────────────────────────────────────────────────────────────
+    // [수정 2026-05-20] 프로필 저장을 실제 백엔드 PATCH /me/profile 로 연결 (P0 #2)
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: P0 #2 (handleSaveProfile 이 setUser 만 호출 → 새로고침 시 휘발)
+    // 날짜: 2026-05-20
+    // 기대 효과:
+    //   - 닉네임/자기소개 변경이 DB 에 저장되어 새로고침 후에도 유지
+    //   - 닉네임 중복 시 서버가 내려준 "이미 사용 중인 닉네임입니다." 메시지 노출
+    // 장점:
+    //   - 변경된 필드만 payload 에 담아 호출 → 불필요한 UPDATE 차단
+    //   - savingProfile 가드로 더블 클릭 시 중복 호출 방지
+    //   - 응답의 user.nickname/bio 로 setUser 동기화 → UI 와 DB 가 한 번에 일치
+    // ────────────────────────────────────────────────────────────────────
+    const handleSaveProfile = async () => {
+        const trimmedNickname = editNickname.trim();
+        if (!trimmedNickname) {
             alert("이름(닉네임)을 입력해주세요.");
             return;
         }
-        setUser((prev) => ({ ...prev, nickname: editNickname }));
-        setIsProfileEdit(false);
-        alert("프로필 정보 변경이 성공적으로 저장되었습니다.");
+        if (trimmedNickname.length > 10) {
+            alert("닉네임은 10자 이내로 입력해주세요.");
+            return;
+        }
+        if (editBio.length > 300) {
+            alert("자기소개는 300자 이내로 입력해주세요.");
+            return;
+        }
+
+        const payload = {};
+        if (trimmedNickname !== (user?.nickname ?? "")) {
+            payload.nickname = trimmedNickname;
+        }
+        if (editBio !== (user?.bio ?? DEFAULT_BIO)) {
+            // user.bio 가 null 인 미설정 회원이 DEFAULT_BIO 그대로 두면 굳이 저장하지 않는다.
+            // 사용자가 명시적으로 다른 값으로 바꿨거나 비웠을 때만 백엔드 호출.
+            payload.bio = editBio;
+        }
+
+        if (Object.keys(payload).length === 0) {
+            setIsProfileEdit(false);
+            return;
+        }
+
+        if (savingProfile) return;
+        setSavingProfile(true);
+        try {
+            const res = await fetch(`${EXPRESS_URL}/me/profile`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                alert(data.message || "프로필 저장에 실패했습니다.");
+                return;
+            }
+
+            setUser((prev) => ({
+                ...prev,
+                ...(data.user?.nickname !== undefined ? { nickname: data.user.nickname } : {}),
+                ...(data.user?.bio !== undefined ? { bio: data.user.bio } : {}),
+            }));
+            if (data.user?.nickname) setEditNickname(data.user.nickname);
+            if (data.user?.bio !== undefined && data.user?.bio !== null) {
+                setEditBio(data.user.bio);
+            }
+            setIsProfileEdit(false);
+            alert("프로필 정보 변경이 성공적으로 저장되었습니다.");
+        } catch (error) {
+            console.error("프로필 저장 실패:", error);
+            alert("서버 오류가 발생했습니다.");
+        } finally {
+            setSavingProfile(false);
+        }
     };
 
     const handleCancelProfile = () => {
         setIsProfileEdit(false);
         setEditNickname(user.nickname);
+        // 저장된 bio 가 있으면 그 값으로, 없으면 기본 안내 문구로 되돌린다.
+        setEditBio(user?.bio ?? DEFAULT_BIO);
         setPreviewAvatar(null); // 프리뷰 데이터 리셋
     };
 
@@ -310,7 +400,7 @@ function MyPage() {
                                 placeholder="소개글을 입력하세요"
                             />
                             <div style={{ display: "flex", gap: "6px", marginTop: "2px" }}>
-                                <button onClick={handleSaveProfile} style={{ border: "none", background: "#4f46e5", color: "white", padding: "4px 12px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}>저장</button>
+                                <button onClick={handleSaveProfile} disabled={savingProfile} style={{ border: "none", background: savingProfile ? "#a5b4fc" : "#4f46e5", color: "white", padding: "4px 12px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold", cursor: savingProfile ? "not-allowed" : "pointer" }}>{savingProfile ? "저장 중…" : "저장"}</button>
                                 <button onClick={handleCancelProfile} style={{ border: "1px solid #dbdbdb", background: "#fff", color: "#4b5563", padding: "4px 12px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}>취소</button>
                             </div>
                         </div>

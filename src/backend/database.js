@@ -159,6 +159,52 @@ async function updateUserPassword(user_id, hashed_password) {
     });
 }
 
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] 프로필 수정 helper (P0 #2)
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: P0 #2 (MyPage handleSaveProfile 백엔드 미연결)
+// 날짜: 2026-05-20
+// 기대 효과:
+//   - Express PATCH /me/profile 가 FastAPI PATCH /user/profile/{user_id} 로 정확히 중계
+// 장점:
+//   - 다른 user 도메인 helper 와 동일한 fetchJson 패턴 → 에러 표준화/내부 인증 헤더 자동 부착
+//   - profile 필드(nickname/bio) 추가 시 본 helper 만 수정하면 됨
+// ────────────────────────────────────────────────────────────────────
+async function updateUserProfile(user_id, profile) {
+    return await fetchJson(`${PYTHON_API}/user/profile/${encodeURIComponent(user_id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+    });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] 아이디 찾기 / 비번 재설정 본인 확인 helper (P0 #3)
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: P0 #3 (LoginPage Mock 하드코딩)
+// 날짜: 2026-05-20
+// 기대 효과:
+//   - Express /find-id / /find-password 가 FastAPI 본인 확인 엔드포인트로 정확히 중계
+// 장점:
+//   - 다른 user helper 와 동일한 fetchJson 패턴 (내부 인증 헤더 자동 부착)
+//   - login_id 만 노출하거나 user_id 만 노출하는 최소 PII 응답
+// ────────────────────────────────────────────────────────────────────
+async function findLoginIdByProfile(nickname, email) {
+    return await fetchJson(`${PYTHON_API}/user/find-login-id`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname, email }),
+    });
+}
+
+async function verifyForPasswordReset(nickname, login_id, email) {
+    return await fetchJson(`${PYTHON_API}/user/verify-for-password-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname, login_id, email }),
+    });
+}
+
 // ─── 세션 관련 함수 ────────────────────────────────────────────────────────
 
 /**
@@ -596,6 +642,9 @@ module.exports = {
     findUser,
     createUser,
     updateUserPassword,
+    updateUserProfile,
+    findLoginIdByProfile,
+    verifyForPasswordReset,
     createSession,
     findSession,
     deleteSession,

@@ -49,8 +49,16 @@ def _calculate_current_streak(completion_dates, today):
 
 
 def _load_user(cursor, user_id: str):
+    # ────────────────────────────────────────────────────────────────────
+    # [수정 2026-05-20] bio 컬럼 노출 (P0 #2)
+    # 오류 번호: P0 #2 (프로필 수정 백엔드)
+    # 날짜: 2026-05-20
+    # 기대 효과: GET /mypage 응답의 user 객체에 bio 가 포함되어
+    #            MyPage 가 새로고침 후에도 저장된 자기소개를 그대로 노출
+    # 장점: 단일 통합 API 호출로 nickname/bio/summary/gallery 모두 받아옴
+    # ────────────────────────────────────────────────────────────────────
     cursor.execute(
-        """SELECT user_id, login_id, nickname, email, gender, birth_date, profile_img
+        """SELECT user_id, login_id, nickname, email, gender, birth_date, profile_img, bio
         FROM users
         WHERE user_id = %s
           AND deleted_at IS NULL""",

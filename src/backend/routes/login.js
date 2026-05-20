@@ -20,9 +20,13 @@ const {
     findUser,
     createUser,
     updateUserPassword,
+    updateUserProfile,
+    findLoginIdByProfile,
+    verifyForPasswordReset,
     createSession,
     deleteSession,
 } = require("../database");
+const crypto = require("crypto"); // [추가 2026-05-20] 임시 비밀번호 안전 난수 생성
 const { v4: uuidv4 } = require("uuid"); // 세션 ID 생성용 UUID v4
 const requireAuth = require("../middleware/requireAuth");
 
@@ -257,8 +261,78 @@ router.get("/me", requireAuth, async (req, res, next) => {
                 gender: user.gender,
                 birth_date: user.birth_date,
                 profile_img: user.profile_img,
+                // ─────────────────────────────────────────────────────────────
+                // [추가 2026-05-20] 자기소개 노출 (P0 #2)
+                // 이유: MyPage 인스타 스타일 편집 UI 초기값을 DB 값으로 채우기 위해 필요
+                // 기대 효과: 새로고침 후에도 저장된 bio 가 동일하게 노출
+                // 장점: 단일 GET /me 호출로 nickname/bio 모두 받아 추가 fetch 불필요
+                // ─────────────────────────────────────────────────────────────
+                bio: user.bio ?? null,
             },
         });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] 프로필 수정 (PATCH /me/profile) — P0 #2
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: P0 #2 (MyPage handleSaveProfile 백엔드 미연결로 새로고침 시 휘발)
+// 날짜: 2026-05-20
+// 기대 효과:
+//   - 인스타 스타일 프로필 편집 UI 가 누른 저장이 실제 DB 에 반영됨
+//   - GET /me 응답의 nickname/bio 가 즉시 갱신값으로 응답
+// 장점:
+//   - requireAuth 미들웨어로 본인만 자기 프로필 수정 가능 (req.user.user_id 사용)
+//   - 클라이언트가 보낸 user_id 는 무시 → IDOR 공격 차단
+//   - 닉네임 trim + 길이 검증을 Express 단에서 차단 → FastAPI/DB 까지 가지 않음
+// ────────────────────────────────────────────────────────────────────
+router.patch("/me/profile", requireAuth, async (req, res, next) => {
+    try {
+        const { nickname, bio } = req.body || {};
+
+        const payload = {};
+
+        if (nickname !== undefined) {
+            if (typeof nickname !== "string") {
+                return res.status(400).json({ success: false, message: "닉네임 형식이 올바르지 않습니다." });
+            }
+            const trimmed = nickname.trim();
+            if (!trimmed) {
+                return res.status(400).json({ success: false, message: "닉네임을 입력하세요." });
+            }
+            if (trimmed.length > 10) {
+                return res.status(400).json({ success: false, message: "닉네임은 10자 이내로 입력하세요." });
+            }
+            payload.nickname = trimmed;
+        }
+
+        if (bio !== undefined) {
+            if (typeof bio !== "string") {
+                return res.status(400).json({ success: false, message: "자기소개 형식이 올바르지 않습니다." });
+            }
+            if (bio.length > 300) {
+                return res.status(400).json({ success: false, message: "자기소개는 300자 이내로 입력하세요." });
+            }
+            // 빈 문자열은 "자기소개 삭제" 의미로 그대로 전달
+            payload.bio = bio;
+        }
+
+        if (Object.keys(payload).length === 0) {
+            return res.status(400).json({ success: false, message: "변경할 항목이 없습니다." });
+        }
+
+        const result = await updateUserProfile(req.user.user_id, payload);
+
+        if (!result?.success) {
+            return res.status(400).json({
+                success: false,
+                message: result?.message || "프로필 수정에 실패했습니다.",
+            });
+        }
+
+        return res.json({ success: true, user: result.user });
     } catch (error) {
         return next(error);
     }
@@ -279,6 +353,131 @@ router.post("/logout", async (req, res, next) => {
 
         res.clearCookie("sessionId", SESSION_COOKIE_OPTIONS);
         return res.json({ success: true, message: "로그아웃 완료" });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] 아이디 찾기 / 비밀번호 재설정 (P0 #3)
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: P0 #3 (LoginPage 아이디·비번 찾기 Mock 하드코딩 제거)
+// 날짜: 2026-05-20
+// 기대 효과:
+//   - "홍길동" / "test@test.com" 하드코딩 매칭 제거 → 실제 회원 정보로 본인 확인
+//   - 비밀번호 재설정 성공 시 임시 비밀번호를 alert 로 즉시 안내 (이메일 인프라 부재 대안)
+// 장점:
+//   - 아이디 찾기: 닉네임+이메일 매칭, 응답에는 login_id 외 PII 노출 없음
+//   - 비밀번호 재설정: 본인 확인 후 임시 비번을 정책(8-16자 영문/숫자/특수문자) 만족하게 생성,
+//     bcrypt 해시로 DB 저장 → 다음 로그인부터 바로 사용 가능
+//   - crypto.randomInt 사용으로 예측 불가능한 난수 보장
+//   - 실제 이메일/SMS 발송 인프라가 추가되면 응답에서 temp_password 제거 + 발송 로직만 추가하면 됨
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * 비밀번호 정책(8-16자, 영문/숫자/특수문자 각 1개 이상)을 만족하는 12자 임시 비밀번호 생성.
+ * - 영문 대/소문자 8자 + 숫자 2자 + 특수문자 2자
+ * - 순서를 섞어 패턴 추측 차단
+ */
+function generateTempPassword() {
+    const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz"; // 0,O,I,l 등 혼동 글자 제외
+    const digits = "23456789";
+    const specials = "!@#$%^&*";
+
+    const pickFrom = (charset, count) => {
+        let out = "";
+        for (let i = 0; i < count; i++) {
+            out += charset[crypto.randomInt(0, charset.length)];
+        }
+        return out;
+    };
+
+    const raw =
+        pickFrom(letters, 8) +
+        pickFrom(digits, 2) +
+        pickFrom(specials, 2);
+
+    // Fisher-Yates 셔플로 자릿수별 위치 무작위화
+    const arr = raw.split("");
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr.join("");
+}
+
+/**
+ * POST /find-id
+ * Body: { name, email }   ← 클라이언트 호환을 위해 "name" 도 닉네임으로 받음
+ *       또는 { nickname, email }
+ *
+ * 실제 인증은 DB 의 nickname 컬럼과 매칭한다. (현 스키마에 실명 컬럼 없음)
+ */
+router.post("/find-id", async (req, res, next) => {
+    try {
+        const { name, nickname, email } = req.body || {};
+        const candidateNickname = (nickname ?? name ?? "").trim();
+        const candidateEmail = (email ?? "").trim();
+
+        if (!candidateNickname || !candidateEmail) {
+            return res.status(400).json({ success: false, message: "닉네임과 이메일을 입력하세요." });
+        }
+        if (!EMAIL_REGEX.test(candidateEmail)) {
+            return res.status(400).json({ success: false, message: "올바른 이메일 형식이 아닙니다." });
+        }
+
+        const result = await findLoginIdByProfile(candidateNickname, candidateEmail);
+        if (!result?.success) {
+            return res.json({ success: false, message: "일치하는 회원 정보가 없습니다." });
+        }
+        return res.json({ success: true, login_id: result.login_id });
+    } catch (error) {
+        return next(error);
+    }
+});
+
+/**
+ * POST /find-password
+ * Body: { name | nickname, login_id (또는 id), email }
+ *
+ * 동작:
+ *   1) FastAPI 본인 확인 (닉네임 + 아이디 + 이메일 매칭)
+ *   2) 임시 비밀번호 생성 → bcrypt 해시
+ *   3) PATCH /user/password/{user_id} 호출로 DB 비밀번호 교체
+ *   4) 평문 임시 비번을 응답에 포함 (이메일 발송 인프라 도입 전 대안)
+ */
+router.post("/find-password", async (req, res, next) => {
+    try {
+        const { name, nickname, id, login_id, email } = req.body || {};
+        const candidateNickname = (nickname ?? name ?? "").trim();
+        const candidateLoginId = (login_id ?? id ?? "").trim();
+        const candidateEmail = (email ?? "").trim();
+
+        if (!candidateNickname || !candidateLoginId || !candidateEmail) {
+            return res.status(400).json({ success: false, message: "닉네임, 아이디, 이메일을 모두 입력하세요." });
+        }
+        if (!EMAIL_REGEX.test(candidateEmail)) {
+            return res.status(400).json({ success: false, message: "올바른 이메일 형식이 아닙니다." });
+        }
+
+        const verify = await verifyForPasswordReset(candidateNickname, candidateLoginId, candidateEmail);
+        if (!verify?.success) {
+            return res.json({ success: false, message: "일치하는 회원 정보가 없습니다." });
+        }
+
+        const tempPassword = generateTempPassword();
+        const hashed = await bcrypt.hash(tempPassword, 10);
+        const updated = await updateUserPassword(verify.user_id, hashed);
+        if (!updated?.success) {
+            return res.status(500).json({ success: false, message: "임시 비밀번호 저장에 실패했습니다." });
+        }
+
+        return res.json({
+            success: true,
+            // 이메일 발송 인프라 도입 전까지는 평문 임시 비번을 응답으로 안내한다.
+            // 인프라 도입 후엔 본 필드를 제거하고 메일 발송 트리거만 남기면 됨.
+            temp_password: tempPassword,
+        });
     } catch (error) {
         return next(error);
     }

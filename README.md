@@ -4058,6 +4058,161 @@ server:  { allowedHosts: true, host: true },               // dev 도 터널 통
 
 ---
 
+## 🔧 2026-05-20 작업 내역
+
+### 1. 이번 세션 개요
+
+팀원 브랜치 `frontend-cy` 의 최신 커밋 `7dd5535` ("첼린지 피드 백엔드 연결") 을 `dev` 로 통합. `frontend-cy` 가 5/14 시점 베이스에서 분기되어 5/15~5/19 dev 작업(관리자 백엔드, 비밀번호 정책, 로그인 UI, 마이페이지 프로필, #18 라우터 패치, 도커 환경) 12 커밋을 누락한 상태였기에, 단순 머지 대신 **신규 브랜치 `merge/challenge-backend` 에서 4 단계 cherry-pick** 방식으로 정리.
+
+| 결과물 | 내용 |
+|---|---|
+| 머지 커밋 수 | 4 commit + 1 merge commit |
+| 신규 파일 | 4 종 (`ChallengePage.jsx`, `routes/challenge.js`, `routers/challenge.py`, 마이그레이션 SQL) |
+| 통합 지점 변경 | Express `app.js` / `database.js`, FastAPI `app.py` / `routers/feed.py`, 프론트 `App.jsx` / `FeedPage.jsx` |
+| 적용 마이그레이션 | `challenge_proofs.share_to_feed` 컬럼 + 복합 인덱스 (RDS 적용 완료) |
+| 전체 5 도메인 CRUD 리뷰 | 루틴/피드/챌린지/공지/유저 — 신규 P0 3 건 도출 |
+
+---
+
+### 2. 머지 전략 — 왜 cherry-pick 인가
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `git merge frontend-cy` 직접 머지 |
+| 문제점 | `App.jsx` 가 5/15~5/19 dev 변경(notices/isAdmin/AdminPage 통합/로그인 UI/프로필 수정 UI)과 동시에 `frontend-cy` 의 챌린지 상태 관리(useState mock + uploadChallengeProofToFeed 헬퍼) 를 양쪽에서 건드림. 3-way 머지 시 import 중복·`fetchRoutines` 이중 선언·dev 전용 state 손실 5 종 위험 |
+| 수정 후 방식 | (1) 신규 파일 4 종만 먼저 이식 → (2) Express 통합 지점 → (3) FastAPI 통합 지점 → (4) 프론트 통합 지점 순으로 4 커밋 분리. 각 커밋마다 Node syntax / Python AST / Vite build / FastAPI import 검증 |
+| 기대 효과 | 회귀 발생 시 어느 커밋이 원인인지 즉시 특정 가능. dev 의 12 커밋 변경분 보존 (관리자 백엔드/#18 패치/프로필 UI 유실 차단) |
+| 문제점 | 머지 커밋 1 개 대비 4 단계 분할로 git log 가 약간 길어지나, 추적성 이득이 더 크다 |
+
+---
+
+### 3. 커밋별 변경 — 4 단 분석
+
+#### 3-1. `3dbff1e` 신규 파일 4 종 이식 (충돌 없음)
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | dev 에 챌린지 관련 코드 0 줄 |
+| 수정 후 방식 | `src/frontend/ChallengePage.jsx` (593 줄, props-less self-contained), `src/backend/routes/challenge.js` (191 줄, multer-s3 + requireAuth), `src/python_api/routers/challenge.py` (460 줄, 6 엔드포인트), `docs/migrations-2026-05-20-challenge-feed-share.sql` (share_to_feed 컬럼 + 인덱스) |
+| 기대 효과 | dev 의 기존 파일을 전혀 건드리지 않고 챌린지 도메인 정의만 도입. 한 커밋만으로 격리되어 롤백 용이 |
+| 문제점 | 이 시점에는 `app.js` / `app.py` / `database.js` 가 아직 챌린지 라우터를 모름 → 다음 커밋까지 동작 안 함 |
+
+#### 3-2. `283b2c4` Express 통합
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `app.js` 에 챌린지 라우터 mount 없음. `database.js` 에 챌린지 helper 0 개 |
+| 수정 후 방식 | `app.js` 에 `const challengeRouter = require("./routes/challenge")` + `app.use("/", challengeRouter)` 추가. `database.js` 에 `getChallenges` / `getMyChallenges` / `getChallengeProofs` / `joinChallenge` / `createChallengeProof` / `cancelTodayChallengeProof` 6 개 helper 추가 (모두 `fetchJson` 패턴) |
+| 기대 효과 | `/challenge/*` HTTP 요청이 라우터에 도달. `challenge.js` 가 `require("../database")` 로 destructure 한 6 함수가 실제로 export 되어 `TypeError: undefined is not a function` 차단 |
+| 문제점 | FastAPI 가 아직 챌린지 라우터를 등록하지 않은 상태라 호출 시 404 — 다음 커밋에서 해결 |
+
+#### 3-3. `3a2fafc` FastAPI 통합
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `app.py` 에 챌린지 라우터 include 없음. `feed.py` 가 routine 피드만 반환 |
+| 수정 후 방식 | `app.py` 에 `from routers import ... challenge` + `app.include_router(challenge.router)` 추가. `feed.py` 에 `_has_challenge_share_column()` 헬퍼 추가 → `share_to_feed=1` 챌린지 인증을 `routine_feeds` 와 합쳐 `created_at DESC` 정렬 후 limit 적용. `source_type` 메타 (`routine` / `challenge`) 부여 |
+| 기대 효과 | FastAPI 에 `/challenge/*` 6 경로 등록. 챌린지 인증이 사용자가 share_to_feed 체크 시 메인 피드에 자연스럽게 노출. 컬럼 미존재 시 헬퍼가 False 반환 → routine 피드만 보이는 안전 폴백 |
+| 문제점 | feed.py 의 routine + challenge 통합으로 limit 가 라이브러리 차원이 아닌 메모리 정렬 후 적용 — 대용량 시 비효율, 현 규모에선 무영향 |
+
+#### 3-4. `6164b5d` 프론트 통합
+
+| 구분 | 내용 |
+|---|---|
+| 기존 방식 | `App.jsx` 에 `challengeMockFeedPosts` useState + `uploadChallengeProofToFeed` 45 줄 헬퍼 + `<FeedPage extraMockPosts=... />` prop 전달 + `<ChallengePage onUploadChallengeFeed=... />` prop. `FeedPage.jsx` 가 `useMemo` 로 mock + 실제 피드 병합 |
+| 수정 후 방식 | App.jsx 에서 mock state / 헬퍼 / prop 전달 전부 제거. ChallengePage 는 self-contained 형태로 호출. FeedPage 에서 `useMemo` 제거하고 `mergedFeedPosts = feedPosts` 로 단순화. FeedPage 카드/모달 신고 dropdown 에 `!isChallengePost &&` 가드 추가 — 챌린지 게시물은 기존 신고 흐름과 충돌 가능성이 있어 신고 비활성 |
+| 기대 효과 | 챌린지 인증이 메인 피드에 실데이터 기반으로 나타남 (mock 제거 → SSOT). dev 에서 5/16 도입된 신고 흐름이 챌린지 게시물에 잘못 적용되는 사고 차단 |
+| 문제점 | 챌린지 게시물 신고 자체가 막혀 있어 향후 챌린지 인증도 신고 가능하게 하려면 `report.py` 가 challenge_proofs 도 받을 수 있도록 확장 필요 |
+
+---
+
+### 4. 마이그레이션 SQL
+
+`docs/migrations-2026-05-20-challenge-feed-share.sql` 적용 완료 (RDS 직접 실행).
+
+```sql
+ALTER TABLE challenge_proofs
+ADD COLUMN share_to_feed TINYINT(1) NOT NULL DEFAULT 0
+COMMENT '1 when the proof should also appear in the feed list'
+AFTER proof_date;
+
+CREATE INDEX idx_challenge_proofs_feed_visibility
+ON challenge_proofs (share_to_feed, deleted_at, created_at);
+```
+
+| 구분 | 내용 |
+|---|---|
+| 컬럼 | `share_to_feed TINYINT(1) NOT NULL DEFAULT 0` — 0=챌린지 페이지 전용, 1=메인 피드도 노출 |
+| 인덱스 | `(share_to_feed, deleted_at, created_at)` 복합 — feed.py 의 `WHERE share_to_feed=1 AND deleted_at IS NULL ORDER BY created_at DESC` 패턴 커버 |
+| 안전성 | 기존 행은 자동 0 (비공개). 미적용 환경에서도 `_has_challenge_share_column()` 폴백으로 500 없이 routine 피드만 노출 |
+
+---
+
+### 5. 통합 후 5 도메인 CRUD 종합 리뷰
+
+머지 직후 React → Express → FastAPI → DB 4 계층 풀스택을 도메인 5 종(루틴/피드/챌린지/공지/유저) 모두 재점검.
+
+#### 5-1. 정상 동작 확인
+
+| 도메인 | 정상 기능 |
+|---|---|
+| 루틴 | 추가 / 조회 / Soft Delete 삭제 (`requireAuth` + 본인 소유 검증) |
+| 피드 | 추가(S3 트랜잭션) / 본인 Hard Delete / 관리자 Soft Delete / 좋아요 / 댓글 작성·삭제 |
+| 챌린지 | 목록·내챌린지·인증기록 조회 / 참여(UNIQUE) / 인증 등록(하루 1회 DB+앱 이중 검증) / 인증 취소 / share_to_feed 노출 |
+| 공지/신고 | 공지 4 종 CRUD (관리자 `requireAdmin`) / 신고 접수 / 신고 처리 단일 트랜잭션 제재 |
+| 유저 | 가입(bcrypt) / 로그인(httpOnly 세션) / 로그아웃 / 마이페이지 조회 |
+
+#### 5-2. 신규 P0 발견 — 3 건
+
+| # | 항목 | 위치 | 영향 |
+|---|---|---|---|
+| 1 | 댓글 조회 INNER JOIN | `comment.py:108` | 회원 탈퇴 도입 시 탈퇴 회원 댓글 통째 누락 (5/19 P0 #2 재확인) |
+| 2 | 프로필 수정이 클라이언트 state 만 변경 | `MyPage.jsx:179~186` (`handleSaveProfile`) | 5/19 머지된 인스타 스타일 UI 가 새로고침 시 초기화. 백엔드 PATCH 엔드포인트 미존재 |
+| 3 | 아이디/비번 찾기 Mock 하드코딩 | `LoginPage.jsx:103~140` | "홍길동"/"test@test.com" 고정 (5/19 P1 #6 재확인) |
+
+#### 5-3. 신규 P1~P2 발견
+
+| # | 항목 | 위치 | 비고 |
+|---|---|---|---|
+| 4 | 챌린지 생성/수정/삭제 UI 부재 | `AdminPage.jsx` | DB·FK 준비됨 (`challenges.created_by`) — 관리자 페이지에서 추가 필요 |
+| 5 | 루틴 수정 엔드포인트 부재 | FastAPI/Express | 사용자는 삭제 후 재등록 워크어라운드 |
+| 6 | 피드 수정 엔드포인트 부재 | FastAPI/Express | 사용자는 삭제 후 재등록 워크어라운드 |
+| 7 | 회원 탈퇴 엔드포인트 부재 | FastAPI/Express | `users.deleted_at` 컬럼 준비됨 (5/19 P1 #7 재확인) |
+| 8 | 관리자 판정 `login_id === "admin"` 하드코딩 | `middleware/requireAdmin.js:22` | 다중 관리자 확장 불가 — `users.role` ENUM 컬럼 도입 권장 |
+| 9 | `users.login_id` UNIQUE + Soft Delete 충돌 | 스키마 정책 | 탈퇴 후 재가입 불가 — 정책 결정 필요 |
+
+---
+
+### 6. 변경 파일 목록 (10 개)
+
+| 파일 | 변경 | 비고 |
+|---|---|---|
+| `src/frontend/ChallengePage.jsx` | 신규 593 줄 | self-contained 페이지 |
+| `src/frontend/App.jsx` | mock 제거 / prop 전달 제거 / 챌린지 useState 제거 | -103 줄 |
+| `src/frontend/FeedPage.jsx` | useMemo 제거 / 챌린지 게시물 신고 가드 | +67 줄 |
+| `src/backend/routes/challenge.js` | 신규 191 줄 | multer-s3 + requireAuth |
+| `src/backend/app.js` | challenge 라우터 mount | +30 줄 (주석 포함) |
+| `src/backend/database.js` | 챌린지 helper 6 개 | +71 줄 |
+| `src/python_api/routers/challenge.py` | 신규 460 줄 | 6 엔드포인트 |
+| `src/python_api/routers/feed.py` | `_has_challenge_share_column` + routine/challenge 통합 정렬 | +128 줄 |
+| `src/python_api/app.py` | challenge 라우터 include | +25 줄 (주석 포함) |
+| `docs/migrations-2026-05-20-challenge-feed-share.sql` | 신규 7 줄 | RDS 적용 완료 |
+
+---
+
+### 7. 권장 후속 작업
+
+| 순서 | 항목 | 이유 |
+|---|---|---|
+| 1 | P0 #1 `comment.py` LEFT JOIN | 단일 쿼리 수정, 회원 탈퇴 도입 전 필수 |
+| 2 | P0 #2 프로필 수정 백엔드 | 5/19 머지된 UI 가 사실상 동작 안 함 — 사용자 체감 가장 큰 버그 |
+| 3 | P0 #3 아이디/비번 찾기 | Mock 제거 또는 UI 임시 비활성화 |
+| 4 | P1 #7 회원 탈퇴 엔드포인트 + #9 login_id 재사용 정책 결정 | comment LEFT JOIN 선행 필요 |
+| 5 | P1 #4 챌린지 관리자 CRUD | 현재 DB 에 챌린지 1 건도 없으면 사용자가 참여할 챌린지가 없음 |
+| 6 | P2 #5 / #6 루틴/피드 수정 | 사용자 편의성 |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료
