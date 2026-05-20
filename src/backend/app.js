@@ -68,6 +68,20 @@ const noticeRouter = require("./routes/notice");
 // 신고 라우터: POST/GET /report, PATCH /report/process, GET /report/:id
 const reportRouter = require("./routes/report");
 
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] frontend-cy(7dd5535) 챌린지 백엔드 이식
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
+// 날짜: 2026-05-20
+// 기대효과:
+//   - /challenge, /challenge/my, /challenge/proofs 등 6개 엔드포인트 노출
+//   - ChallengePage 가 mock 이 아닌 실제 백엔드 호출로 동작
+// 장점:
+//   - 다른 라우터들과 동일한 require → app.use 패턴 유지 → 일관성
+//   - 라우터 한 줄 추가로 챌린지 도메인 전체 활성화 (확장 비용 최소)
+// ────────────────────────────────────────────────────────────────────
+const challengeRouter = require("./routes/challenge");
+
 const app = express();
 
 // ── 미들웨어 등록 ────────────────────────────────────────────────────────────
@@ -155,6 +169,22 @@ app.use("/", statsRouter);
 // 공지/신고 관리 라우트는 각 라우터 내부에서 requireAuth와 requireAdmin으로 보호한다.
 app.use("/", noticeRouter);
 app.use("/", reportRouter);
+
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] 챌린지 라우터 마운트
+// ────────────────────────────────────────────────────────────────────
+// 기대효과:
+//   - GET    /challenge                          : 전체 챌린지 목록
+//   - GET    /challenge/my                       : 내가 참여한 챌린지
+//   - GET    /challenge/proofs                   : 내 인증 기록
+//   - POST   /challenge/:id/join                 : 챌린지 참여
+//   - POST   /challenge/:id/proof                : 인증 등록 (S3 업로드 N건)
+//   - DELETE /challenge/:id/proof/today          : 오늘 인증 취소 (S3 객체 정리)
+// 장점:
+//   - challenge.js 내부에서 requireAuth 적용 → 다른 보호 라우트와 동일 가드
+//   - prefix "/" 패턴 유지 → 클라이언트 호출 URL이 ChallengePage 코드와 일치
+// ────────────────────────────────────────────────────────────────────
+app.use("/", challengeRouter);
 
 // ── 글로벌 에러 핸들러 ───────────────────────────────────────────────────────
 // 모든 라우터의 미처리 오류를 JSON 응답으로 통일한다.

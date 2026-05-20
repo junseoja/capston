@@ -523,6 +523,70 @@ async function processReport(processData) {
     });
 }
 
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] 챌린지 관련 함수 (frontend-cy 7dd5535 이식)
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
+// 날짜: 2026-05-20
+// 기대효과:
+//   - Express challenge.js 라우터가 FastAPI /challenge/* 호출 시 단일 진입점 사용
+//   - 다른 도메인(feed/like/comment)과 동일한 fetchJson 에러 표준화 적용
+// 장점:
+//   - 라우터는 try/catch 만 부착하면 FastApiError 일관 처리 가능
+//   - URL 인코딩(encodeURIComponent) 을 한 곳에서 보장 → 라우터별 누락 위험 제거
+// ────────────────────────────────────────────────────────────────────
+
+/** 전체 챌린지 목록 조회 (FastAPI GET /challenge/) */
+async function getChallenges() {
+    return await fetchJson(`${PYTHON_API}/challenge/`);
+}
+
+/** 내가 참여한 챌린지 목록 (FastAPI GET /challenge/my/{user_id}) */
+async function getMyChallenges(user_id) {
+    return await fetchJson(
+        `${PYTHON_API}/challenge/my/${encodeURIComponent(user_id)}`,
+    );
+}
+
+/** 내 챌린지 인증 기록 조회 (FastAPI GET /challenge/proofs/{user_id}) */
+async function getChallengeProofs(user_id) {
+    return await fetchJson(
+        `${PYTHON_API}/challenge/proofs/${encodeURIComponent(user_id)}`,
+    );
+}
+
+/** 챌린지 참여 (FastAPI POST /challenge/{challenge_id}/join) */
+async function joinChallenge(challenge_id, user_id) {
+    return await fetchJson(
+        `${PYTHON_API}/challenge/${encodeURIComponent(challenge_id)}/join`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id }),
+        },
+    );
+}
+
+/** 챌린지 인증 등록 (FastAPI POST /challenge/{challenge_id}/proof) */
+async function createChallengeProof(challenge_id, payload) {
+    return await fetchJson(
+        `${PYTHON_API}/challenge/${encodeURIComponent(challenge_id)}/proof`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        },
+    );
+}
+
+/** 오늘 챌린지 인증 취소 (FastAPI DELETE /challenge/{challenge_id}/proof/today?user_id=...) */
+async function cancelTodayChallengeProof(challenge_id, user_id) {
+    return await fetchJson(
+        `${PYTHON_API}/challenge/${encodeURIComponent(challenge_id)}/proof/today?user_id=${encodeURIComponent(user_id)}`,
+        { method: "DELETE" },
+    );
+}
+
 // ── 모듈 내보내기 ────────────────────────────────────────────────────────────
 module.exports = {
     // 헬퍼 / 커스텀 에러 — 라우터에서 `error instanceof FastApiError` 로 구분 가능
@@ -566,4 +630,11 @@ module.exports = {
     listReports,
     getReport,
     processReport,
+    // [추가 2026-05-20] 챌린지 함수 6종 (frontend-cy 7dd5535 이식)
+    getChallenges,
+    getMyChallenges,
+    getChallengeProofs,
+    joinChallenge,
+    createChallengeProof,
+    cancelTodayChallengeProof,
 };
