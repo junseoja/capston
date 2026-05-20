@@ -77,15 +77,18 @@ function App() {
     // 라우트 리다이렉트를 바로 수행하지 않기 위한 플래그
     const [authChecked, setAuthChecked] = useState(false);
 
-    // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
-    // 출처: origin/frontend-cy commit a5075ce "feat: 챌린지 피드 기능 수정"
-    // 사유: 챌린지 인증을 프론트 mock 피드에 합쳐 보여주기 위한 상태.
-    //      챌린지 인증 시 "피드에 업로드" 체크 → uploadChallengeProofToFeed 가 이 배열에 추가 →
-    //      FeedPage 가 extraMockPosts 로 받아 자체 백엔드 피드와 합쳐 표시.
-    // 기대효과: 챌린지 인증 흐름의 피드 노출이 즉시 가능 (백엔드 챌린지 피드 API 미구현 상태에서 데모용).
-    // 장점: 백엔드 챌린지 피드 API 가 추가되면 이 상태 + 핸들러만 제거하면 됨 (격리됨).
-    // TODO: 추후 챌린지 피드 백엔드 API 연동 시 제거 가능
-    const [challengeMockFeedPosts, setChallengeMockFeedPosts] = useState([]);
+    // ────────────────────────────────────────────────────────────────────
+    // [제거 2026-05-20] frontend-cy(7dd5535) 챌린지 백엔드 통합으로 mock 상태 폐기
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
+    // 날짜: 2026-05-20
+    // 기대효과:
+    //   - 챌린지 인증은 FastAPI feed.py GET /feed/ 가 challenge_proofs 와 합쳐 반환
+    //   - 프론트 mock 상태(challengeMockFeedPosts) 와 업로드 콜백 더 이상 불필요
+    // 장점:
+    //   - 단일 진실 공급원(SSOT) 완성 — 새로고침/다중 기기에서도 동일 데이터
+    //   - App.jsx 상태 표면 축소 → 유지보수 부담 감소
+    // ────────────────────────────────────────────────────────────────────
 
     // ── [추가 2026-05-12 / frontend 머지 7/7] 관리자/신고/제재 알림 상태 ──
     // 출처: origin/frontend src/App.jsx (commits f387027, 56bc7cc, 8c9c6a2)
@@ -697,54 +700,18 @@ function App() {
         return true;
     };
 
-    // ── [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] 챌린지 인증 → 피드 업로드 (mock) ──
-    /**
-     * uploadChallengeProofToFeed - 챌린지 인증을 프론트 mock 피드 목록에 추가.
-     * 출처: origin/frontend-cy commit a5075ce
-     * 사유: ChallengePage 에서 "피드에 업로드" 체크 시 호출되어 챌린지 인증을 mock 피드로 노출.
-     * 기대효과: 백엔드 챌린지 피드 API 미구현 상태에서도 데모/시연 가능.
-     * 장점:
-     * - 파일이 없으면 미리 차단 (alert) → 빈 피드 생성 방지.
-     * - 게시물에 source_type: "challenge" + challenge_id/title/category 메타 첨부 →
-     * FeedPage 가 챌린지 배지 표시 및 좋아요/댓글 비활성 처리 가능.
-     * - mockPost.feed_id 를 `challenge-feed-${Date.now()}` 로 두어 진짜 피드와 충돌 없음.
-     * TODO: 추후 백엔드 챌린지 피드 API 추가 시 fetch 호출로 교체.
-     */
-    const uploadChallengeProofToFeed = async ({
-        challenge,
-        content,
-        files,
-        createdAt,
-    }) => {
-        if (!files || files.length === 0) {
-            alert("피드에 업로드하려면 사진 또는 영상을 1개 이상 추가해주세요.");
-            return false;
-        }
-        const mockFeedId = `challenge-feed-${Date.now()}`;
-        const mockPost = {
-            feed_id: mockFeedId,
-            nickname: currentUser?.nickname ?? "나",
-            routine_title: `[챌린지] ${challenge.title}`,
-            category: challenge.category,
-            content,
-            liked: false,
-            like_count: 0,
-            comment_count: 0,
-            comments: [],
-            created_at: createdAt,
-            images: files.map((file, index) => ({
-                image_id: `${mockFeedId}-${index}`,
-                file_url: file.previewUrl,
-                file_type: file.type,
-            })),
-            source_type: "challenge",
-            challenge_id: challenge.id,
-            challenge_title: challenge.title,
-            challenge_category: challenge.category,
-        };
-        setChallengeMockFeedPosts((prev) => [mockPost, ...prev]);
-        return true;
-    };
+    // ────────────────────────────────────────────────────────────────────
+    // [제거 2026-05-20] uploadChallengeProofToFeed mock 핸들러 폐기
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
+    // 날짜: 2026-05-20
+    // 기대효과:
+    //   - ChallengePage 가 자체적으로 POST /challenge/:id/proof 호출 (백엔드 처리)
+    //   - share_to_feed 컬럼이 1 이면 GET /feed/ 응답에 자동 포함되어 노출
+    // 장점:
+    //   - 화면 새로고침/다른 기기에서도 동일 데이터 보장
+    //   - mock 핸들러/상태/prop 3종 동시 제거로 변경 흐름 추적성 향상
+    // ────────────────────────────────────────────────────────────────────
 
     // ── 로그아웃 처리 ─────────────────────────────────────────────────────────
 
@@ -781,10 +748,7 @@ function App() {
         // 장점: deleteNotifications 는 의도적으로 보존(영구화) → 알림은 다음 접속 시에도 확인 가능.
         setIsAdmin(false);
         setNotices([]); // [수정 2026-05-16] 로그아웃 시 공지 캐시도 비움 (재로그인 시 재조회)
-        // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
-        // 사유: 로그아웃 시 챌린지 mock 피드도 함께 초기화 (다음 유저에게 이전 데이터 노출 방지).
-        // 장점: 동일 브라우저 다른 계정 로그인 시 깨끗한 챌린지 피드 상태로 시작.
-        setChallengeMockFeedPosts([]);
+        // [제거 2026-05-20] challengeMockFeedPosts 폐기 — 백엔드 통합으로 mock 상태 불필요
         // [추가 2026-05-13 / frontend 머지 Stage 2-7]
         // 사유: 로그아웃 시 공지 상세 선택 상태 초기화 (notices 자체는 localStorage 보존).
         // 장점: 다른 계정 로그인 시 이전 유저가 보던 공지 상세가 노출되지 않음.
@@ -907,10 +871,9 @@ function App() {
                                     // 사유: 2단계 FeedPage 의 신고 콜백 주입.
                                     // 기대효과: 🚩 신고 버튼 클릭 → reports 큐 누적 → AdminPage 노출.
                                     onReportPost={handleReportPost}
-                                    // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
-                                    // 사유: 챌린지 mock 피드 게시물 주입 → FeedPage 가 mergedFeedPosts 로 합쳐 표시.
-                                    // 기대효과: 챌린지 인증이 피드 화면에 즉시 노출 (백엔드 미구현 상태에서 데모용).
-                                    extraMockPosts={challengeMockFeedPosts}
+                                    // [제거 2026-05-20] extraMockPosts prop 폐기
+                                    // 기대효과: FeedPage 가 백엔드(GET /feed/) 응답만으로 challenge 통합 피드 노출
+                                    // 장점: 부모-자식 간 상태 동기화 부담 제거, props 표면 축소
                                 />
                                 : <Navigate to="/login" />
                         }
@@ -1000,12 +963,10 @@ function App() {
                         path="/challenge"
                         element={
                             isLoggedIn
-                                ? <ChallengePage
-                                    // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
-                                    // 사유: 챌린지 인증 "피드에 업로드" 핸들러 주입.
-                                    // 기대효과: ChallengePage 가 인증 완료 시 이 콜백을 호출해 mock 피드에 추가.
-                                    onUploadChallengeFeed={uploadChallengeProofToFeed}
-                                />
+                                // [제거 2026-05-20] onUploadChallengeFeed prop 폐기
+                                // 기대효과: ChallengePage 가 자체적으로 POST /challenge/:id/proof 호출
+                                // 장점: 콜백 의존 제거 → 챌린지 도메인이 App.jsx 와 완전 디커플
+                                ? <ChallengePage />
                                 : <Navigate to="/login" />
                         }
                     />

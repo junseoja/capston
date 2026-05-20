@@ -1,125 +1,136 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-/**
- * 나중에 백엔드 API와 연결할 때 이 서비스 객체만 교체하면 됩니다.
- *
- * 예상 API:
- * - GET /challenge
- * - GET /challenge/my
- * - POST /challenge/:challengeId/join
- * - GET /challenge/:challengeId
- * - POST /challenge/:challengeId/proof
- */
-const mockChallenges = [
-  {
-    id: 1,
-    title: "7일 미라클 모닝 챌린지",
-    description: "매일 아침 정해진 시간에 일어나 하루를 시작하는 챌린지입니다.",
-    category: "미라클 모닝",
-    startDate: "2026-05-10",
-    endDate: "2026-05-16",
-    participants: 42,
-    totalDays: 7,
-  },
-  {
-    id: 2,
-    title: "하루 30분 운동 챌린지",
-    description: "매일 30분 이상 운동하며 건강한 습관을 만드는 챌린지입니다.",
-    category: "운동",
-    startDate: "2026-05-10",
-    endDate: "2026-05-30",
-    participants: 108,
-    totalDays: 21,
-  },
-  {
-    id: 3,
-    title: "물 2L 마시기 챌린지",
-    description:
-      "매일 충분한 수분을 섭취하며 생활 습관을 개선하는 챌린지입니다.",
-    category: "건강",
-    startDate: "2026-05-12",
-    endDate: "2026-05-25",
-    participants: 67,
-    totalDays: 14,
-  },
-  {
-    id: 4,
-    title: "하루 1시간 집중 공부 챌린지",
-    description:
-      "매일 1시간 이상 집중해서 공부하는 습관을 만드는 챌린지입니다.",
-    category: "공부",
-    startDate: "2026-05-11",
-    endDate: "2026-05-24",
-    participants: 89,
-    totalDays: 14,
-  },
-];
+import { EXPRESS_URL } from "./config";
 
-const mockJoinedChallenges = [
-  {
-    id: 1,
-    totalDays: 7,
-  },
-];
+async function parseApiResponse(response, defaultMessage) {
+  const rawText = await response.text();
+  const trimmed = rawText.trim();
 
-// 챌린지 인증 내역 mock 데이터
-// 진행도는 이 인증 내역 개수를 기준으로 계산하도록 변경합니다.
-const mockChallengeProofs = [
-  {
-    id: 101,
-    challengeId: 1,
-    content: "오늘 아침 7시에 기상해서 스트레칭까지 완료했습니다.",
-    files: [],
-    createdAt: "2026-05-10T07:10:00",
-  },
-  {
-    id: 102,
-    challengeId: 1,
-    content: "둘째 날도 같은 시간에 일어나서 독서 20분을 했습니다.",
-    files: [],
-    createdAt: "2026-05-11T07:05:00",
-  },
-  {
-    id: 103,
-    challengeId: 1,
-    content: "오늘도 미라클 모닝 성공! 산책까지 마쳤습니다.",
-    files: [],
-    createdAt: "2026-05-12T07:02:00",
-  },
-];
+  let result = null;
+  if (trimmed) {
+    try {
+      result = JSON.parse(trimmed);
+    } catch {
+      if (
+        trimmed.startsWith("<!DOCTYPE") ||
+        trimmed.startsWith("<html") ||
+        trimmed.startsWith("<HTML")
+      ) {
+        throw new Error(
+          "챌린지 API가 JSON 대신 HTML을 반환했습니다. Express 서버 실행 상태와 VITE_EXPRESS_URL 설정을 확인해 주세요.",
+        );
+      }
+
+      throw new Error(defaultMessage);
+    }
+  }
+
+  if (!response.ok || !result?.success) {
+    throw new Error(result?.message || result?.detail || defaultMessage);
+  }
+
+  return result;
+}
 
 const challengeService = {
   async fetchChallenges() {
-    // TODO: 백엔드 연결 시 GET /challenge 호출
-    return mockChallenges;
+    const response = await fetch(`${EXPRESS_URL}/challenge`, {
+      credentials: "include",
+    });
+    const result = await parseApiResponse(
+      response,
+      "챌린지 목록을 불러오지 못했습니다.",
+    );
+    return result.challenges || [];
   },
 
   async fetchMyChallenges() {
-    // TODO: 백엔드 연결 시 GET /challenge/my 호출
-    return mockJoinedChallenges;
+    const response = await fetch(`${EXPRESS_URL}/challenge/my`, {
+      credentials: "include",
+    });
+    const result = await parseApiResponse(
+      response,
+      "참여 중인 챌린지를 불러오지 못했습니다.",
+    );
+    return result.challenges || [];
   },
 
   async fetchChallengeProofs() {
-    // TODO: 백엔드 연결 시 GET /challenge/:challengeId/proofs 호출 또는
-    // 사용자 참여 챌린지 인증 내역 API로 대체
-    return mockChallengeProofs;
+    const response = await fetch(`${EXPRESS_URL}/challenge/proofs`, {
+      credentials: "include",
+    });
+    const result = await parseApiResponse(
+      response,
+      "챌린지 인증 내역을 불러오지 못했습니다.",
+    );
+    return result.proofs || [];
   },
 
-  async joinChallenge(challenge) {
-    // TODO: 백엔드 연결 시 POST /challenge/:challengeId/join 호출
-    return {
-      id: challenge.id,
-      totalDays: challenge.totalDays,
-    };
+  async joinChallenge(challengeId) {
+    const response = await fetch(`${EXPRESS_URL}/challenge/${challengeId}/join`, {
+      method: "POST",
+      credentials: "include",
+    });
+    const result = await parseApiResponse(
+      response,
+      "챌린지 참여에 실패했습니다.",
+    );
+    return result.challenge;
   },
 
-  async submitChallengeProof(proofPayload) {
-    // TODO: 백엔드 연결 시 POST /challenge/:challengeId/proof 로 FormData 전송
-    return proofPayload;
+  async submitChallengeProof({
+    challengeId,
+    content,
+    proofDate,
+    files,
+    shareToFeed,
+  }) {
+    const formData = new FormData();
+
+    if (content) {
+      formData.append("content", content);
+    }
+    if (proofDate) {
+      formData.append("proof_date", proofDate);
+    }
+
+    formData.append("share_to_feed", shareToFeed ? "true" : "false");
+
+    for (const file of files) {
+      if (file.file) {
+        formData.append("files", file.file);
+      }
+    }
+
+    const response = await fetch(`${EXPRESS_URL}/challenge/${challengeId}/proof`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    const result = await parseApiResponse(
+      response,
+      "챌린지 인증 등록에 실패했습니다.",
+    );
+    return result.proof;
+  },
+
+  async cancelTodayChallengeProof(challengeId) {
+    const response = await fetch(
+      `${EXPRESS_URL}/challenge/${challengeId}/proof/today`,
+      {
+        method: "DELETE",
+        credentials: "include",
+      },
+    );
+    return parseApiResponse(
+      response,
+      "오늘 챌린지 인증 취소에 실패했습니다.",
+    );
   },
 };
 
 const formatChallengeDate = (dateString) => {
+  if (!dateString) return "-";
   const date = new Date(dateString);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -128,17 +139,25 @@ const formatChallengeDate = (dateString) => {
 };
 
 const formatChallengeDateTime = (dateString) => {
+  if (!dateString) return "-";
   const date = new Date(dateString);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
-
   return `${year}.${month}.${day} ${hours}:${minutes}`;
 };
 
-// 홈의 루틴 완료 판정처럼 "오늘" 기준을 로컬 날짜로 맞추기 위한 helper
+const formatChallengeCompletedTime = (dateString) => {
+  if (!dateString) return "-";
+  return new Date(dateString).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+};
+
 const getLocalDateString = (date = new Date()) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -146,60 +165,61 @@ const getLocalDateString = (date = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-// 완료 시간 표시용 helper (홈의 completedAt 느낌을 맞추기 위함)
-const formatChallengeCompletedTime = (dateString) => {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-};
-
 const calculateProgressRate = (completedDays, totalDays) => {
   if (!totalDays) return 0;
   return Math.round((completedDays / totalDays) * 100);
 };
 
-function ChallengePage({ onUploadChallengeFeed }) {
+function ChallengePage() {
   const [allChallenges, setAllChallenges] = useState([]);
   const [joinedChallenges, setJoinedChallenges] = useState([]);
+  const [challengeProofs, setChallengeProofs] = useState([]);
   const [selectedChallengeId, setSelectedChallengeId] = useState(null);
 
-  // 챌린지 인증 업로드용 상태
   const [selectedProofChallenge, setSelectedProofChallenge] = useState(null);
   const [challengeProofText, setChallengeProofText] = useState("");
   const [challengeProofFiles, setChallengeProofFiles] = useState([]);
-  const [challengeProofs, setChallengeProofs] = useState([]);
-  // 챌린지 인증을 피드에도 올릴지 여부
   const [challengeUploadToFeed, setChallengeUploadToFeed] = useState(false);
 
-  // draft 미리보기 URL 정리용 ref
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const challengeProofObjectUrlsRef = useRef([]);
 
-  useEffect(() => {
-    const initializeChallenges = async () => {
-      const [challengeList, myJoinedList, proofList] = await Promise.all([
-        challengeService.fetchChallenges(),
-        challengeService.fetchMyChallenges(),
-        challengeService.fetchChallengeProofs(),
-      ]);
+  const loadChallenges = useCallback(async (preferredChallengeId = null) => {
+    const [challengeList, myJoinedList, proofList] = await Promise.all([
+      challengeService.fetchChallenges(),
+      challengeService.fetchMyChallenges(),
+      challengeService.fetchChallengeProofs(),
+    ]);
 
-      setAllChallenges(challengeList);
-      setJoinedChallenges(myJoinedList);
-      setChallengeProofs(proofList);
-
-      const initialSelectedId =
-        myJoinedList[0]?.id ?? challengeList[0]?.id ?? null;
-
-      setSelectedChallengeId(initialSelectedId);
-    };
-
-    initializeChallenges();
+    setAllChallenges(challengeList);
+    setJoinedChallenges(myJoinedList);
+    setChallengeProofs(proofList);
+    setSelectedChallengeId((currentId) => {
+      if (preferredChallengeId) {
+        return preferredChallengeId;
+      }
+      return currentId ?? myJoinedList[0]?.id ?? challengeList[0]?.id ?? null;
+    });
   }, []);
 
   useEffect(() => {
-    // 컴포넌트가 사라질 때 생성한 preview URL 정리
+    const initializeChallenges = async () => {
+      try {
+        await loadChallenges();
+      } catch (error) {
+        console.error("챌린지 초기화에 실패했습니다:", error);
+        alert(error.message || "챌린지 정보를 불러오지 못했습니다.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initializeChallenges();
+  }, [loadChallenges]);
+
+  useEffect(() => {
     return () => {
       challengeProofObjectUrlsRef.current.forEach((url) => {
         URL.revokeObjectURL(url);
@@ -207,12 +227,9 @@ function ChallengePage({ onUploadChallengeFeed }) {
     };
   }, []);
 
-  const isJoinedChallenge = (challengeId) => {
-    return joinedChallenges.some((challenge) => challenge.id === challengeId);
-  };
+  const isJoinedChallenge = (challengeId) =>
+    joinedChallenges.some((challenge) => challenge.id === challengeId);
 
-  // 특정 챌린지의 "오늘 인증한 내역" 1개를 찾아 반환
-  // 나중에 백엔드 연결 시 proofDate를 내려주면 createdAt fallback 없이 그대로 비교하면 됩니다.
   const getTodayChallengeProof = (challengeId) => {
     const today = getLocalDateString();
 
@@ -220,47 +237,37 @@ function ChallengePage({ onUploadChallengeFeed }) {
       challengeProofs.find((proof) => {
         const proofDate =
           proof.proofDate || getLocalDateString(new Date(proof.createdAt));
-
         return proof.challengeId === challengeId && proofDate === today;
       }) || null
     );
-  };
-
-  // 오늘 이미 인증했는지 true/false로 판단
-  const hasTodayChallengeProof = (challengeId) => {
-    return Boolean(getTodayChallengeProof(challengeId));
   };
 
   const getCompletedDaysByProofs = (challengeId, totalDays) => {
     const proofCount = challengeProofs.filter(
       (proof) => proof.challengeId === challengeId,
     ).length;
-
-    // completedDays가 totalDays를 넘지 않도록 제한
     return Math.min(proofCount, totalDays);
   };
 
   const myChallengeCards = useMemo(() => {
     return joinedChallenges
-      .map((joinedItem) => {
+      .map((joinedChallenge) => {
         const challengeInfo = allChallenges.find(
-          (challenge) => challenge.id === joinedItem.id,
+          (challenge) => challenge.id === joinedChallenge.id,
         );
-
         if (!challengeInfo) return null;
 
-        const totalDays = joinedItem.totalDays ?? challengeInfo.totalDays;
+        const totalDays = joinedChallenge.totalDays ?? challengeInfo.totalDays;
         const completedDays = getCompletedDaysByProofs(
-          joinedItem.id,
+          joinedChallenge.id,
           totalDays,
         );
-        const progressRate = calculateProgressRate(completedDays, totalDays);
 
         return {
           ...challengeInfo,
           completedDays,
           totalDays,
-          progressRate,
+          progressRate: calculateProgressRate(completedDays, totalDays),
         };
       })
       .filter(Boolean);
@@ -270,35 +277,47 @@ function ChallengePage({ onUploadChallengeFeed }) {
     const challengeInfo = allChallenges.find(
       (challenge) => challenge.id === selectedChallengeId,
     );
-
     if (!challengeInfo) return null;
 
     const joinedInfo = joinedChallenges.find(
       (challenge) => challenge.id === selectedChallengeId,
     );
-
     const totalDays = joinedInfo?.totalDays ?? challengeInfo.totalDays;
     const completedDays = joinedInfo
       ? getCompletedDaysByProofs(selectedChallengeId, totalDays)
       : 0;
-    const progressRate = calculateProgressRate(completedDays, totalDays);
 
     return {
       ...challengeInfo,
       isJoined: Boolean(joinedInfo),
       completedDays,
       totalDays,
-      progressRate,
+      progressRate: calculateProgressRate(completedDays, totalDays),
     };
   }, [allChallenges, joinedChallenges, selectedChallengeId, challengeProofs]);
 
   const selectedChallengeProofs = useMemo(() => {
     if (!selectedChallengeId) return [];
-
     return challengeProofs
       .filter((proof) => proof.challengeId === selectedChallengeId)
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [challengeProofs, selectedChallengeId]);
+
+  const revokeChallengeProofPreviewUrl = (previewUrl) => {
+    if (!previewUrl?.startsWith("blob:")) return;
+    URL.revokeObjectURL(previewUrl);
+    challengeProofObjectUrlsRef.current =
+      challengeProofObjectUrlsRef.current.filter((url) => url !== previewUrl);
+  };
+
+  const revokeChallengeProofFiles = (files = []) => {
+    files.forEach((file) => revokeChallengeProofPreviewUrl(file.previewUrl));
+  };
+
+  const clearChallengeProofDraftFiles = useCallback(() => {
+    revokeChallengeProofFiles(challengeProofFiles);
+    setChallengeProofFiles([]);
+  }, [challengeProofFiles]);
 
   const handleSelectChallenge = (challengeId) => {
     setSelectedChallengeId(challengeId);
@@ -310,93 +329,61 @@ function ChallengePage({ onUploadChallengeFeed }) {
       return;
     }
 
-    const joinedChallenge = await challengeService.joinChallenge(challenge);
-
-    setJoinedChallenges((prev) => [...prev, joinedChallenge]);
-
-    setAllChallenges((prev) =>
-      prev.map((item) =>
-        item.id === challenge.id
-          ? { ...item, participants: item.participants + 1 }
-          : item,
-      ),
-    );
-
-    setSelectedChallengeId(challenge.id);
-  };
-
-  // 미리보기 URL 정리 공통 헬퍼
-  const revokeChallengeProofPreviewUrl = (previewUrl) => {
-    if (!previewUrl?.startsWith("blob:")) return;
-
-    URL.revokeObjectURL(previewUrl);
-    challengeProofObjectUrlsRef.current =
-      challengeProofObjectUrlsRef.current.filter((url) => url !== previewUrl);
-  };
-
-  // 파일 배열에 들어 있는 preview URL 일괄 정리
-  const revokeChallengeProofFiles = (files = []) => {
-    files.forEach((file) => {
-      revokeChallengeProofPreviewUrl(file.previewUrl);
-    });
-  };
-
-  // draft 파일만 정리하는 헬퍼
-  const clearChallengeProofDraftFiles = () => {
-    revokeChallengeProofFiles(challengeProofFiles);
-    setChallengeProofFiles([]);
+    try {
+      await challengeService.joinChallenge(challenge.id);
+      await loadChallenges(challenge.id);
+      setSelectedChallengeId(challenge.id);
+    } catch (error) {
+      console.error("챌린지 참여에 실패했습니다:", error);
+      alert(error.message || "챌린지 참여에 실패했습니다.");
+    }
   };
 
   const handleOpenChallengeProof = (challenge) => {
-    // 홈의 루틴 완료처럼 하루 1회만 인증 가능하도록 한 번 더 방어
-    if (hasTodayChallengeProof(challenge.id)) {
-      return;
-    }
+    if (getTodayChallengeProof(challenge.id)) return;
 
-    // 챌린지 페이지 내부에서만 인증 업로드 UI를 열도록 처리
     setSelectedProofChallenge(challenge);
     setChallengeProofText("");
     setChallengeUploadToFeed(false);
     clearChallengeProofDraftFiles();
   };
 
-  const handleCloseChallengeProof = () => {
+  const handleCloseChallengeProof = useCallback(() => {
     clearChallengeProofDraftFiles();
     setChallengeProofText("");
     setChallengeUploadToFeed(false);
     setSelectedProofChallenge(null);
-  };
+  }, [clearChallengeProofDraftFiles]);
 
-  // 홈의 완료 상태처럼 다시 눌러 오늘 인증을 취소
-  const handleCancelTodayChallengeProof = (challengeId) => {
+  const handleCancelTodayChallengeProof = async (challengeId) => {
     const todayProof = getTodayChallengeProof(challengeId);
-
     if (!todayProof) return;
 
-    const isConfirmed = window.confirm("오늘 챌린지 인증을 취소하시겠습니까?");
+    const isConfirmed = window.confirm("오늘 챌린지 인증을 취소할까요?");
     if (!isConfirmed) return;
 
-    // 주의:
-    // 챌린지 인증이 피드 mock 게시물과 같은 previewUrl을 공유할 수 있으므로
-    // 취소 시점에는 revokeObjectURL을 바로 호출하지 않습니다.
-    setChallengeProofs((prev) =>
-      prev.filter((proof) => proof.id !== todayProof.id),
-    );
+    try {
+      await challengeService.cancelTodayChallengeProof(challengeId);
+      setChallengeProofs((prev) =>
+        prev.filter((proof) => proof.id !== todayProof.id),
+      );
 
-    if (selectedProofChallenge?.id === challengeId) {
-      handleCloseChallengeProof();
+      if (selectedProofChallenge?.id === challengeId) {
+        handleCloseChallengeProof();
+      }
+    } catch (error) {
+      console.error("챌린지 인증 취소에 실패했습니다:", error);
+      alert(error.message || "오늘 챌린지 인증 취소에 실패했습니다.");
     }
   };
 
   const handleChallengeProofFileChange = (event) => {
     const selectedFiles = Array.from(event.target.files || []);
-
     if (selectedFiles.length === 0) return;
 
     const availableSlots = 3 - challengeProofFiles.length;
-
     if (availableSlots <= 0) {
-      alert("사진/영상은 최대 3개까지만 업로드할 수 있습니다.");
+      alert("사진이나 영상은 최대 3개까지 업로드할 수 있습니다.");
       event.target.value = "";
       return;
     }
@@ -405,9 +392,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
       .slice(0, availableSlots)
       .map((file, index) => {
         const previewUrl = URL.createObjectURL(file);
-
         challengeProofObjectUrlsRef.current.push(previewUrl);
-
         return {
           id: `${Date.now()}-${index}`,
           name: file.name,
@@ -417,7 +402,6 @@ function ChallengePage({ onUploadChallengeFeed }) {
         };
       });
 
-    // TODO: 영상 길이 제한이 필요해지면 여기서 metadata 검사 추가
     setChallengeProofFiles((prev) => [...prev, ...nextFiles]);
     event.target.value = "";
   };
@@ -425,11 +409,9 @@ function ChallengePage({ onUploadChallengeFeed }) {
   const handleRemoveChallengeProofFile = (fileId) => {
     setChallengeProofFiles((prev) => {
       const targetFile = prev.find((file) => file.id === fileId);
-
       if (targetFile) {
         revokeChallengeProofPreviewUrl(targetFile.previewUrl);
       }
-
       return prev.filter((file) => file.id !== fileId);
     });
   };
@@ -437,54 +419,54 @@ function ChallengePage({ onUploadChallengeFeed }) {
   const handleSubmitChallengeProof = async (event) => {
     event.preventDefault();
 
-    if (!selectedProofChallenge) return;
+    if (!selectedProofChallenge || isSubmitting) return;
+    if (getTodayChallengeProof(selectedProofChallenge.id)) return;
 
-    // 함수 내부에서도 하루 1회 제한을 한 번 더 확인
-    if (hasTodayChallengeProof(selectedProofChallenge.id)) {
+    const trimmedContent = challengeProofText.trim();
+    if (!trimmedContent && challengeProofFiles.length === 0) {
+      alert("인증 글이나 사진/영상을 하나 이상 입력해 주세요.");
       return;
     }
 
-    if (!challengeProofText.trim() && challengeProofFiles.length === 0) {
-      alert("인증 글 또는 사진/영상을 하나 이상 입력해주세요.");
-      return;
-    }
-
-    // 루틴 상세 인증과 동일하게, 피드 업로드를 체크했다면 미디어를 필수로 요구
     if (challengeUploadToFeed && challengeProofFiles.length === 0) {
-      alert("피드에 업로드하려면 사진 또는 영상을 1개 이상 추가해주세요.");
+      alert("피드에도 업로드하려면 사진이나 영상을 하나 이상 추가해 주세요.");
       return;
     }
 
-    const proofPayload = {
-      id: Date.now(),
-      challengeId: selectedProofChallenge.id,
-      content: challengeProofText.trim(),
-      files: challengeProofFiles,
-      proofDate: getLocalDateString(), // 오늘 날짜를 별도 저장
-      createdAt: new Date().toISOString(),
-    };
+    setIsSubmitting(true);
 
-    // TODO: 백엔드 연결 시 POST /challenge/:challengeId/proof 로 FormData 전송
-    const savedProof =
-      await challengeService.submitChallengeProof(proofPayload);
-
-    setChallengeProofs((prev) => [savedProof, ...prev]);
-
-    // 챌린지 인증을 같은 피드 페이지에도 보여주기 위한 프론트 mock 업로드
-    if (challengeUploadToFeed && onUploadChallengeFeed) {
-      await onUploadChallengeFeed({
-        challenge: selectedProofChallenge,
-        content: challengeProofText.trim(),
+    try {
+      const savedProof = await challengeService.submitChallengeProof({
+        challengeId: selectedProofChallenge.id,
+        content: trimmedContent,
         files: challengeProofFiles,
-        createdAt: proofPayload.createdAt,
+        proofDate: getLocalDateString(),
+        shareToFeed: challengeUploadToFeed,
       });
-    }
 
-    setChallengeProofText("");
-    setChallengeProofFiles([]);
-    setChallengeUploadToFeed(false);
-    setSelectedProofChallenge(null);
+      setChallengeProofs((prev) => [savedProof, ...prev]);
+      handleCloseChallengeProof();
+    } catch (error) {
+      console.error("챌린지 인증 등록에 실패했습니다:", error);
+      alert(error.message || "챌린지 인증 등록에 실패했습니다.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="challenge-page">
+        <section className="routine-content challenge-hero">
+          <p className="challenge-eyebrow">Challenge</p>
+          <h1 className="challenge-page-title">챌린지</h1>
+          <p className="challenge-page-description">
+            챌린지 정보를 불러오는 중입니다.
+          </p>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="challenge-page">
@@ -492,8 +474,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
         <p className="challenge-eyebrow">Challenge</p>
         <h1 className="challenge-page-title">챌린지</h1>
         <p className="challenge-page-description">
-          다양한 챌린지에 참여하여 새로운 습관을 만들어보세요. 나에게 맞는
-          챌린지를 선택하고, 꾸준히 실천하며 성장하는 경험을 할 수 있습니다.
+          다양한 챌린지에 참여하고 매일 인증을 쌓아가며 루틴을 확장해 보세요.
         </p>
       </section>
 
@@ -503,21 +484,19 @@ function ChallengePage({ onUploadChallengeFeed }) {
             <div>
               <h2 className="challenge-section-title">내가 참여한 챌린지</h2>
               <p className="challenge-section-subtitle">
-                현재 참여 중인 챌린지의 진행도를 한눈에 확인할 수 있습니다.
+                참여 중인 챌린지의 오늘 인증 상태와 진행률을 확인할 수 있습니다.
               </p>
             </div>
-            <span className="challenge-count-pill">
-              {myChallengeCards.length}개
-            </span>
+            <span className="challenge-count-pill">{myChallengeCards.length}개</span>
           </div>
 
           {myChallengeCards.length === 0 ? (
             <div className="challenge-empty-card">
               <p className="challenge-empty-title">
-                아직 참여 중인 챌린지가 없습니다.
+                참여 중인 챌린지가 없습니다.
               </p>
               <p className="challenge-empty-text">
-                아래 전체 챌린지에서 원하는 챌린지에 참여해보세요.
+                아래 전체 챌린지에서 원하는 항목을 골라 참여해 보세요.
               </p>
             </div>
           ) : (
@@ -535,9 +514,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
                   >
                     <div className="challenge-card-top">
                       <div>
-                        <h3 className="challenge-card-title">
-                          {challenge.title}
-                        </h3>
+                        <h3 className="challenge-card-title">{challenge.title}</h3>
                         <p className="challenge-card-period">
                           기간: {formatChallengeDate(challenge.startDate)} ~{" "}
                           {formatChallengeDate(challenge.endDate)}
@@ -549,8 +526,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
                     </div>
 
                     <p className="challenge-progress-text">
-                      진행도: {challenge.completedDays} / {challenge.totalDays}
-                      일
+                      진행일 {challenge.completedDays} / {challenge.totalDays}일
                     </p>
 
                     <div className="challenge-progress-track">
@@ -574,7 +550,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
                             handleCancelTodayChallengeProof(challenge.id);
                           }}
                         >
-                          <span className="challenge-complete-icon">✓</span>
+                          <span className="challenge-complete-icon">완료</span>
                           <span className="challenge-complete-text">
                             완료 시간:{" "}
                             {formatChallengeCompletedTime(todayProof.createdAt)}
@@ -605,7 +581,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
             <div>
               <h2 className="challenge-section-title">챌린지 상세 보기</h2>
               <p className="challenge-section-subtitle">
-                선택한 챌린지의 상세 정보와 진행 상태를 확인할 수 있습니다.
+                선택한 챌린지의 기간, 진행률, 인증 내역을 확인할 수 있습니다.
               </p>
             </div>
           </div>
@@ -623,9 +599,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
                 </div>
 
                 <span
-                  className={`challenge-status-pill ${
-                    selectedChallenge.isJoined ? "joined" : "open"
-                  }`}
+                  className={`challenge-status-pill ${selectedChallenge.isJoined ? "joined" : "open"}`}
                 >
                   {selectedChallenge.isJoined ? "참여 중" : "참여 가능"}
                 </span>
@@ -645,7 +619,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
                 </div>
 
                 <div className="challenge-summary-item">
-                  <span>참여자 수</span>
+                  <span>참여자</span>
                   <strong>{selectedChallenge.participants}명</strong>
                 </div>
 
@@ -655,7 +629,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
                 </div>
 
                 <div className="challenge-summary-item">
-                  <span>진행도</span>
+                  <span>진행일</span>
                   <strong>
                     {selectedChallenge.completedDays} /{" "}
                     {selectedChallenge.totalDays}일
@@ -697,9 +671,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
 
                 {selectedChallenge.isJoined &&
                   (() => {
-                    const todayProof = getTodayChallengeProof(
-                      selectedChallenge.id,
-                    );
+                    const todayProof = getTodayChallengeProof(selectedChallenge.id);
                     const isProofDoneToday = Boolean(todayProof);
 
                     return (
@@ -709,26 +681,20 @@ function ChallengePage({ onUploadChallengeFeed }) {
                             type="button"
                             className="challenge-complete-box challenge-complete-box-button"
                             onClick={() =>
-                              handleCancelTodayChallengeProof(
-                                selectedChallenge.id,
-                              )
+                              handleCancelTodayChallengeProof(selectedChallenge.id)
                             }
                           >
-                            <span className="challenge-complete-icon">✓</span>
+                            <span className="challenge-complete-icon">완료</span>
                             <span className="challenge-complete-text">
                               완료 시간:{" "}
-                              {formatChallengeCompletedTime(
-                                todayProof.createdAt,
-                              )}
+                              {formatChallengeCompletedTime(todayProof.createdAt)}
                             </span>
                           </button>
                         ) : (
                           <button
                             type="button"
                             className="challenge-button challenge-button-outline challenge-proof-button"
-                            onClick={() =>
-                              handleOpenChallengeProof(selectedChallenge)
-                            }
+                            onClick={() => handleOpenChallengeProof(selectedChallenge)}
                           >
                             오늘 인증하기
                           </button>
@@ -739,8 +705,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
               </div>
 
               <p className="challenge-proof-note">
-                챌린지 인증은 현재 프론트 mock 상태로 동작하며, 추후 백엔드
-                API와 연결될 예정입니다.
+                챌린지 인증은 실제 백엔드 API와 연결되어 저장됩니다.
               </p>
 
               {selectedChallenge.isJoined &&
@@ -759,7 +724,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
                         onChange={(event) =>
                           setChallengeProofText(event.target.value)
                         }
-                        placeholder="오늘 챌린지 인증 내용을 입력하세요."
+                        placeholder="오늘 챌린지 인증 내용을 입력해 주세요."
                       />
 
                       <label className="proof-file-label">
@@ -773,7 +738,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
                       </label>
 
                       <p className="challenge-proof-help">
-                        사진/영상은 최대 3개까지 업로드할 수 있습니다.
+                        사진이나 영상은 최대 3개까지 업로드할 수 있습니다.
                       </p>
 
                       <label className="feed-upload-check">
@@ -825,13 +790,18 @@ function ChallengePage({ onUploadChallengeFeed }) {
                       )}
 
                       <div className="challenge-proof-actions">
-                        <button type="submit" className="challenge-button">
-                          인증 등록
+                        <button
+                          type="submit"
+                          className="challenge-button"
+                          disabled={isSubmitting}
+                        >
+                          {isSubmitting ? "등록 중..." : "인증 등록"}
                         </button>
                         <button
                           type="button"
                           className="challenge-button challenge-button-outline"
                           onClick={handleCloseChallengeProof}
+                          disabled={isSubmitting}
                         >
                           취소
                         </button>
@@ -841,11 +811,11 @@ function ChallengePage({ onUploadChallengeFeed }) {
                 )}
 
               <div className="challenge-proof-history">
-                <h4 className="challenge-proof-history-title">내 인증 내역</h4>
+                <h4 className="challenge-proof-history-title">전체 인증 내역</h4>
 
                 {selectedChallengeProofs.length === 0 ? (
                   <p className="challenge-proof-empty">
-                    아직 등록한 인증이 없습니다.
+                    아직 등록된 인증이 없습니다.
                   </p>
                 ) : (
                   <div className="challenge-proof-history-list">
@@ -868,15 +838,15 @@ function ChallengePage({ onUploadChallengeFeed }) {
                                 key={file.id}
                                 className="challenge-proof-media-item"
                               >
-                                {file.type.startsWith("image/") ? (
+                                {(file.type || "").startsWith("image/") ? (
                                   <img
-                                    src={file.previewUrl}
-                                    alt={file.name}
+                                    src={file.previewUrl || file.fileUrl}
+                                    alt={file.name || "챌린지 인증"}
                                     className="challenge-proof-media"
                                   />
                                 ) : (
                                   <video
-                                    src={file.previewUrl}
+                                    src={file.previewUrl || file.fileUrl}
                                     className="challenge-proof-media"
                                     controls
                                   />
@@ -893,9 +863,11 @@ function ChallengePage({ onUploadChallengeFeed }) {
             </div>
           ) : (
             <div className="challenge-empty-card">
-              <p className="challenge-empty-title">선택된 챌린지가 없습니다.</p>
+              <p className="challenge-empty-title">
+                선택된 챌린지가 없습니다.
+              </p>
               <p className="challenge-empty-text">
-                참여한 챌린지 또는 전체 챌린지 카드를 선택해보세요.
+                참여 중인 챌린지나 전체 챌린지 목록에서 하나를 선택해 주세요.
               </p>
             </div>
           )}
@@ -907,8 +879,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
           <div>
             <h2 className="challenge-section-title">전체 챌린지</h2>
             <p className="challenge-section-subtitle">
-              현재 참여 가능한 챌린지 목록입니다. 추후 관리자 페이지에서 등록한
-              챌린지가 이 영역에 표시될 수 있습니다.
+              현재 참여 가능한 챌린지 목록입니다.
             </p>
           </div>
         </div>
@@ -925,9 +896,7 @@ function ChallengePage({ onUploadChallengeFeed }) {
               >
                 <div className="challenge-card-top">
                   <div>
-                    <span className="challenge-badge">
-                      {challenge.category}
-                    </span>
+                    <span className="challenge-badge">{challenge.category}</span>
                     <h3 className="challenge-card-title">{challenge.title}</h3>
                   </div>
                   <span className="challenge-participant-count">
@@ -952,8 +921,8 @@ function ChallengePage({ onUploadChallengeFeed }) {
                     <button
                       type="button"
                       className="challenge-button challenge-button-secondary"
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      onClick={(event) => {
+                        event.stopPropagation();
                         handleSelectChallenge(challenge.id);
                       }}
                     >
@@ -963,8 +932,8 @@ function ChallengePage({ onUploadChallengeFeed }) {
                     <button
                       type="button"
                       className="challenge-button"
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      onClick={(event) => {
+                        event.stopPropagation();
                         handleJoinChallenge(challenge);
                       }}
                     >

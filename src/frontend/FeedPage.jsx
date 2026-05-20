@@ -12,10 +12,19 @@
 //   currentUser - 현재 로그인한 유저 정보 ({ user_id, nickname, ... })
 // ============================================================
 
-// [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] useMemo 추가
-// 사유: 챌린지 mock 피드(extraMockPosts)와 자체 피드(feedPosts)를 합쳐 정렬하는 mergedFeedPosts 계산용.
-// 장점: 매 렌더마다 정렬을 반복하지 않고, 두 배열 중 하나라도 바뀔 때만 재계산.
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+// ────────────────────────────────────────────────────────────────────
+// [수정 2026-05-20] frontend-cy(7dd5535) 챌린지 백엔드 통합 — useMemo 제거
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
+// 날짜: 2026-05-20
+// 기대효과:
+//   - 챌린지 피드가 백엔드 GET /feed/ 의 challenge_proofs 통합 결과에 포함되어
+//     별도 mock 머지가 필요 없어짐 → useMemo / extraMockPosts 제거
+// 장점:
+//   - 데이터 소스가 단일화(SSOT) → 매 렌더 정렬·dedup 부담 0
+//   - App.jsx 의 challengeMockFeedPosts 상태도 함께 제거 가능
+// ────────────────────────────────────────────────────────────────────
+import { useEffect, useState, useCallback, useRef } from "react";
 import { EXPRESS_URL } from "./config";
 
 // [수정 2026-05-03] 한 번에 가져올 페이지 크기 — FastAPI Query(limit) 와 동일한 의미
@@ -27,12 +36,16 @@ const PAGE_SIZE = 20;
 //        구현된 상태였고, frontend 신기능 중 미구현이었던 신고 기능만 선별 머지.
 // 기대효과: 카드 및 모달에서 🚩 신고 버튼 클릭 → 사유 입력 → 상위 onReportPost 콜백으로 전달.
 // 장점: dev 의 백엔드 API 연결(POST /like, /comment 등)을 100% 보존하면서 UX 통일성 유지.
-// [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] extraMockPosts props 추가
-// 출처: origin/frontend-cy commit a5075ce
-// 사유: 챌린지 mock 피드 게시물을 부모(App.jsx)로부터 주입받아 자체 백엔드 피드와 합쳐 표시.
-// 기대효과: 챌린지 인증이 즉시 피드 화면에 나타남 (백엔드 챌린지 피드 API 미구현 상태에서 데모용).
-// 장점: 미주입(기본값 [])이면 기존 동작 그대로 → 후방 호환.
-function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
+// ────────────────────────────────────────────────────────────────────
+// [수정 2026-05-20] extraMockPosts props 제거
+// ────────────────────────────────────────────────────────────────────
+// 기대효과:
+//   - 챌린지 피드는 백엔드 통합(feed.py GET /feed/) 에서 source_type='challenge'
+//     로 함께 반환되므로 부모로부터 mock 주입을 받을 필요가 없어짐
+// 장점:
+//   - props 표면 축소 → 컴포넌트 책임이 "백엔드 피드 렌더"로 단일화
+// ────────────────────────────────────────────────────────────────────
+function FeedPage({ currentUser, onReportPost }) {
   // 피드 목록 (DB에서 조회, 최신순) — 페이지가 로드될 때마다 누적
   const [feedPosts, setFeedPosts] = useState([]);
 
@@ -64,15 +77,16 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
   const [reportCategory, setReportCategory] = useState("");
   const [reportDetail, setReportDetail] = useState("");
 
-  // 현재 선택된 피드 객체
-  // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
-  // 사유: 챌린지 mock 피드(extraMockPosts) + 자체 백엔드 피드(feedPosts) 합쳐 최신순 정렬.
-  // 장점: 두 배열 중 하나라도 바뀔 때만 재계산 → 매 렌더 정렬 부담 없음.
-  const mergedFeedPosts = useMemo(() => {
-    return [...extraMockPosts, ...feedPosts].sort(
-      (a, b) => new Date(b.created_at) - new Date(a.created_at),
-    );
-  }, [extraMockPosts, feedPosts]);
+  // ────────────────────────────────────────────────────────────────────
+  // [수정 2026-05-20] mergedFeedPosts 단순화
+  // ────────────────────────────────────────────────────────────────────
+  // 기대효과:
+  //   - 백엔드가 routine+challenge 를 미리 시간순 머지해 반환하므로
+  //     프론트에서 별도 정렬·머지 불필요 → 그대로 feedPosts 참조
+  // 장점:
+  //   - 정렬 비용 제거 + 의존성 추적 단순화
+  // ────────────────────────────────────────────────────────────────────
+  const mergedFeedPosts = feedPosts;
 
   const selectedPost =
     mergedFeedPosts.find((post) => post.feed_id === selectedPostId) ?? null;
@@ -593,8 +607,11 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
                     )}
                   </div>
 
-                  {/* [수정형 인스타그램식 더보기 드롭다운 메뉴 적용] */}
-                  {post.user_id !== currentUser?.user_id && (
+                  {/* [수정형 인스타그램식 더보기 드롭다운 메뉴 적용]
+                      [수정 2026-05-20] frontend-cy(7dd5535) 챌린지 통합
+                      기대효과: 챌린지 인증 게시물에는 신고 메뉴 비노출
+                      장점: 챌린지 도메인은 자체 검수 절차가 있어 일반 피드 신고 흐름과 분리 */}
+                  {!isChallengePost && post.user_id !== currentUser?.user_id && (
                     <div style={{ position: "relative" }}>
                       <button
                         type="button"
@@ -847,8 +864,12 @@ function FeedPage({ currentUser, onReportPost, extraMockPosts = [] }) {
                     </span>
                   </div>
 
-                  {/* [수정형 상세 모달 내 인스타식 더보기 드롭다운 적용] */}
-                  {selectedPost.user_id !== currentUser?.user_id && (
+                  {/* [수정형 상세 모달 내 인스타식 더보기 드롭다운 적용]
+                      [수정 2026-05-20] 챌린지 게시물 모달에서도 신고 메뉴 비노출
+                      기대효과: 카드와 모달의 신고 가시성 정책을 일치시켜 일관된 UX 제공
+                      장점: source_type 메타 한 가지로 두 진입점을 같은 규칙으로 제어 */}
+                  {selectedPost.source_type !== "challenge" &&
+                    selectedPost.user_id !== currentUser?.user_id && (
                     <div style={{ position: "relative" }}>
                       <button
                         type="button"
