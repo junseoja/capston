@@ -274,6 +274,23 @@ def _build_cursor(created_at, feed_id: str) -> str:
     return f"{ts}_{feed_id}"
 
 
+# ────────────────────────────────────────────────────────────────────
+# [추가 2026-05-20] frontend-cy(7dd5535) 챌린지 피드 통합용 컬럼 가드
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
+# 날짜: 2026-05-20
+# 기대효과:
+#   - migrations-2026-05-20-challenge-feed-share.sql 적용 전 환경에서도
+#     get_feeds() 가 컬럼 부재로 500 에러 내지 않고 routine 피드만 정상 반환
+# 장점:
+#   - 마이그레이션 미적용 환경(개발자 로컬, 신규 클론)에서도 안전 fallback
+#   - 단일 SHOW COLUMNS 비용만 들이고 challenge 쿼리 전체를 skip 가능
+# ────────────────────────────────────────────────────────────────────
+def _has_challenge_share_column(cursor) -> bool:
+    cursor.execute("SHOW COLUMNS FROM challenge_proofs LIKE 'share_to_feed'")
+    return cursor.fetchone() is not None
+
+
 @router.get("/")
 def get_feeds(
     user_id: Optional[str] = Query(
@@ -364,12 +381,12 @@ def get_feeds(
             params.append(limit)
 
             cur.execute(base_sql, tuple(params))
-            feeds = cur.fetchall()
+            routine_feeds = cur.fetchall()
 
             # 2단계: 위 페이지에 속한 feed_id 들의 이미지 일괄 조회 (IN 쿼리 1회)
             images_by_feed = {}
-            if feeds:
-                feed_ids = [f["feed_id"] for f in feeds]
+            if routine_feeds:
+                feed_ids = [f["feed_id"] for f in routine_feeds]
                 placeholders = ",".join(["%s"] * len(feed_ids))
                 cur.execute(
                     f"SELECT image_id, feed_id, file_url, file_type "
@@ -379,14 +396,111 @@ def get_feeds(
                 for img in cur.fetchall():
                     images_by_feed.setdefault(img["feed_id"], []).append(img)
 
-            # 3단계: 피드에 이미지/liked bool 결합
-            for f in feeds:
+            # 3단계: 피드에 이미지/liked bool 결합 + source_type 부착
+            for f in routine_feeds:
                 f["images"] = images_by_feed.get(f["feed_id"], [])
                 f["liked"] = bool(f["liked"])
+                # [추가 2026-05-20] 챌린지 통합 시 FeedPage 가 게시물 출처를 구분하도록 메타 부착
+                f["source_type"] = "routine"
 
-        # 다음 페이지 cursor 계산 — 페이지 크기만큼 채워졌을 때만 다음이 있다고 간주
+            # ────────────────────────────────────────────────────────────────────
+            # [추가 2026-05-20] frontend-cy(7dd5535) 챌린지 피드 통합
+            # ────────────────────────────────────────────────────────────────────
+            # 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
+            # 날짜: 2026-05-20
+            # 기대효과:
+            #   - ChallengePage 에서 "피드에 업로드" 체크 후 등록된 챌린지 인증이
+            #     FeedPage 의 단일 목록에 routine 피드와 시간순으로 섞여 노출
+            # 장점:
+            #   - 별도 챌린지 피드 화면을 만들 필요 없이 기존 FeedPage 재사용
+            #   - share_to_feed 컬럼 가드(_has_challenge_share_column) 로
+            #     마이그레이션 미적용 환경에서도 routine 피드만 안전하게 반환
+            # ────────────────────────────────────────────────────────────────────
+            challenge_feeds = []
+            if _has_challenge_share_column(cur):
+                challenge_sql = """SELECT
+                        cp.proof_id AS feed_id,
+                        cp.content,
+                        cp.created_at,
+                        cp.user_id,
+                        COALESCE(u.nickname, '(탈퇴한 사용자)') AS nickname,
+                        u.profile_img,
+                        CONCAT('[챌린지] ', c.title) AS routine_title,
+                        c.category,
+                        0 AS like_count,
+                        0 AS comment_count,
+                        0 AS liked,
+                        'challenge' AS source_type,
+                        c.challenge_id,
+                        c.title AS challenge_title,
+                        c.category AS challenge_category
+                    FROM challenge_proofs cp
+                    JOIN challenges c ON cp.challenge_id = c.challenge_id
+                    LEFT JOIN users u ON cp.user_id = u.user_id
+                    WHERE cp.deleted_at IS NULL
+                      AND c.deleted_at IS NULL
+                      AND cp.share_to_feed = 1
+                """
+                challenge_params = []
+
+                if parsed_cursor:
+                    challenge_sql += " AND (cp.created_at, cp.proof_id) < (%s, %s)"
+                    challenge_params.extend([parsed_cursor[0], parsed_cursor[1]])
+
+                challenge_sql += """
+                    ORDER BY cp.created_at DESC, cp.proof_id DESC
+                    LIMIT %s
+                """
+                challenge_params.append(limit)
+                cur.execute(challenge_sql, tuple(challenge_params))
+                challenge_feeds = cur.fetchall()
+
+                challenge_images_by_feed = {}
+                if challenge_feeds:
+                    challenge_feed_ids = [feed["feed_id"] for feed in challenge_feeds]
+                    placeholders = ",".join(["%s"] * len(challenge_feed_ids))
+                    cur.execute(
+                        f"""SELECT proof_file_id, proof_id, file_url, file_type
+                            FROM challenge_proof_files
+                            WHERE proof_id IN ({placeholders})
+                            ORDER BY file_order ASC, created_at ASC""",
+                        tuple(challenge_feed_ids),
+                    )
+                    for image in cur.fetchall():
+                        challenge_images_by_feed.setdefault(image["proof_id"], []).append(
+                            {
+                                "image_id": image["proof_file_id"],
+                                "feed_id": image["proof_id"],
+                                "file_url": image["file_url"],
+                                "file_type": image["file_type"],
+                            }
+                        )
+
+                for feed in challenge_feeds:
+                    feed["images"] = challenge_images_by_feed.get(feed["feed_id"], [])
+                    feed["liked"] = False
+
+        # ────────────────────────────────────────────────────────────────────
+        # [추가 2026-05-20] routine + challenge 피드를 created_at DESC 기준으로 머지
+        # ────────────────────────────────────────────────────────────────────
+        # 장점:
+        #   - 두 소스를 한 응답으로 합쳐 프론트엔드의 페이지네이션 로직 그대로 사용
+        #   - tie-breaker 로 feed_id 를 포함해 같은 created_at 다중 행도 결정적 정렬
+        # ────────────────────────────────────────────────────────────────────
+        feeds = sorted(
+            [*routine_feeds, *challenge_feeds],
+            key=lambda item: (str(item["created_at"]), item["feed_id"]),
+            reverse=True,
+        )[:limit]
+
+        has_more = (
+            len(routine_feeds) == limit
+            or len(challenge_feeds) == limit
+            or len(routine_feeds) + len(challenge_feeds) > limit
+        )
+
         next_cursor = None
-        if feeds and len(feeds) == limit:
+        if feeds and has_more:
             last = feeds[-1]
             next_cursor = _build_cursor(last["created_at"], last["feed_id"])
 
