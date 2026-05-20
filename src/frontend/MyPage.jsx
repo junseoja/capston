@@ -19,7 +19,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { EXPRESS_URL } from "./config";
 
-function MyPage() {
+function MyPage({ onLogout }) {
     const navigate = useNavigate();
 
     // 로그인한 유저 정보 (GET /me 응답)
@@ -267,30 +267,78 @@ function MyPage() {
                 <div className="profile-info" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flexGrow: 1 }}>
                     {!isProfileEdit ? (
                         <>
-                            <div style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", justifyContent: "space-between" }}>
-                                <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "900", color: "#111827" }}>
-                                    {user.nickname}
-                                </h1>
-                                <button
-                                    onClick={() => setIsProfileEdit(true)}
-                                    style={{
-                                        border: "1px solid #dbdbdb",
-                                        background: "#ffffff",
-                                        padding: "5px 12px",
-                                        borderRadius: "8px",
-                                        fontSize: "12px",
-                                        fontWeight: "700",
-                                        color: "#262626",
-                                        cursor: "pointer",
-                                        boxShadow: "0 1px 2px rgba(0,0,0,0.03)"
-                                    }}
-                                >
-                                    프로필 편집
-                                </button>
-                            </div>
-                            <p style={{ margin: "4px 0 0 0", color: "#6b7280", fontSize: "14px", fontWeight: "600", textAlign: "left" }}>
-                                {editBio}
-                            </p>
+ <div
+    style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        width: "100%",
+    }}
+>
+    <h1
+        style={{
+            margin: 0,
+            fontSize: "22px",
+            fontWeight: "900",
+            color: "#111827",
+        }}
+    >
+        {user.nickname}
+    </h1>
+
+    <div
+        style={{
+            display: "flex",
+            gap: "8px",
+            marginLeft: "auto",
+        }}
+    >
+        <button
+            onClick={() => setIsProfileEdit(true)}
+            style={{
+                border: "1px solid #dbdbdb",
+                background: "#ffffff",
+                padding: "5px 12px",
+                borderRadius: "8px",
+                fontSize: "12px",
+                fontWeight: "700",
+                color: "#262626",
+                cursor: "pointer",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+            }}
+        >
+            프로필 편집
+        </button>
+
+        <button
+            onClick={onLogout}
+            style={{
+                border: "1px solid #ef4444",
+                background: "#ffffff",
+                padding: "5px 12px",
+                borderRadius: "8px",
+                fontSize: "12px",
+                fontWeight: "700",
+                color: "#ef4444",
+                cursor: "pointer",
+            }}
+        >
+            로그아웃
+        </button>
+    </div>
+</div>
+
+<p
+    style={{
+        margin: "4px 0 0 0",
+        color: "#6b7280",
+        fontSize: "14px",
+        fontWeight: "600",
+        textAlign: "left",
+    }}
+>
+    {editBio}
+</p>
                         </>
                     ) : (
                         /* 프로필 편집 인라인 레이아웃 전환 상태 */

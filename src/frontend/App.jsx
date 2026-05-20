@@ -830,7 +830,7 @@ function App() {
                         {isAdmin && (
                             <button onClick={() => navigate("/admin")}>관리자</button>
                         )}
-                        <button onClick={handleLogout}>로그아웃</button>
+                        
                     </nav>
                 </header>
             )}
@@ -983,7 +983,11 @@ function App() {
                     {/* 마이페이지: MyPage 내부에서 직접 /me, /routine API 호출 */}
                     <Route
                         path="/mypage"
-                        element={isLoggedIn ? <MyPage /> : <Navigate to="/login" />}
+                        element={
+    isLoggedIn
+        ? <MyPage onLogout={handleLogout} />
+        : <Navigate to="/login" />
+}
                     />
 
                     {/* 상세 분석 페이지: 마이페이지에서 "상세 분석" 버튼으로 진입 */}
