@@ -11,8 +11,14 @@ const {
     joinChallenge,
     createChallengeProof,
     cancelTodayChallengeProof,
+    createChallenge,
+    updateChallenge,
+    deleteChallenge,
+    getChallengeParticipants,
+    getChallengeAllProofs,
 } = require("../database");
 const requireAuth = require("../middleware/requireAuth");
+const requireAdmin = require("../middleware/requireAdmin");
 
 const router = express.Router();
 
@@ -187,5 +193,105 @@ router.delete("/challenge/:challenge_id/proof/today", requireAuth, async (req, r
         return next(error);
     }
 });
+
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] 관리자 챌린지 CRUD + 참여자/인증 (5개 라우트)
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: P1 (AdminPage 챌린지 관리 mock state → DB 영속)
+// 날짜: 2026-05-20
+// 기대 효과:
+//   - POST   /challenge                          : 챌린지 신규 등록
+//   - PATCH  /challenge/:challenge_id            : 챌린지 정보 수정
+//   - DELETE /challenge/:challenge_id            : 챌린지 Soft Delete
+//   - GET    /challenge/:challenge_id/participants : 참여자 + 인증일수
+//   - GET    /challenge/:challenge_id/proofs       : 실시간 인증 현황
+// 장점:
+//   - requireAdmin 으로 보호 (notice/report 와 동일 패턴)
+//   - 입력 검증을 라우트 단에서 빠르게 거르고 FastAPI 호출 비용 절감
+// ────────────────────────────────────────────────────────────────────
+
+function _parsePayload(body) {
+    return {
+        title: typeof body.title === "string" ? body.title.trim() : body.title,
+        description:
+            typeof body.description === "string" ? body.description.trim() : body.description,
+        category: typeof body.category === "string" ? body.category.trim() : body.category,
+        start_date: body.start_date || body.startDate,
+        end_date: body.end_date || body.endDate,
+    };
+}
+
+router.post("/challenge", requireAuth, requireAdmin, async (req, res, next) => {
+    try {
+        const payload = _parsePayload(req.body || {});
+        if (!payload.title) {
+            return res.status(400).json({ success: false, message: "챌린지 제목을 입력해주세요." });
+        }
+        if (!payload.start_date || !payload.end_date) {
+            return res.status(400).json({ success: false, message: "시작일과 종료일을 입력해주세요." });
+        }
+        const result = await createChallenge({
+            ...payload,
+            created_by: req.user.user_id,
+        });
+        return res.json(result);
+    } catch (error) {
+        return next(error);
+    }
+});
+
+router.patch("/challenge/:challenge_id", requireAuth, requireAdmin, async (req, res, next) => {
+    try {
+        const payload = _parsePayload(req.body || {});
+        const filtered = Object.fromEntries(
+            Object.entries(payload).filter(([, v]) => v !== undefined && v !== null && v !== ""),
+        );
+        if (Object.keys(filtered).length === 0) {
+            return res.status(400).json({ success: false, message: "수정할 항목이 없습니다." });
+        }
+        const result = await updateChallenge(req.params.challenge_id, filtered);
+        return res.json(result);
+    } catch (error) {
+        return next(error);
+    }
+});
+
+router.delete("/challenge/:challenge_id", requireAuth, requireAdmin, async (req, res, next) => {
+    try {
+        const result = await deleteChallenge(req.params.challenge_id);
+        return res.json(result);
+    } catch (error) {
+        return next(error);
+    }
+});
+
+router.get(
+    "/challenge/:challenge_id/participants",
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const result = await getChallengeParticipants(req.params.challenge_id);
+            return res.json({ success: true, ...result });
+        } catch (error) {
+            return next(error);
+        }
+    },
+);
+
+router.get(
+    "/challenge/:challenge_id/proofs",
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const limit = Number(req.query.limit) || 60;
+            const result = await getChallengeAllProofs(req.params.challenge_id, limit);
+            return res.json({ success: true, ...result });
+        } catch (error) {
+            return next(error);
+        }
+    },
+);
 
 module.exports = router;

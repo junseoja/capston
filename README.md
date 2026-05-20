@@ -4213,6 +4213,112 @@ ON challenge_proofs (share_to_feed, deleted_at, created_at);
 
 ---
 
+## 🔧 2026-05-20 후속 작업 (frontend-cy 머지 직후 P0 3건 + P1 1건)
+
+> frontend-cy(7dd5535) → dev 머지 직후 코드 리뷰에서 발견된 P0 3 건과 P1 #4 (관리자 챌린지 CRUD) 를 같은 날 후속 작업으로 처리.
+
+### 1) 6하원칙 요약
+
+| 항목 | 내용 |
+|---|---|
+| **누가 (Who)** | enterausername1230 (캡스톤 백엔드 담당) |
+| **언제 (When)** | 2026-05-20 (KST), frontend-cy 머지 푸시 직후 동일 일자 |
+| **어디서 (Where)** | `src/python_api/routers/`, `src/backend/routes/`, `src/backend/database.js`, `src/frontend/`, `docs/` |
+| **무엇을 (What)** | P0 #1 댓글 LEFT JOIN, P0 #2 프로필 수정(닉네임/bio) 백엔드, P0 #3 아이디·비번 찾기 백엔드, P1 #4 관리자 챌린지 CRUD + 참여자/실시간 인증 현황 |
+| **어떻게 (How)** | FastAPI 엔드포인트 신규 → Express helper/route(`requireAuth`/`requireAdmin`) → 프론트 UI 실제 fetch 전환 → `node -c` / `python ast` / `vite build` 3 단 검증 |
+| **왜 (Why)** | 머지 직전 리뷰에서 (a) INNER JOIN 으로 탈퇴 회원 댓글 사라짐 (b) 프로필 수정 UI 가 실제 저장 안 됨 (c) 아이디/비번 찾기 Mock 하드코딩 (d) 관리자 챌린지 CRUD 백엔드 0 건 — 4 가지 사용자 체감 큰 버그를 발견 |
+
+---
+
+### 2) 작업별 상세
+
+#### 2-1) P0 #1 — `comment.py` LEFT JOIN (탈퇴 회원 댓글 보존)
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 담당 |
+| 언제 | 2026-05-20 오전 |
+| 어디서 | `src/python_api/routers/comment.py` (1 파일, 약 12 줄 교체) |
+| 무엇을 | `JOIN users u` → `LEFT JOIN users u ON ... AND u.deleted_at IS NULL` + `COALESCE(u.nickname, '(탈퇴한 회원)')` |
+| 어떻게 | INNER JOIN 으로는 작성자가 탈퇴(`deleted_at` 채워짐)되면 댓글 row 자체가 사라져 다른 사용자의 대화 흐름이 끊김 → LEFT JOIN 으로 댓글 row 보존, nickname 만 COALESCE 로 대체 |
+| 왜 | 회원 탈퇴 엔드포인트(P1 #7) 도입 직전에 반드시 선행되어야 하는 데이터 손실 방지 작업 |
+
+#### 2-2) P0 #2 — 프로필 수정 백엔드 (닉네임 + bio, 사진 제외)
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 + 프론트 담당 |
+| 언제 | 2026-05-20 오전 |
+| 어디서 | `docs/migrations-2026-05-20-users-bio.sql` (신규, RDS 적용 완료), `src/python_api/routers/user.py`, `src/python_api/routers/mypage.py`, `src/backend/database.js`, `src/backend/routes/login.js`, `src/frontend/MyPage.jsx` |
+| 무엇을 | `users.bio VARCHAR(300) NULL` 컬럼 신설 / FastAPI `PATCH /user/profile/{user_id}` (동적 UPDATE, 닉네임 중복 시 409) / Express `PATCH /me/profile` (세션 인증 + 길이 검증) / MyPage 의 `handleSaveProfile` 을 Mock → 실제 PATCH 호출로 교체 + `savingProfile` 잠금 |
+| 어떻게 | (1) ALTER TABLE 로 bio 컬럼 추가 → (2) FastAPI 가 nickname/bio 중 전달된 필드만 동적 UPDATE → (3) Express 가 trim·길이 검증 후 FastAPI 호출 → (4) MyPage 가 변경된 필드만 payload 로 PATCH (5) `mypage.py._load_user` SELECT 에 bio 컬럼 노출 |
+| 왜 | 5/19 머지된 인스타 스타일 프로필 편집 UI 가 실제로는 저장이 안 되어 새로고침 시 모두 초기화 — 사용자 체감 가장 큰 버그. 프로필 사진은 S3 인프라 확장 작업이 별도 필요해 차후로 미룸. |
+
+#### 2-3) P0 #3 — 아이디/비번 찾기 백엔드 (Mock 제거)
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 + 프론트 담당 |
+| 언제 | 2026-05-20 오전 |
+| 어디서 | `src/python_api/routers/user.py`, `src/backend/database.js`, `src/backend/routes/login.js`, `src/frontend/LoginPage.jsx` |
+| 무엇을 | FastAPI `POST /user/find-login-id` / `POST /user/verify-for-password-reset` 추가, Express `POST /find-id` / `POST /find-password` (임시 비밀번호 12자: 8 영문 + 2 숫자 + 2 특수, `crypto.randomInt` Fisher-Yates 셔플), LoginPage 가 Mock → 실제 fetch 호출 |
+| 어떻게 | (1) 본인 확인: nickname + email 조합으로 login_id 조회, nickname + login_id + email 조합으로 user_id 조회 → (2) 비번 찾기 성공 시 임시 비번 생성 → bcrypt 해시 → `updateUserPassword` 로 DB 갱신 → (3) 평문 임시 비번을 응답 JSON 으로 반환(SMTP 인프라 미구축, 캡스톤 데모 한정) → (4) UI 가 alert 팝업으로 노출 + `findIdLoading`/`findPwLoading` 로 중복 클릭 차단 |
+| 왜 | LoginPage 의 찾기 모달이 Mock 하드코딩 상태였고, 비번 분실 사용자가 실제로 복구할 방법이 없었음. SMTP 미구축이 차단 요인이라 평문 응답으로 우회. |
+
+#### 2-4) P1 #4 — 관리자 챌린지 CRUD + 참여자/실시간 인증 현황
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 + 프론트 담당 |
+| 언제 | 2026-05-20 오후 |
+| 어디서 | `src/python_api/routers/challenge.py` (+~280 줄), `src/backend/database.js` (helper 5 종), `src/backend/routes/challenge.js` (라우트 5 개), `src/frontend/AdminPage.jsx` (mock state 제거 + lazy fetch 모달) |
+| 무엇을 | **FastAPI 5 엔드포인트**: `POST /challenge/` (서버에서 `total_days` 계산), `PATCH /challenge/{id}`, `DELETE /challenge/{id}` (Soft Delete), `GET /challenge/{id}/participants` (닉네임/프로필/인증일수 집계), `GET /challenge/{id}/proofs` (실시간 인증 카드용, 첨부 파일 포함). **Express**: 위 5 개를 `requireAdmin` 가드로 프록시. **AdminPage**: `useEffect` 로 `GET /challenge` 로드, `selectedChallenge` set 시 `participants`/`proofs` 병렬 lazy fetch, 저장/삭제 → 실제 API |
+| 어떻게 | (1) 마이그레이션 없음(테이블 6 종 모두 5/13 에 이미 생성) → (2) `_load_active_challenge` / `_serialize_challenge` 기존 헬퍼 재사용 → (3) 참여자는 `challenge_proofs` 를 `COUNT(DISTINCT proof_date)` 로 user_id 별 집계 → (4) 인증 카드 LIMIT 60 으로 페이지당 부하 제한 → (5) 상세 모달의 하드코딩 사용자 6명/인증 카드 3개를 실제 DB 데이터로 교체 |
+| 왜 | AdminPage 챌린지 탭이 컴포넌트 로컬 state 라 새로고침 시 초기화되고 사용자 ChallengePage 와 데이터가 단절. 관리자가 챌린지를 등록해야 사용자가 참여할 수 있는 구조라 P1 중 가장 차단성 높음. |
+
+---
+
+### 3) 변경 파일 / 라인 요약
+
+| 파일 | 변경 | 용도 |
+|---|---|---|
+| `src/python_api/routers/comment.py` | LEFT JOIN + COALESCE | 탈퇴 회원 댓글 보존 |
+| `src/python_api/routers/user.py` | +endpoint 3 종 (profile/find-login-id/verify-for-password-reset) | 프로필 수정 + 아이디/비번 본인 확인 |
+| `src/python_api/routers/mypage.py` | `_load_user` SELECT 에 `bio` 추가 | MyPage 새로고침 후에도 bio 노출 |
+| `src/python_api/routers/challenge.py` | +endpoint 5 종 (POST/PATCH/DELETE/participants/proofs) | 관리자 챌린지 CRUD |
+| `src/backend/database.js` | helper 8 종 추가 (`updateUserProfile`/`findLoginIdByProfile`/`verifyForPasswordReset` + 챌린지 5종) | fetchJson 패턴 확장 |
+| `src/backend/routes/login.js` | +route 3 종 (`PATCH /me/profile`, `POST /find-id`, `POST /find-password`) + `generateTempPassword()` | 세션 인증 / 임시 비번 발급 |
+| `src/backend/routes/challenge.js` | +route 5 종 (`requireAdmin` 가드) | 관리자 챌린지 CRUD |
+| `src/frontend/MyPage.jsx` | `handleSaveProfile` 실제 PATCH + `savingProfile` 잠금 | 프로필 저장 영속 |
+| `src/frontend/LoginPage.jsx` | 아이디/비번 찾기 Mock → 실제 fetch + 로딩 플래그 | 임시 비번 alert 노출 |
+| `src/frontend/AdminPage.jsx` | mock state 제거 / `useEffect` fetch / lazy 모달 / 저장·삭제 API | 챌린지 DB 영속 + 실시간 인증 현황 |
+| `docs/migrations-2026-05-20-users-bio.sql` | 신규 (RDS 적용 완료) | `users.bio VARCHAR(300) NULL` |
+
+---
+
+### 4) 검증
+
+| 단계 | 결과 |
+|---|---|
+| `node -c src/backend/routes/{login,challenge}.js` | ✅ |
+| `node -c src/backend/database.js` | ✅ |
+| `python3 -c "import ast; ast.parse(...)" × 4 router` | ✅ |
+| `npm run build` (vite 8) | ✅ 366.99 kB / gzip 104.89 kB |
+| 사용자 1·2·3 시나리오 로컬 검증 (admin 등록 → 사용자 참여 → 인증 → 관리자 모달 실시간 노출) | ✅ |
+
+---
+
+### 5) 남은 후속 작업 (다음 P1)
+
+| 항목 | 비고 |
+|---|---|
+| P1 #7 회원 탈퇴 엔드포인트 | `comment.py` LEFT JOIN 선행 완료 → 차단 요인 해소됨 |
+| P2 #5 루틴 수정 / #6 피드 수정 | 사용자 편의성 |
+| `users.role` 컬럼 도입 | `requireAdmin` 미들웨어 정책 변경 (현재 `login_id === "admin"` 하드코딩) |
+| SMTP 인프라 | `find-password` 평문 응답 제거 + 메일 발송 |
+
+---
+
 ## ⚠️ 미구현 / 개선 필요 사항
 
 - [x] ~~피드 기능 → 백엔드 연결 (현재 메모리에만 저장, 새로고침 시 초기화)~~ ✅ 2026-04-18 완료

@@ -103,16 +103,114 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportTab]);
 
-  // ── [챌린지 관리 상태 - 사용자 ChallengePage 데이터 구조와 완벽 동기화] ──
-  const [challenges, setChallenges] = useState([
-    { id: 1, title: "7일 미라클 모닝 챌린지", category: "미라클 모닝", participants: 42, status: "진행중", startDate: "2026-05-10", endDate: "2026-05-16", description: "매일 아침 정해진 시간에 일어나 하루를 시작하는 챌린지입니다.", totalDays: 7, progress: 75 },
-    { id: 2, title: "하루 30분 운동 챌린지", category: "운동", participants: 108, status: "진행중", startDate: "2026-05-10", endDate: "2026-05-30", description: "매일 30분 이상 운동하며 건강한 습관을 만드는 챌린지입니다.", totalDays: 21, progress: 42 },
-    { id: 3, title: "물 2L 마시기 챌린지", category: "건강", participants: 67, status: "진행중", startDate: "2026-05-12", endDate: "2026-05-25", description: "매일 충분한 수분을 섭취하며 생활 습관을 개선하는 챌린지입니다.", totalDays: 14, progress: 60 },
-    { id: 4, title: "하루 1시간 집중 공부 챌린지", category: "공부", participants: 89, status: "진행중", startDate: "2026-05-11", endDate: "2026-05-24", description: "매일 1시간 이상 집중해서 공부하는 습관을 만드는 챌린지입니다.", totalDays: 14, progress: 50 }
-  ]);
+  // ────────────────────────────────────────────────────────────────────
+  // [수정 2026-05-20] 챌린지 관리 mock state → 백엔드 연결
+  // ────────────────────────────────────────────────────────────────────
+  // 오류 번호: P1 (AdminPage 챌린지 CRUD 가 컴포넌트 로컬 state 라
+  //                새로고침 시 초기화되고 DB 영속화되지 않음)
+  // 날짜: 2026-05-20
+  // 기대 효과:
+  //   - GET    /challenge                          : 목록 로드
+  //   - POST   /challenge                          : 새 챌린지 등록
+  //   - PATCH  /challenge/:id                      : 챌린지 수정
+  //   - DELETE /challenge/:id                      : Soft Delete
+  //   - GET    /challenge/:id/participants         : 참여자 + 인증일수
+  //   - GET    /challenge/:id/proofs               : 실시간 인증 현황
+  // 장점:
+  //   - 사용자 ChallengePage 와 동일 DB → 등록한 챌린지가 즉시 사용자에게 노출
+  //   - participants/proofs 는 selectedChallenge 가 set 될 때만 lazy fetch
+  //     → 목록 로딩 시 불필요한 부하 없음
+  // ────────────────────────────────────────────────────────────────────
+  const [challenges, setChallenges] = useState([]);
+  const [challengesLoading, setChallengesLoading] = useState(false);
   const [selectedChallenge, setSelectedChallenge] = useState(null);
+  const [challengeDetail, setChallengeDetail] = useState({
+    participants: [],
+    proofs: [],
+    totalDays: 0,
+    loading: false,
+  });
   const [isChallengeModalOpen, setIsChallengeModalOpen] = useState(false);
   const [editingChallenge, setEditingChallenge] = useState(null);
+  const [savingChallenge, setSavingChallenge] = useState(false);
+
+  // 백엔드 GET /challenge 응답을 기존 렌더가 쓰는 필드명으로 정규화.
+  // FastAPI 는 startDate/endDate/totalDays/participants 까지 키 통일 완료.
+  // status/progress 는 화면 표시용으로 클라이언트에서 계산.
+  const mapChallengeRow = (c) => {
+    const today = new Date();
+    const start = c.startDate ? new Date(c.startDate) : null;
+    const end = c.endDate ? new Date(c.endDate) : null;
+    let status = "진행중";
+    if (start && today < start) status = "예정";
+    else if (end && today > end) status = "종료";
+    let progress = 0;
+    if (start && end && c.totalDays > 0) {
+      const elapsed = Math.min(c.totalDays, Math.max(0, Math.floor((today - start) / (1000 * 60 * 60 * 24)) + 1));
+      progress = Math.min(100, Math.round((elapsed / c.totalDays) * 100));
+    }
+    return { ...c, status, progress };
+  };
+
+  const fetchChallenges = async () => {
+    setChallengesLoading(true);
+    try {
+      const res = await fetch(`${EXPRESS_URL}/challenge`, { credentials: "include" });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.challenges)) {
+        setChallenges(data.challenges.map(mapChallengeRow));
+      } else {
+        setChallenges([]);
+      }
+    } catch (error) {
+      console.error("챌린지 목록 조회 실패:", error);
+      setChallenges([]);
+    } finally {
+      setChallengesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchChallenges();
+  }, []);
+
+  // selectedChallenge 가 set 되면 참여자/인증 lazy fetch.
+  useEffect(() => {
+    if (!selectedChallenge) {
+      setChallengeDetail({ participants: [], proofs: [], totalDays: 0, loading: false });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setChallengeDetail((s) => ({ ...s, loading: true }));
+      try {
+        const [pRes, prRes] = await Promise.all([
+          fetch(`${EXPRESS_URL}/challenge/${selectedChallenge.id}/participants`, {
+            credentials: "include",
+          }),
+          fetch(`${EXPRESS_URL}/challenge/${selectedChallenge.id}/proofs?limit=60`, {
+            credentials: "include",
+          }),
+        ]);
+        const pData = await pRes.json();
+        const prData = await prRes.json();
+        if (cancelled) return;
+        setChallengeDetail({
+          participants: pData.success ? pData.participants || [] : [],
+          proofs: prData.success ? prData.proofs || [] : [],
+          totalDays: pData.success ? pData.total_days || 0 : 0,
+          loading: false,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        console.error("챌린지 상세 조회 실패:", error);
+        setChallengeDetail({ participants: [], proofs: [], totalDays: 0, loading: false });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedChallenge]);
 
   // 폼 스펙 정규화 (유저 측 필드 구조인 startDate, endDate 와 매칭)
   const [challengeForm, setChallengeForm] = useState({
@@ -147,43 +245,71 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
     setIsChallengeModalOpen(true);
   };
 
-  const handleSaveChallenge = () => {
+  // [수정 2026-05-20] 챌린지 저장 = POST/PATCH /challenge (백엔드 영속)
+  const handleSaveChallenge = async () => {
     if (!challengeForm.title || !challengeForm.startDate || !challengeForm.endDate) {
       alert("챌린지 제목과 기간을 정확히 입력해주세요.");
       return;
     }
-
-    // 날짜 연산을 통해 totalDays 계산 구현 (유저 패널 인터페이스 동기화용)
-    const start = new Date(challengeForm.startDate);
-    const end = new Date(challengeForm.endDate);
-    const diffTime = Math.abs(end - start);
-    const calculatedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-
-    if (editingChallenge) {
-      setChallenges(challenges.map(c =>
-        c.id === editingChallenge.id ? { ...c, ...challengeForm, totalDays: calculatedDays } : c
-      ));
-      alert("챌린지가 수정되었습니다.");
-    } else {
-      const newChallenge = {
-        id: Date.now(),
-        ...challengeForm,
-        participants: 0,
-        status: "진행중",
-        totalDays: calculatedDays,
-        progress: 0
-      };
-      setChallenges([newChallenge, ...challenges]);
-      alert("새로운 챌린지가 등록되었습니다.");
+    if (new Date(challengeForm.startDate) > new Date(challengeForm.endDate)) {
+      alert("종료일은 시작일 이후여야 합니다.");
+      return;
     }
-    setIsChallengeModalOpen(false);
+
+    setSavingChallenge(true);
+    try {
+      const payload = {
+        title: challengeForm.title.trim(),
+        description: challengeForm.description || "",
+        category: challengeForm.category || "",
+        start_date: challengeForm.startDate,
+        end_date: challengeForm.endDate,
+      };
+      const url = editingChallenge
+        ? `${EXPRESS_URL}/challenge/${editingChallenge.id}`
+        : `${EXPRESS_URL}/challenge`;
+      const method = editingChallenge ? "PATCH" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        alert(data.message || "챌린지 저장에 실패했습니다.");
+        return;
+      }
+      alert(editingChallenge ? "챌린지가 수정되었습니다." : "새로운 챌린지가 등록되었습니다.");
+      setIsChallengeModalOpen(false);
+      await fetchChallenges();
+    } catch (error) {
+      console.error("챌린지 저장 실패:", error);
+      alert("서버 오류로 챌린지 저장에 실패했습니다.");
+    } finally {
+      setSavingChallenge(false);
+    }
   };
 
-  const handleDeleteChallenge = (id) => {
-    if (window.confirm("이 챌린지를 삭제하시겠습니까? 관련 데이터가 모두 삭제됩니다.")) {
-      setChallenges(challenges.filter(c => c.id !== id));
+  // [수정 2026-05-20] 챌린지 삭제 = DELETE /challenge/:id (Soft Delete)
+  const handleDeleteChallenge = async (id) => {
+    if (!window.confirm("이 챌린지를 삭제하시겠습니까? 관련 데이터가 모두 삭제됩니다.")) return;
+    try {
+      const res = await fetch(`${EXPRESS_URL}/challenge/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!data.success) {
+        alert(data.message || "챌린지 삭제에 실패했습니다.");
+        return;
+      }
       if (selectedChallenge?.id === id) setSelectedChallenge(null);
       alert("챌린지가 삭제되었습니다.");
+      await fetchChallenges();
+    } catch (error) {
+      console.error("챌린지 삭제 실패:", error);
+      alert("서버 오류로 챌린지 삭제에 실패했습니다.");
     }
   };
 
@@ -354,6 +480,12 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                   </tr>
                 </thead>
                 <tbody>
+                  {challengesLoading && challenges.length === 0 && (
+                    <tr><td colSpan="6" style={{ textAlign: "center", padding: "30px", color: "#999", fontSize: "13px" }}>챌린지 목록을 불러오는 중…</td></tr>
+                  )}
+                  {!challengesLoading && challenges.length === 0 && (
+                    <tr><td colSpan="6" style={{ textAlign: "center", padding: "30px", color: "#ccc", fontSize: "13px" }}>등록된 챌린지가 없습니다. "+ 새 챌린지 등록" 을 눌러 추가해주세요.</td></tr>
+                  )}
                   {challenges.map(c => (
                     <tr key={c.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                       <td style={{ padding: "16px 20px", fontWeight: "800", fontSize: '14px', color: '#111' }}>{c.title}</td>
@@ -388,27 +520,63 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 2.5fr", gap: "25px" }}>
                   <div style={{ background: "#f8f9fa", padding: "20px", borderRadius: "16px" }}>
-                    <h4 style={{ fontSize: "14px", fontWeight: "800", marginBottom: "15px", color: "#4f46e5" }}>👥 참여자 리스트 ({selectedChallenge.participants}명)</h4>
+                    <h4 style={{ fontSize: "14px", fontWeight: "800", marginBottom: "15px", color: "#4f46e5" }}>
+                      👥 참여자 리스트 ({challengeDetail.participants.length}명)
+                    </h4>
                     <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                      {["김루틴", "이갓생", "박미라클", "최열정", "정꾸준", "강도전"].map((user, i) => (
-                        <div key={i} style={{ padding: "12px", borderBottom: "1px solid #eee", fontSize: "13px", display: "flex", justifyContent: "space-between", background: 'white', borderRadius: '8px', marginBottom: '8px' }}>
-                          <span style={{ fontWeight: "700" }}>{user}</span>
-                          <span style={{ fontWeight: "800", color: "#10b981" }}>총 {selectedChallenge.totalDays}일 중 {Math.round(selectedChallenge.totalDays * 0.8)}일 성공</span>
-                        </div>
-                      ))}
+                      {challengeDetail.loading ? (
+                        <div style={{ textAlign: "center", color: "#999", padding: "30px 0", fontSize: "13px" }}>불러오는 중…</div>
+                      ) : challengeDetail.participants.length === 0 ? (
+                        <div style={{ textAlign: "center", color: "#ccc", padding: "30px 0", fontSize: "13px" }}>아직 참여자가 없습니다.</div>
+                      ) : (
+                        challengeDetail.participants.map((p) => (
+                          <div key={p.participant_id} style={{ padding: "12px", borderBottom: "1px solid #eee", fontSize: "13px", display: "flex", justifyContent: "space-between", background: "white", borderRadius: "8px", marginBottom: "8px" }}>
+                            <span style={{ fontWeight: "700" }}>{p.nickname}</span>
+                            <span style={{ fontWeight: "800", color: "#10b981" }}>
+                              총 {challengeDetail.totalDays || selectedChallenge.totalDays}일 중 {p.proof_days}일 인증
+                            </span>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
                   <div style={{ background: "#f8f9fa", padding: "20px", borderRadius: "16px" }}>
-                    <h4 style={{ fontSize: "14px", fontWeight: "800", marginBottom: "15px", color: "#4f46e5" }}>📸 실시간 인증 현황</h4>
+                    <h4 style={{ fontSize: "14px", fontWeight: "800", marginBottom: "15px", color: "#4f46e5" }}>
+                      📸 실시간 인증 현황 ({challengeDetail.proofs.length}건)
+                    </h4>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", maxHeight: "300px", overflowY: "auto", paddingRight: "5px" }}>
-                      {[1, 2, 3].map(i => (
-                        <div key={i} style={{ background: "white", padding: "10px", borderRadius: "12px", boxShadow: "0 2px 5px rgba(0,0,0,0.05)" }}>
-                          <div style={{ width: "100%", height: "80px", background: "#f0f0f0", borderRadius: "8px", marginBottom: "8px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", color: "#999" }}>인증 미디어 영역</div>
-                          <div style={{ fontSize: "11px", fontWeight: "800" }}>사용자_{i}</div>
-                          <div style={{ fontSize: "9px", color: "#bbb", marginBottom: '5px' }}>2026.05.13 07:15</div>
-                          <div style={{ fontSize: '10px', color: '#666', lineHeight: '1.4' }}>오늘도 기분 좋은 기상 인증 완료!</div>
-                        </div>
-                      ))}
+                      {challengeDetail.loading ? (
+                        <div style={{ gridColumn: "1 / -1", textAlign: "center", color: "#999", padding: "30px 0", fontSize: "13px" }}>불러오는 중…</div>
+                      ) : challengeDetail.proofs.length === 0 ? (
+                        <div style={{ gridColumn: "1 / -1", textAlign: "center", color: "#ccc", padding: "30px 0", fontSize: "13px" }}>아직 등록된 인증이 없습니다.</div>
+                      ) : (
+                        challengeDetail.proofs.map((proof) => {
+                          const firstFile = (proof.files || [])[0];
+                          const isVideo = (firstFile?.file_type || "").startsWith("video/");
+                          return (
+                            <div key={proof.id} style={{ background: "white", padding: "10px", borderRadius: "12px", boxShadow: "0 2px 5px rgba(0,0,0,0.05)" }}>
+                              <div style={{ width: "100%", height: "80px", background: "#f0f0f0", borderRadius: "8px", marginBottom: "8px", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", color: "#999" }}>
+                                {firstFile ? (
+                                  isVideo ? (
+                                    <video src={firstFile.file_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted />
+                                  ) : (
+                                    <img src={firstFile.file_url} alt="인증" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                  )
+                                ) : (
+                                  "텍스트 인증"
+                                )}
+                              </div>
+                              <div style={{ fontSize: "11px", fontWeight: "800" }}>{proof.nickname}</div>
+                              <div style={{ fontSize: "9px", color: "#bbb", marginBottom: "5px" }}>
+                                {proof.proof_date} · {proof.created_at?.slice(11, 16) || ""}
+                              </div>
+                              <div style={{ fontSize: "10px", color: "#666", lineHeight: "1.4", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: "2", WebkitBoxOrient: "vertical" }}>
+                                {proof.content || "(본문 없음)"}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 </div>
@@ -442,8 +610,10 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
                     </div>
                     <textarea placeholder="챌린지 상세 설명 내용을 입력하세요." value={challengeForm.description} onChange={(e) => setChallengeForm({...challengeForm, description: e.target.value})} style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd', minHeight: '100px', resize: 'none' }} />
                     <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                      <button className="routine-save-btn" onClick={handleSaveChallenge} style={{ flex: 2, padding: '15px' }}>{editingChallenge ? "수정 완료" : "챌린지 등록하기"}</button>
-                      <button onClick={() => setIsChallengeModalOpen(false)} style={{ flex: 1, border: 'none', background: '#eee', borderRadius: '12px', fontWeight: '800', cursor: 'pointer' }}>취소</button>
+                      <button className="routine-save-btn" onClick={handleSaveChallenge} disabled={savingChallenge} style={{ flex: 2, padding: '15px', opacity: savingChallenge ? 0.6 : 1 }}>
+                        {savingChallenge ? "저장 중…" : editingChallenge ? "수정 완료" : "챌린지 등록하기"}
+                      </button>
+                      <button onClick={() => setIsChallengeModalOpen(false)} disabled={savingChallenge} style={{ flex: 1, border: 'none', background: '#eee', borderRadius: '12px', fontWeight: '800', cursor: 'pointer' }}>취소</button>
                     </div>
                   </div>
                 </div>

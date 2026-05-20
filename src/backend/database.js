@@ -633,6 +633,57 @@ async function cancelTodayChallengeProof(challenge_id, user_id) {
     );
 }
 
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-20] 관리자 챌린지 CRUD + 참여자/인증 helper (5종)
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: P1 (AdminPage 챌린지 관리 mock state → 백엔드 연결)
+// 날짜: 2026-05-20
+// 기대 효과:
+//   - Express POST/PATCH/DELETE /challenge 와 GET 참여자/인증 모달이
+//     FastAPI 와 표준 fetchJson 패턴으로 통신
+// 장점:
+//   - 다른 도메인과 동일한 에러 표준화 / 내부 인증 헤더 자동 부착
+//   - encodeURIComponent 일괄 처리로 라우터 누락 방지
+// ────────────────────────────────────────────────────────────────────
+async function createChallenge(challengeData) {
+    return await fetchJson(`${PYTHON_API}/challenge/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(challengeData),
+    });
+}
+
+async function updateChallenge(challenge_id, patchData) {
+    return await fetchJson(
+        `${PYTHON_API}/challenge/${encodeURIComponent(challenge_id)}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patchData),
+        },
+    );
+}
+
+async function deleteChallenge(challenge_id) {
+    return await fetchJson(
+        `${PYTHON_API}/challenge/${encodeURIComponent(challenge_id)}`,
+        { method: "DELETE" },
+    );
+}
+
+async function getChallengeParticipants(challenge_id) {
+    return await fetchJson(
+        `${PYTHON_API}/challenge/${encodeURIComponent(challenge_id)}/participants`,
+    );
+}
+
+async function getChallengeAllProofs(challenge_id, limit = 60) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    return await fetchJson(
+        `${PYTHON_API}/challenge/${encodeURIComponent(challenge_id)}/proofs?${params.toString()}`,
+    );
+}
+
 // ── 모듈 내보내기 ────────────────────────────────────────────────────────────
 module.exports = {
     // 헬퍼 / 커스텀 에러 — 라우터에서 `error instanceof FastApiError` 로 구분 가능
@@ -686,4 +737,10 @@ module.exports = {
     joinChallenge,
     createChallengeProof,
     cancelTodayChallengeProof,
+    // [추가 2026-05-20] 관리자 챌린지 CRUD + 참여자/인증 (5종)
+    createChallenge,
+    updateChallenge,
+    deleteChallenge,
+    getChallengeParticipants,
+    getChallengeAllProofs,
 };

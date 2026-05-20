@@ -14,6 +14,34 @@ class ChallengeJoin(BaseModel):
     user_id: str
 
 
+# ────────────────────────────────────────────────────────────────────
+# [추가 2026-05-20] 관리자 챌린지 CRUD Pydantic 모델
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: P1 (관리자 챌린지 백엔드 미연결)
+# 날짜: 2026-05-20
+# 기대 효과:
+#   - AdminPage 의 "새 챌린지 등록 / 수정 / 삭제" 가 DB 영속화
+# 장점:
+#   - title/description/category/start_date/end_date 만 받고 total_days 는
+#     서버에서 계산 → 클라이언트 변조 불가
+# ────────────────────────────────────────────────────────────────────
+class ChallengeCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    category: Optional[str] = ""
+    start_date: str
+    end_date: str
+    created_by: Optional[str] = None
+
+
+class ChallengeUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
 class ChallengeProofFilePayload(BaseModel):
     file_url: str
     file_type: Optional[str] = ""
@@ -450,6 +478,348 @@ def cancel_today_challenge_proof(
 
         conn.commit()
         return {"success": True, "proof_id": proof["proof_id"], "file_urls": file_urls}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+# ============================================================
+# [추가 2026-05-20] 관리자 챌린지 CRUD + 참여자/인증 현황 (5개)
+# ============================================================
+# 오류 번호: P1 (AdminPage 챌린지 관리 mock state → 백엔드 연결)
+# 날짜: 2026-05-20
+# 기대 효과:
+#   - POST   /challenge/                  : 챌린지 신규 등록 (관리자)
+#   - PATCH  /challenge/{challenge_id}    : 챌린지 정보 수정 (관리자)
+#   - DELETE /challenge/{challenge_id}    : 챌린지 Soft Delete (관리자)
+#   - GET    /challenge/{id}/participants : 참여자 + 인증 일수
+#   - GET    /challenge/{id}/proofs       : 전체 인증 (실시간 인증 현황)
+# 장점:
+#   - 기존 _load_active_challenge / _serialize_challenge 재사용 → 표준화
+#   - total_days 는 (end_date - start_date + 1) 로 서버 계산 → 변조 불가
+#   - participants 응답은 닉네임/프로필/인증일수 까지 포함 → 프론트가 추가 호출 불필요
+# ============================================================
+from datetime import date as _date
+
+
+def _parse_date(value: str, field: str) -> _date:
+    """YYYY-MM-DD 문자열을 date 로 변환. 실패 시 400."""
+    try:
+        return _date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{field} 는 YYYY-MM-DD 형식이어야 합니다.")
+
+
+@router.post("/")
+def create_challenge(body: ChallengeCreate):
+    title = (body.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="챌린지 제목을 입력해주세요.")
+    if len(title) > 100:
+        raise HTTPException(status_code=400, detail="제목은 100자 이내여야 합니다.")
+
+    start_date = _parse_date(body.start_date, "start_date")
+    end_date = _parse_date(body.end_date, "end_date")
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="종료일은 시작일 이후여야 합니다.")
+
+    total_days = (end_date - start_date).days + 1
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            challenge_id = uuid7str()
+            cursor.execute(
+                """INSERT INTO challenges
+                      (challenge_id, title, description, category,
+                       start_date, end_date, total_days, created_by)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    challenge_id,
+                    title,
+                    (body.description or "").strip() or None,
+                    (body.category or "").strip() or None,
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                    total_days,
+                    body.created_by,
+                ),
+            )
+            challenge = _load_active_challenge(cursor, challenge_id)
+        conn.commit()
+        return {"success": True, "challenge": _serialize_challenge(challenge)}
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.patch("/{challenge_id}")
+def update_challenge(challenge_id: str, body: ChallengeUpdate):
+    updates = []
+    params: List = []
+
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="제목은 빈 값일 수 없습니다.")
+        if len(title) > 100:
+            raise HTTPException(status_code=400, detail="제목은 100자 이내여야 합니다.")
+        updates.append("title = %s")
+        params.append(title)
+
+    if body.description is not None:
+        updates.append("description = %s")
+        params.append(body.description.strip() or None)
+
+    if body.category is not None:
+        updates.append("category = %s")
+        params.append(body.category.strip() or None)
+
+    new_start = _parse_date(body.start_date, "start_date") if body.start_date is not None else None
+    new_end = _parse_date(body.end_date, "end_date") if body.end_date is not None else None
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            existing = _load_active_challenge(cursor, challenge_id)
+            if not existing:
+                raise HTTPException(status_code=404, detail="챌린지를 찾을 수 없습니다.")
+
+            final_start = new_start or existing["start_date"]
+            final_end = new_end or existing["end_date"]
+            if final_start > final_end:
+                raise HTTPException(status_code=400, detail="종료일은 시작일 이후여야 합니다.")
+
+            if new_start is not None:
+                updates.append("start_date = %s")
+                params.append(final_start.isoformat() if hasattr(final_start, "isoformat") else final_start)
+            if new_end is not None:
+                updates.append("end_date = %s")
+                params.append(final_end.isoformat() if hasattr(final_end, "isoformat") else final_end)
+            if new_start is not None or new_end is not None:
+                total_days = (final_end - final_start).days + 1 if hasattr(final_end, "__sub__") else (
+                    _date.fromisoformat(str(final_end)) - _date.fromisoformat(str(final_start))
+                ).days + 1
+                updates.append("total_days = %s")
+                params.append(total_days)
+
+            if not updates:
+                return {"success": True, "challenge": _serialize_challenge(existing)}
+
+            params.append(challenge_id)
+            cursor.execute(
+                f"UPDATE challenges SET {', '.join(updates)} WHERE challenge_id = %s",
+                tuple(params),
+            )
+
+            updated = _load_active_challenge(cursor, challenge_id)
+        conn.commit()
+        return {"success": True, "challenge": _serialize_challenge(updated)}
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.delete("/{challenge_id}")
+def delete_challenge(challenge_id: str):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            existing = _load_active_challenge(cursor, challenge_id)
+            if not existing:
+                raise HTTPException(status_code=404, detail="챌린지를 찾을 수 없습니다.")
+            cursor.execute(
+                """UPDATE challenges
+                   SET deleted_at = NOW()
+                   WHERE challenge_id = %s""",
+                (challenge_id,),
+            )
+        conn.commit()
+        return {"success": True, "challenge_id": challenge_id}
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/{challenge_id}/participants")
+def get_challenge_participants(challenge_id: str):
+    """관리자 상세 모달: 참여자 + 인증 일수."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            challenge = _load_active_challenge(cursor, challenge_id)
+            if not challenge:
+                raise HTTPException(status_code=404, detail="챌린지를 찾을 수 없습니다.")
+
+            cursor.execute(
+                """SELECT cp.participant_id,
+                          cp.user_id,
+                          cp.status,
+                          cp.joined_at,
+                          u.nickname,
+                          u.profile_img,
+                          COALESCE(pc.proof_days, 0) AS proof_days
+                   FROM challenge_participants cp
+                   LEFT JOIN users u
+                          ON cp.user_id = u.user_id
+                         AND u.deleted_at IS NULL
+                   LEFT JOIN (
+                       SELECT user_id, COUNT(DISTINCT proof_date) AS proof_days
+                       FROM challenge_proofs
+                       WHERE challenge_id = %s
+                         AND deleted_at IS NULL
+                       GROUP BY user_id
+                   ) pc ON pc.user_id = cp.user_id
+                   WHERE cp.challenge_id = %s
+                   ORDER BY cp.joined_at ASC""",
+                (challenge_id, challenge_id),
+            )
+            rows = cursor.fetchall()
+
+        return {
+            "total_days": int(challenge["total_days"] or 0),
+            "participants": [
+                {
+                    "participant_id": r["participant_id"],
+                    "user_id": r["user_id"],
+                    "nickname": r["nickname"] or "(탈퇴한 회원)",
+                    "profile_img": r["profile_img"],
+                    "status": r["status"],
+                    "joined_at": _to_iso(r["joined_at"]),
+                    "proof_days": int(r["proof_days"] or 0),
+                }
+                for r in rows
+            ],
+        }
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/{challenge_id}/proofs")
+def get_challenge_all_proofs(
+    challenge_id: str,
+    limit: int = Query(60, ge=1, le=200, description="최대 인증 건수"),
+):
+    """관리자 상세 모달: 실시간 인증 현황 (모든 참여자)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            challenge = _load_active_challenge(cursor, challenge_id)
+            if not challenge:
+                raise HTTPException(status_code=404, detail="챌린지를 찾을 수 없습니다.")
+
+            cursor.execute(
+                """SELECT cp.proof_id,
+                          cp.user_id,
+                          cp.content,
+                          cp.proof_date,
+                          cp.created_at,
+                          u.nickname,
+                          u.profile_img,
+                          cpf.proof_file_id,
+                          cpf.file_url,
+                          cpf.file_type,
+                          cpf.file_order
+                   FROM challenge_proofs cp
+                   LEFT JOIN users u
+                          ON cp.user_id = u.user_id
+                         AND u.deleted_at IS NULL
+                   LEFT JOIN challenge_proof_files cpf
+                          ON cp.proof_id = cpf.proof_id
+                   WHERE cp.challenge_id = %s
+                     AND cp.deleted_at IS NULL
+                   ORDER BY cp.created_at DESC, cpf.file_order ASC, cpf.created_at ASC
+                   LIMIT %s""",
+                (challenge_id, limit * 10),
+            )
+            rows = cursor.fetchall()
+
+        proofs = []
+        proof_map = {}
+        for row in rows:
+            proof = proof_map.get(row["proof_id"])
+            if not proof:
+                if len(proofs) >= limit:
+                    continue
+                proof = {
+                    "id": row["proof_id"],
+                    "user_id": row["user_id"],
+                    "nickname": row["nickname"] or "(탈퇴한 회원)",
+                    "profile_img": row["profile_img"],
+                    "content": row["content"] or "",
+                    "proof_date": _to_iso(row["proof_date"]),
+                    "created_at": _to_iso(row["created_at"]),
+                    "files": [],
+                }
+                proof_map[row["proof_id"]] = proof
+                proofs.append(proof)
+
+            if row.get("proof_file_id"):
+                proof["files"].append(
+                    {
+                        "id": row["proof_file_id"],
+                        "file_url": row["file_url"],
+                        "file_type": row["file_type"] or "",
+                    }
+                )
+
+        return {"proofs": proofs}
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     except Exception as e:
         try:
             conn.rollback()
