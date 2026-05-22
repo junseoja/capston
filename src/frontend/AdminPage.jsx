@@ -1,33 +1,20 @@
 // ============================================================
-// [2026-05-13 / frontend 머지 Stage 2-3] — dev 의 231줄 버전을 frontend 의 535줄 버전으로 통째 교체.
-// 출처 커밋 (frontend 측):
-//   - d7f70a5 "feat: 관리자 공지사항 작성·수정 및 신고 게시물 관리 기능 구현"
-//   - adde39d "feat: 공지사항 리스트 및 상세 페이지 구현"
-//   - 98693c1 "design: 관리자 신고 상세 모달 레이아웃 변경 및 공지사항 상세 디자인 고도화"
-// 통합 사유: dev 의 5/12 머지 1단계에서 가져왔던 AdminPage 자체가 frontend 의 옛 버전이었음.
-//   frontend 가 그 위에서 (a) 공지사항 작성·수정 (b) 신고 처리 UI 고도화 (c) 챌린지 관리(보너스)
-//   을 확장 → 통째 교체가 가장 충돌 없이 모든 신기능 흡수 가능.
-// 추가된 신기능:
-//   1) 공지사항 CRUD — notices/setNotices props 로 외부 데이터 연결.
-//      카테고리(일반/이벤트/점검/업데이트) + 신규/수정 모달.
-//   2) 챌린지 관리 — 컴포넌트 내부 상태로 챌린지 추가/수정/삭제 (백엔드 미연동, mock).
-//   3) 신고 상세 모달 디자인 + 처리 상태 표시 강화.
-// 외부 의존성: React 기본만 (fetch / EXPRESS_URL 사용 안 함 → 백엔드 영향 0).
-// 주의:
-//   - notices/setNotices props 주입은 Stage 2-7 (App.jsx 통합)에서 처리.
-//   - 챌린지 관리는 데이터가 컴포넌트 내부 상태라 새로고침 시 초기화됨 (mock 단계).
-//
-// [최초 추가 기록 보존 — 2026-05-12 / frontend 머지 1단계]
-//   출처: origin/frontend commits 8c9c6a2 + 62d5017
-//   당시 사유: 관리자 페이지를 dev 경로 규칙(src/frontend/*)으로 이전, 순수 표시 컴포넌트.
+// AdminPage.jsx - 관리자 콘솔
 // ============================================================
-// [수정 2026-05-16 / 관리자 백엔드 연결]
-// 오류/변경 번호: 5/12~5/13 의 공지/신고 mock(localStorage·in-memory)
-//                 → 실제 백엔드(Express /notice, /report) 연결
-// 날짜: 2026-05-16
-// 사유: notices/reports 가 가짜 데이터라 새로고침/다른 기기에서 안 보였음.
-// 기대효과: 공지 작성/수정/삭제와 신고 조회/제재가 DB 에 영속.
-// 장점: useEffect + fetch 패턴이 dev 기존 MyPage/FeedPage 와 일관.
+// 역할:
+//   - 신고 목록 조회, 신고 상세 확인, 게시물 제재 처리
+//   - 공지사항 작성/수정/삭제
+//   - 챌린지 생성/수정/삭제, 참여자/인증 현황 조회
+//
+// 현재 연결 상태:
+//   - 신고: Express /report, /report/process
+//   - 공지: Express /notice
+//   - 챌린지: Express /challenge 계열 관리자 API
+//
+// 접근 제어:
+//   App.jsx에서 1차로 admin 라우트 가드 처리,
+//   Express 라우터에서 requireAuth + requireAdmin으로 최종 보호.
+// ============================================================
 import React, { useState, useMemo, useEffect } from "react";
 import { EXPRESS_URL } from "./config";
 
@@ -103,24 +90,14 @@ function AdminPage({ onDeleteConfirm, notices = [], onNoticeChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportTab]);
 
-  // ────────────────────────────────────────────────────────────────────
-  // [수정 2026-05-20] 챌린지 관리 mock state → 백엔드 연결
-  // ────────────────────────────────────────────────────────────────────
-  // 오류 번호: P1 (AdminPage 챌린지 CRUD 가 컴포넌트 로컬 state 라
-  //                새로고침 시 초기화되고 DB 영속화되지 않음)
-  // 날짜: 2026-05-20
-  // 기대 효과:
+  // 챌린지 관리 API:
   //   - GET    /challenge                          : 목록 로드
   //   - POST   /challenge                          : 새 챌린지 등록
   //   - PATCH  /challenge/:id                      : 챌린지 수정
   //   - DELETE /challenge/:id                      : Soft Delete
   //   - GET    /challenge/:id/participants         : 참여자 + 인증일수
   //   - GET    /challenge/:id/proofs               : 실시간 인증 현황
-  // 장점:
-  //   - 사용자 ChallengePage 와 동일 DB → 등록한 챌린지가 즉시 사용자에게 노출
-  //   - participants/proofs 는 selectedChallenge 가 set 될 때만 lazy fetch
-  //     → 목록 로딩 시 불필요한 부하 없음
-  // ────────────────────────────────────────────────────────────────────
+  // 참여자/인증 현황은 selectedChallenge가 정해진 뒤에만 lazy fetch한다.
   const [challenges, setChallenges] = useState([]);
   const [challengesLoading, setChallengesLoading] = useState(false);
   const [selectedChallenge, setSelectedChallenge] = useState(null);

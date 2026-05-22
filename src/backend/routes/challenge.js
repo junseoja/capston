@@ -1,3 +1,21 @@
+// ============================================================
+// 챌린지(Challenge) 관련 Express 라우터
+// ============================================================
+// 담당 라우트:
+//   GET    /challenge                         : 전체 챌린지 목록
+//   GET    /challenge/my                      : 내가 참여한 챌린지
+//   GET    /challenge/proofs                  : 내 인증 기록
+//   POST   /challenge/:challenge_id/join      : 챌린지 참여
+//   POST   /challenge/:challenge_id/proof     : 오늘 인증 등록 (S3 업로드 N건)
+//   DELETE /challenge/:challenge_id/proof/today : 오늘 인증 취소
+//   POST/PATCH/DELETE /challenge              : 관리자 챌린지 CRUD
+//   GET    /challenge/:id/participants|proofs : 관리자 현황 조회
+//
+// 파일 업로드:
+//   multer-s3가 challenge/ prefix로 S3에 저장하고, FastAPI에는 URL/key/type만 전달한다.
+//   FastAPI 저장 실패나 인증 취소 시 S3 객체는 best-effort로 정리한다.
+// ============================================================
+
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
@@ -194,21 +212,12 @@ router.delete("/challenge/:challenge_id/proof/today", requireAuth, async (req, r
     }
 });
 
-// ────────────────────────────────────────────────────────────────────
-// [추가 2026-05-20] 관리자 챌린지 CRUD + 참여자/인증 (5개 라우트)
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: P1 (AdminPage 챌린지 관리 mock state → DB 영속)
-// 날짜: 2026-05-20
-// 기대 효과:
+// 관리자 챌린지 CRUD + 참여자/인증 라우트:
 //   - POST   /challenge                          : 챌린지 신규 등록
 //   - PATCH  /challenge/:challenge_id            : 챌린지 정보 수정
 //   - DELETE /challenge/:challenge_id            : 챌린지 Soft Delete
 //   - GET    /challenge/:challenge_id/participants : 참여자 + 인증일수
 //   - GET    /challenge/:challenge_id/proofs       : 실시간 인증 현황
-// 장점:
-//   - requireAdmin 으로 보호 (notice/report 와 동일 패턴)
-//   - 입력 검증을 라우트 단에서 빠르게 거르고 FastAPI 호출 비용 절감
-// ────────────────────────────────────────────────────────────────────
 
 function _parsePayload(body) {
     return {

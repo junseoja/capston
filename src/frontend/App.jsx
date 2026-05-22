@@ -2,11 +2,12 @@
 // App.jsx - 앱 루트 컴포넌트
 // ============================================================
 // 역할:
-//   - 로그인 상태(isLoggedIn)를 전역으로 관리
+//   - 로그인/현재 유저/공지 목록/루틴 상태를 전역으로 관리
 //   - 루틴 데이터(routines)를 중앙에서 fetch하여 하위 컴포넌트에 props로 전달
 //     (단일 진실 공급원 패턴 - Single Source of Truth)
 //   - 루틴 완료 처리(체크/상세) 및 피드 업로드를 백엔드 API로 처리
 //   - react-router-dom의 Routes로 URL 기반 페이지 이동 처리
+//   - 관리자 전용 화면(/admin)은 login_id === "admin" 기준으로 접근 제한
 //
 // 상태 구조:
 //   isLoggedIn  : 로그인 여부 (true/false)
@@ -17,10 +18,14 @@
 // 라우트 구조:
 //   /login  → LoginPage  (비로그인 전용)
 //   /signup → SignupPage (비로그인 전용)
-//   /       → HomePage   (로그인 전용)
-//   /routine → RoutinePage (로그인 전용)
-//   /feed   → FeedPage   (로그인 전용)
-//   /mypage → MyPage     (로그인 전용)
+//   /          → HomePage       (로그인 전용)
+//   /routine   → RoutinePage    (로그인 전용)
+//   /feed      → FeedPage       (로그인 전용)
+//   /challenge → ChallengePage  (로그인 전용)
+//   /notice    → NoticeList     (로그인 전용)
+//   /mypage    → MyPage         (로그인 전용)
+//   /stats     → StatsPage      (로그인 전용)
+//   /admin     → AdminPage      (관리자 전용)
 // ============================================================
 
 import { useState, useCallback, useEffect } from "react";
@@ -34,22 +39,14 @@ import FeedPage from "./FeedPage";
 import MyPage from "./MyPage";
 import SignupPage from "./SignupPage";
 import StatsPage from "./StatsPage";
-// [추가 2026-05-12 / frontend-cy 머지 (45d00d8)]
-// 사유: 챌린지 페이지 컴포넌트 신규 추가에 따른 import.
-// 기대효과: /challenge 라우트에서 ChallengePage 렌더링 가능.
-// 장점: 챌린지 기능을 독립 페이지로 분리 → 코드 응집도↑, 라우팅 일관성 유지.
+// 챌린지 화면은 App 전역 상태에 의존하지 않고 자체적으로 /challenge API를 호출한다.
+// 참여/인증/취소 흐름이 루틴 피드 업로드와 분리되어 있어 라우트만 연결한다.
 import ChallengePage from "./ChallengePage";
-// [추가 2026-05-12 / frontend 머지 7/7]
-// 출처: origin/frontend commits 8c9c6a2 / 62d5017 / f387027 / 56bc7cc
-// 사유: 1단계에서 추가한 관리자 페이지 컴포넌트를 라우트 등록 및 권한 가드 적용.
-// 기대효과: 로그인 시 id="admin" 이면 /admin 으로 진입, 일반 유자는 접근 차단.
-// 장점: 다른 보호 라우트와 동일한 isLoggedIn 가드 패턴 + 추가 관리자 권한 가드 한 줄로 처리.
+// 관리자 화면은 신고/공지/챌린지 관리 API를 직접 호출한다.
+// 접근 제어는 프론트 라우트 가드 + Express requireAdmin 이중 구조다.
 import AdminPage from "./AdminPage";
-// [추가 2026-05-13 / frontend 머지 Stage 2-7]
-// 출처: origin/frontend commits adde39d / 98693c1 (공지사항 리스트/상세 페이지)
-// 사유: Stage 2-1, 2-2 에서 추가한 NoticeList / NoticeDetail 컴포넌트를 라우트 등록.
-// 기대효과: /notice 로 리스트, /notice/detail 로 상세 페이지 접근 가능.
-// 장점: react-router 라우트 패턴으로 통일 (frontend 원본의 page-state 패턴 대신).
+// NoticeList/NoticeDetail 은 원래 page-state 방식 컴포넌트라,
+// 아래 라우트에서 setPage 콜백을 react-router navigate로 어댑트한다.
 import NoticeList from "./NoticeList";
 import NoticeDetail from "./NoticeDetail";
 
@@ -77,36 +74,9 @@ function App() {
     // 라우트 리다이렉트를 바로 수행하지 않기 위한 플래그
     const [authChecked, setAuthChecked] = useState(false);
 
-    // ────────────────────────────────────────────────────────────────────
-    // [제거 2026-05-20] frontend-cy(7dd5535) 챌린지 백엔드 통합으로 mock 상태 폐기
-    // ────────────────────────────────────────────────────────────────────
-    // 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
-    // 날짜: 2026-05-20
-    // 기대효과:
-    //   - 챌린지 인증은 FastAPI feed.py GET /feed/ 가 challenge_proofs 와 합쳐 반환
-    //   - 프론트 mock 상태(challengeMockFeedPosts) 와 업로드 콜백 더 이상 불필요
-    // 장점:
-    //   - 단일 진실 공급원(SSOT) 완성 — 새로고침/다중 기기에서도 동일 데이터
-    //   - App.jsx 상태 표면 축소 → 유지보수 부담 감소
-    // ────────────────────────────────────────────────────────────────────
-
-    // ── [추가 2026-05-12 / frontend 머지 7/7] 관리자/신고/제재 알림 상태 ──
-    // 출처: origin/frontend src/App.jsx (commits f387027, 56bc7cc, 8c9c6a2)
-    // 사유:
-    //   1) FeedPage 의 onReportPost / AdminPage 의 reports props 가 공유할
-    //      신고 데이터 저장소가 필요.
-    //   2) HomePage 의 deleteNotifications props 가 받을 제재 알림 큐.
-    //   3) LoginPage 가 6단계에서 role 시그널을 보내므로 관리자 권한 플래그 추가.
-    // 기대효과:
-    //   - FeedPage 신고 → reports 누적 → AdminPage 리스트 표시.
-    //   - AdminPage 제재 → deleteNotifications 추가 → HomePage 모달 표시.
-    //   - 로그인 ID 가 "admin" 이면 isAdmin=true → /admin 라우트 접근 허용.
-    // 장점:
-    //   - 단일 진실 공급원(SSOT) 패턴 유지 — 데이터 흐름이 App.jsx 한 곳에 모임.
-    //   - deleteNotifications 는 localStorage 영속화 → 새로고침/재로그인 후에도 알림 유지.
-    // [수정 2026-05-16] reports 는 더 이상 App.jsx 가 메모리로 관리하지 않음.
-    // AdminPage 가 GET /report 로 직접 조회하고, 제재 후 자체 재조회한다.
-    // (관리자만 보는 데이터라 항상 App 에서 들고 있을 필요가 없음)
+    // 관리자/신고/제재 알림 상태.
+    // 신고 목록 자체는 AdminPage가 /report에서 직접 조회하고,
+    // App은 작성자에게 보여줄 제재 알림 큐와 관리자 라우트 가드만 관리한다.
     const [deleteNotifications, setDeleteNotifications] = useState(() => {
         try {
             return JSON.parse(localStorage.getItem("deleteNotifications") || "[]");
@@ -116,19 +86,9 @@ function App() {
     });
     const [isAdmin, setIsAdmin] = useState(false);
 
-    // [수정 2026-05-16 / 관리자 백엔드 연결] 공지사항 전역 상태
-    // 오류/변경 번호: 5/13 Stage 2-7 의 localStorage mock → 실제 백엔드(GET /notice) 전환
-    // 날짜: 2026-05-16
-    // 사유:
-    //   기존엔 AdminPage 가 setNotices 로 메모리/localStorage 에만 공지를 쌓아
-    //   다른 기기/새 브라우저에서는 공지가 안 보였음 (가짜 데이터).
-    //   백엔드 notice 라우터 완성으로 실제 DB 기반 공유 데이터로 전환.
-    // 기대효과:
-    //   AdminPage 가 공지를 작성하면 DB 에 저장되고, HomePage 모달 /
-    //   NoticeList 가 모든 사용자/기기에서 같은 공지를 본다.
-    // 장점:
-    //   단일 진실 공급원이 localStorage → 백엔드 DB 로 승격.
-    //   fetchRoutines 와 동일한 useCallback 패턴이라 코드 일관성 유지.
+    // 공지사항 전역 상태.
+    // AdminPage가 공지를 변경하면 onNoticeChange(fetchNotices)로 재조회하고,
+    // HomePage/NoticeList/NoticeDetail은 같은 배열을 공유한다.
     const [notices, setNotices] = useState([]);
     // 공지사항 상세 페이지에서 표시할 항목 (NoticeList 에서 클릭 → setSelectedNotice)
     const [selectedNotice, setSelectedNotice] = useState(null);
@@ -700,18 +660,8 @@ function App() {
         return true;
     };
 
-    // ────────────────────────────────────────────────────────────────────
-    // [제거 2026-05-20] uploadChallengeProofToFeed mock 핸들러 폐기
-    // ────────────────────────────────────────────────────────────────────
-    // 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
-    // 날짜: 2026-05-20
-    // 기대효과:
-    //   - ChallengePage 가 자체적으로 POST /challenge/:id/proof 호출 (백엔드 처리)
-    //   - share_to_feed 컬럼이 1 이면 GET /feed/ 응답에 자동 포함되어 노출
-    // 장점:
-    //   - 화면 새로고침/다른 기기에서도 동일 데이터 보장
-    //   - mock 핸들러/상태/prop 3종 동시 제거로 변경 흐름 추적성 향상
-    // ────────────────────────────────────────────────────────────────────
+    // 챌린지 인증은 ChallengePage가 직접 /challenge/:id/proof로 저장한다.
+    // share_to_feed가 켜진 인증은 FastAPI GET /feed 응답에 자동 포함된다.
 
     // ── 로그아웃 처리 ─────────────────────────────────────────────────────────
 
@@ -748,10 +698,7 @@ function App() {
         // 장점: deleteNotifications 는 의도적으로 보존(영구화) → 알림은 다음 접속 시에도 확인 가능.
         setIsAdmin(false);
         setNotices([]); // [수정 2026-05-16] 로그아웃 시 공지 캐시도 비움 (재로그인 시 재조회)
-        // [제거 2026-05-20] challengeMockFeedPosts 폐기 — 백엔드 통합으로 mock 상태 불필요
-        // [추가 2026-05-13 / frontend 머지 Stage 2-7]
-        // 사유: 로그아웃 시 공지 상세 선택 상태 초기화 (notices 자체는 localStorage 보존).
-        // 장점: 다른 계정 로그인 시 이전 유저가 보던 공지 상세가 노출되지 않음.
+        // 다른 계정 로그인 시 이전 유저가 보던 공지 상세가 노출되지 않도록 초기화.
         setSelectedNotice(null);
         navigate("/login");
     };
@@ -778,23 +725,14 @@ function App() {
                         <button onClick={() => navigate("/routine")}>루틴</button>
                         <button onClick={() => navigate("/feed")}>피드</button>
                         <button onClick={() => navigate("/mypage")}>마이페이지</button>
-                        {/* [추가 2026-05-12 / frontend-cy 머지 (45d00d8)]
-                            사유: 챌린지 페이지 진입 버튼.
-                            기대효과: 상단 네비게이션에서 /challenge 즉시 이동 가능.
-                            장점: 사용자 동선 단축, 다른 메뉴들과 통일된 진입 방식 제공. */}
+                        {/* 챌린지 페이지 진입 */}
                         <button onClick={() => navigate("/challenge")}>챌린지</button>
-                        {/* [추가 2026-05-13 / frontend 머지 Stage 2-7]
-                            사유: 공지사항 리스트 페이지 진입점.
-                            기대효과: 사용자가 언제든 공지 목록 확인 가능. */}
+                        {/* 공지사항 목록 진입 */}
                         <button onClick={() => navigate("/notice")}>공지사항</button>
-                        {/* [추가 2026-05-12 / frontend 머지 7/7 - 관리자 메뉴]
-                            사유: 관리자만 보이는 상단 네비 진입점.
-                            기대효과: isAdmin 일 때만 표시 → 일반 유저는 깔끔한 메뉴 유지.
-                            장점: 조건부 렌더라 권한 없는 사람에게는 메뉴 노출 0. */}
+                        {/* 관리자에게만 관리 콘솔 진입 버튼을 노출 */}
                         {isAdmin && (
                             <button onClick={() => navigate("/admin")}>관리자</button>
                         )}
-                        <button onClick={handleLogout}>로그아웃</button>
                     </nav>
                 </header>
             )}
@@ -835,14 +773,10 @@ function App() {
                                     onCompleteCheck={completeCheckRoutine}    // 체크 루틴 완료 핸들러
                                     onCompleteDetail={completeDetailRoutine}  // 상세 루틴 완료 핸들러
                                     onCancelComplete={cancelRoutineCompletion} // 완료 취소 핸들러
-                                    // [추가 2026-05-12 / frontend 머지 7/7]
-                                    // 사유: 3단계 HomePage 의 관리자 제재 알림 모달 props 주입.
-                                    // 기대효과: AdminPage 에서 제재 → 작성자가 홈 진입 시 모달로 안내.
+                                    // 관리자 제재 알림 모달용 큐
                                     deleteNotifications={deleteNotifications}
                                     setDeleteNotifications={setDeleteNotifications}
-                                    // [추가 2026-05-13 / frontend 머지 Stage 2-7]
-                                    // 사유: HomePage Stage 2-4 에서 추가한 공지사항 노출 모달이 사용할 notices 주입.
-                                    // 기대효과: AdminPage 에서 공지 작성 → 홈 진입 시 모달로 안내.
+                                    // 홈 공지 모달에서 사용할 공지 목록
                                     notices={notices}
                                 />
                                 : <Navigate to="/login" />
@@ -860,33 +794,21 @@ function App() {
                         }
                     />
 
-                    {/* 피드 페이지: DB에서 전체 피드를 최신순으로 조회 */}
+                    {/* 피드 페이지: 루틴/챌린지 통합 피드를 최신순으로 조회 */}
                     <Route
                         path="/feed"
                         element={
                             isLoggedIn
                                 ? <FeedPage
                                     currentUser={currentUser}
-                                    // [추가 2026-05-12 / frontend 머지 7/7]
-                                    // 사유: 2단계 FeedPage 의 신고 콜백 주입.
-                                    // 기대효과: 🚩 신고 버튼 클릭 → reports 큐 누적 → AdminPage 노출.
+                                    // 신고 모달 제출 시 Express /report로 접수
                                     onReportPost={handleReportPost}
-                                    // [제거 2026-05-20] extraMockPosts prop 폐기
-                                    // 기대효과: FeedPage 가 백엔드(GET /feed/) 응답만으로 challenge 통합 피드 노출
-                                    // 장점: 부모-자식 간 상태 동기화 부담 제거, props 표면 축소
                                 />
                                 : <Navigate to="/login" />
                         }
                     />
 
-                    {/* [추가 2026-05-12 / frontend 머지 7/7 - 관리자 페이지 라우트]
-                        사유: 1단계에서 추가한 AdminPage 컴포넌트를 라우트에 등록.
-                        가드: 로그인 + 관리자(isAdmin) 동시 만족 필요.
-                        기대효과:
-                          - 비로그인 → /login
-                          - 일반 유저 → / (홈으로 차단)
-                          - 관리자 → AdminPage(reports, onDeleteConfirm 주입)
-                        장점: 다른 보호 라우트와 같은 패턴 + 권한 가드 1줄 추가만 차이. */}
+                    {/* 관리자 페이지: 로그인 + 관리자(isAdmin) 동시 만족 필요 */}
                     <Route
                         path="/admin"
                         element={
@@ -894,10 +816,7 @@ function App() {
                                 ? <Navigate to="/login" />
                                 : isAdmin
                                     ? <AdminPage
-                                        // [수정 2026-05-16 / 관리자 백엔드 연결]
-                                        // reports 는 props 주입 대신 AdminPage 가
-                                        // 자체적으로 GET /report 조회 (관리자만 보는 데이터).
-                                        // onDeleteConfirm: 제재 시 PATCH /report/process 호출.
+                                        // 신고 처리 시 PATCH /report/process 호출
                                         onDeleteConfirm={handleDeleteConfirm}
                                         // notices 는 App 의 fetchNotices 결과를 그대로 보여주고,
                                         // 작성/수정/삭제 후엔 onNoticeChange 로 App 이 재조회.
@@ -908,11 +827,7 @@ function App() {
                         }
                     />
 
-                    {/* [추가 2026-05-13 / frontend 머지 Stage 2-7 - 공지사항 라우트]
-                        사유: Stage 2-1/2-2 에서 추가한 NoticeList / NoticeDetail 컴포넌트 라우팅 등록.
-                        가드: 로그인 사용자만 접근.
-                        주의: NoticeList 의 setPage 는 frontend 원본 page-state 패턴 → useNavigate adapt.
-                              setSelectedNotice 는 App.jsx 상태와 직결. */}
+                    {/* 공지사항: 로그인 사용자만 접근, page-state 콜백은 navigate로 어댑트 */}
                     <Route
                         path="/notice"
                         element={
@@ -943,10 +858,15 @@ function App() {
                         }
                     />
 
-                    {/* 마이페이지: MyPage 내부에서 직접 /me, /routine API 호출 */}
+                    {/* 마이페이지: MyPage 내부에서 /mypage, /me/profile, /feed 삭제 API 호출 */}
                     <Route
                         path="/mypage"
-                        element={isLoggedIn ? <MyPage /> : <Navigate to="/login" />}
+                        element={
+                            isLoggedIn
+                                // 로그아웃 버튼은 상단 네비 대신 마이페이지 프로필 영역에 둔다.
+                                ? <MyPage onLogout={handleLogout} />
+                                : <Navigate to="/login" />
+                        }
                     />
 
                     {/* 상세 분석 페이지: 마이페이지에서 "상세 분석" 버튼으로 진입 */}
@@ -955,17 +875,11 @@ function App() {
                         element={isLoggedIn ? <StatsPage /> : <Navigate to="/login" />}
                     />
 
-                    {/* [추가 2026-05-12 / frontend-cy 머지 (45d00d8)]
-                        사유: 신규 챌린지 페이지 라우트 등록.
-                        기대효과: 비로그인 시 /login 으로 가드, 로그인 시 ChallengePage 렌더.
-                        장점: 다른 보호 라우트와 동일한 isLoggedIn 가드 패턴 사용 → 일관성↑. */}
+                    {/* 챌린지 페이지: 목록/참여/인증을 ChallengePage가 자체 API로 처리 */}
                     <Route
                         path="/challenge"
                         element={
                             isLoggedIn
-                                // [제거 2026-05-20] onUploadChallengeFeed prop 폐기
-                                // 기대효과: ChallengePage 가 자체적으로 POST /challenge/:id/proof 호출
-                                // 장점: 콜백 의존 제거 → 챌린지 도메인이 App.jsx 와 완전 디커플
                                 ? <ChallengePage />
                                 : <Navigate to="/login" />
                         }

@@ -1,3 +1,13 @@
+"""Challenge domain API.
+
+Express의 challenge.js 라우터가 내부 키를 붙여 호출하는 데이터 계층이다.
+사용자 기능은 챌린지 목록/참여/인증 등록/오늘 인증 취소를 담당하고,
+관리자 기능은 챌린지 CRUD와 참여자/인증 현황 조회를 담당한다.
+
+인증 파일 자체는 Express가 S3에 업로드하며, 이 라우터는 DB에 URL/key/type
+메타데이터와 챌린지 참여/인증 관계만 저장한다.
+"""
+
 from fastapi import APIRouter, HTTPException, Query
 from database import get_connection
 from pydantic import BaseModel, Field

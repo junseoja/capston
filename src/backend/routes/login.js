@@ -5,7 +5,10 @@
 //   POST /signup          : 회원가입 (bcrypt 해싱 후 저장)
 //   POST /login           : 로그인 (bcrypt 비교, httpOnly 쿠키 세션 발급)
 //   GET  /me              : 현재 로그인 유저 정보 반환
+//   PATCH /me/profile     : 닉네임/자기소개 수정
 //   POST /logout          : 로그아웃 (세션 DB 삭제 + 쿠키 제거)
+//   POST /find-id         : 닉네임+이메일 기반 아이디 찾기
+//   POST /find-password   : 본인확인 후 임시 비밀번호 발급
 //   GET  /check-duplicate : 아이디/닉네임 중복 확인 (회원가입 전)
 //
 // 보안:

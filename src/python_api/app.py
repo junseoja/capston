@@ -38,18 +38,7 @@ SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "500"))
 # - stats    : 상세 분석 통계 실제 데이터
 # - notice   : 관리자 공지사항 CRUD
 # - report   : 게시글 신고 접수 + 관리자 제재 처리
-# ────────────────────────────────────────────────────────────────────
-# [추가 2026-05-20] 챌린지 라우터 import (frontend-cy 7dd5535 이식)
-# ────────────────────────────────────────────────────────────────────
-# 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
-# 날짜: 2026-05-20
-# 기대효과:
-#   - /challenge 경로의 GET/POST/DELETE 엔드포인트 활성화
-#   - Express challenge.js 가 호출할 데이터 계층 노출
-# 장점:
-#   - 다른 도메인 라우터와 동일한 import 패턴 → 일관성 유지
-# ────────────────────────────────────────────────────────────────────
-# - challenge : 챌린지 목록/참여/인증 등록·취소
+# - challenge : 챌린지 목록/참여/인증 등록·취소 + 관리자 CRUD/현황
 from routers import user, routine, completion, feed, like, comment, mypage, stats
 from routers import notice, report, challenge
 
@@ -127,13 +116,5 @@ app.include_router(stats.router)
 app.include_router(notice.router)
 app.include_router(report.router)
 
-# ────────────────────────────────────────────────────────────────────
-# [추가 2026-05-20] 챌린지 라우터 등록 (frontend-cy 7dd5535 이식)
-# ────────────────────────────────────────────────────────────────────
-# 기대효과:
-#   - /challenge, /challenge/my/{user_id}, /challenge/proofs/{user_id}
-#   - /challenge/{id}/join, /challenge/{id}/proof, /challenge/{id}/proof/today
-# 장점:
-#   - include_router 한 줄로 챌린지 도메인 노출 → 다른 도메인 패턴과 동일
-# ────────────────────────────────────────────────────────────────────
+# 챌린지 라우터: 사용자 참여/인증과 관리자 CRUD/현황을 모두 포함한다.
 app.include_router(challenge.router)

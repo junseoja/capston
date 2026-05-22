@@ -274,18 +274,8 @@ def _build_cursor(created_at, feed_id: str) -> str:
     return f"{ts}_{feed_id}"
 
 
-# ────────────────────────────────────────────────────────────────────
-# [추가 2026-05-20] frontend-cy(7dd5535) 챌린지 피드 통합용 컬럼 가드
-# ────────────────────────────────────────────────────────────────────
-# 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
-# 날짜: 2026-05-20
-# 기대효과:
-#   - migrations-2026-05-20-challenge-feed-share.sql 적용 전 환경에서도
-#     get_feeds() 가 컬럼 부재로 500 에러 내지 않고 routine 피드만 정상 반환
-# 장점:
-#   - 마이그레이션 미적용 환경(개발자 로컬, 신규 클론)에서도 안전 fallback
-#   - 단일 SHOW COLUMNS 비용만 들이고 challenge 쿼리 전체를 skip 가능
-# ────────────────────────────────────────────────────────────────────
+# challenge_proofs.share_to_feed 마이그레이션 미적용 환경을 위한 가드.
+# 컬럼이 없으면 챌린지 피드 병합만 건너뛰고 루틴 피드는 정상 반환한다.
 def _has_challenge_share_column(cursor) -> bool:
     cursor.execute("SHOW COLUMNS FROM challenge_proofs LIKE 'share_to_feed'")
     return cursor.fetchone() is not None
@@ -403,19 +393,8 @@ def get_feeds(
                 # [추가 2026-05-20] 챌린지 통합 시 FeedPage 가 게시물 출처를 구분하도록 메타 부착
                 f["source_type"] = "routine"
 
-            # ────────────────────────────────────────────────────────────────────
-            # [추가 2026-05-20] frontend-cy(7dd5535) 챌린지 피드 통합
-            # ────────────────────────────────────────────────────────────────────
-            # 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
-            # 날짜: 2026-05-20
-            # 기대효과:
-            #   - ChallengePage 에서 "피드에 업로드" 체크 후 등록된 챌린지 인증이
-            #     FeedPage 의 단일 목록에 routine 피드와 시간순으로 섞여 노출
-            # 장점:
-            #   - 별도 챌린지 피드 화면을 만들 필요 없이 기존 FeedPage 재사용
-            #   - share_to_feed 컬럼 가드(_has_challenge_share_column) 로
-            #     마이그레이션 미적용 환경에서도 routine 피드만 안전하게 반환
-            # ────────────────────────────────────────────────────────────────────
+            # share_to_feed가 켜진 챌린지 인증을 일반 피드 목록에 병합한다.
+            # FeedPage는 source_type 값으로 루틴 피드와 챌린지 인증 피드를 구분한다.
             challenge_feeds = []
             if _has_challenge_share_column(cur):
                 challenge_sql = """SELECT

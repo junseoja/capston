@@ -1,3 +1,21 @@
+// ============================================================
+// ChallengePage.jsx - 챌린지 페이지
+// ============================================================
+// 역할:
+//   - 전체 챌린지 목록, 내가 참여한 챌린지, 내 인증 기록을 조회
+//   - 챌린지 참여, 오늘 인증 등록, 오늘 인증 취소 처리
+//   - 인증 파일은 FormData로 Express /challenge/:id/proof에 전달하고,
+//     Express가 S3 업로드 후 FastAPI에 메타데이터를 저장한다.
+//
+// 데이터 흐름:
+//   ChallengePage -> Express challenge.js -> FastAPI challenge.py -> MySQL
+//   인증 미디어: Express challenge.js -> AWS S3
+//
+// 주의:
+//   챌린지 인증을 피드에 공유하면 FastAPI feed.py가 GET /feed 응답에서
+//   source_type="challenge" 항목으로 함께 내려준다.
+// ============================================================
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EXPRESS_URL } from "./config";

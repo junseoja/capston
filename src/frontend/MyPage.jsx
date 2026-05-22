@@ -3,6 +3,7 @@
 // ============================================================
 // 역할:
 //   - 로그인한 유저의 닉네임, 프로필 아바타 표시
+//   - 닉네임/자기소개 수정 (PATCH /me/profile)
 //   - 오늘의 갓생 지수(통합 달성률) 차트
 //   - 핵심 지표: 총 루틴 수 / 연속 달성 / 인증 게시글 수
 //   - 내 인증 갤러리 (피드 이미지 모음)
@@ -19,18 +20,16 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { EXPRESS_URL } from "./config";
 
-function MyPage() {
+function MyPage({ onLogout }) {
     const navigate = useNavigate();
 
     // 로그인한 유저 정보 (GET /me 응답)
     const [user, setUser] = useState(null);
 
-    // [추가 2026-05-10] 마이페이지 실제 요약 지표.
-    // 이유: 기존 mock 달성률/연속 달성/인증 게시글 수를 DB 기반 API 응답으로 대체.
+    // 마이페이지 실제 요약 지표. GET /mypage 응답의 summary를 저장한다.
     const [summary, setSummary] = useState(null);
 
-    // [추가 2026-05-10] 내 인증 갤러리 실제 항목.
-    // 이유: Unsplash placeholder 대신 feeds/feed_images 에 저장된 실제 업로드 파일 표시.
+    // 내 인증 갤러리 실제 항목. feeds/feed_images의 S3 URL을 표시한다.
     const [galleryItems, setGalleryItems] = useState([]);
 
     // 데이터 로딩 중 여부
@@ -56,13 +55,8 @@ function MyPage() {
     // ── [추가] 인스타그램형 프로필 편집 상태 관리 ─────────────────────────────────────
     const [isProfileEdit, setIsProfileEdit] = useState(false);
     const [editNickname, setEditNickname] = useState("");
-    // ────────────────────────────────────────────────────────────────────
-    // [수정 2026-05-20] bio 초기값을 하드코딩에서 DB user.bio 기반으로 전환 (P0 #2)
-    // 오류 번호: P0 #2 (프로필 수정 백엔드 미연결로 새로고침 시 휘발)
-    // 날짜: 2026-05-20
-    // 기대 효과: 저장된 자기소개가 새로고침 후에도 동일하게 노출됨
-    // 장점: useEffect 로 user 로딩 완료 시 동기화 → 첫 렌더는 빈 값, 로딩 후 실제 값으로 채워짐
-    // ────────────────────────────────────────────────────────────────────
+    // bio는 GET /mypage 응답의 user.bio로 동기화한다.
+    // 값이 아직 없을 때만 기본 문구를 화면에 보여준다.
     const DEFAULT_BIO = "오늘도 나만의 루틴으로 채워가는 하루 ✨";
     const [editBio, setEditBio] = useState(DEFAULT_BIO);
     // 저장 진행 중 플래그 — 중복 저장 클릭 방지
@@ -357,26 +351,44 @@ function MyPage() {
                 <div className="profile-info" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flexGrow: 1 }}>
                     {!isProfileEdit ? (
                         <>
-                            <div style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", justifyContent: "space-between" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%" }}>
                                 <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "900", color: "#111827" }}>
                                     {user.nickname}
                                 </h1>
-                                <button
-                                    onClick={() => setIsProfileEdit(true)}
-                                    style={{
-                                        border: "1px solid #dbdbdb",
-                                        background: "#ffffff",
-                                        padding: "5px 12px",
-                                        borderRadius: "8px",
-                                        fontSize: "12px",
-                                        fontWeight: "700",
-                                        color: "#262626",
-                                        cursor: "pointer",
-                                        boxShadow: "0 1px 2px rgba(0,0,0,0.03)"
-                                    }}
-                                >
-                                    프로필 편집
-                                </button>
+                                {/* 상단 네비에서 제거한 로그아웃 동선을 프로필 액션 묶음으로 이동 */}
+                                <div style={{ display: "flex", gap: "8px", marginLeft: "auto" }}>
+                                    <button
+                                        onClick={() => setIsProfileEdit(true)}
+                                        style={{
+                                            border: "1px solid #dbdbdb",
+                                            background: "#ffffff",
+                                            padding: "5px 12px",
+                                            borderRadius: "8px",
+                                            fontSize: "12px",
+                                            fontWeight: "700",
+                                            color: "#262626",
+                                            cursor: "pointer",
+                                            boxShadow: "0 1px 2px rgba(0,0,0,0.03)"
+                                        }}
+                                    >
+                                        프로필 편집
+                                    </button>
+                                    <button
+                                        onClick={onLogout}
+                                        style={{
+                                            border: "1px solid #ef4444",
+                                            background: "#ffffff",
+                                            padding: "5px 12px",
+                                            borderRadius: "8px",
+                                            fontSize: "12px",
+                                            fontWeight: "700",
+                                            color: "#ef4444",
+                                            cursor: "pointer"
+                                        }}
+                                    >
+                                        로그아웃
+                                    </button>
+                                </div>
                             </div>
                             <p style={{ margin: "4px 0 0 0", color: "#6b7280", fontSize: "14px", fontWeight: "600", textAlign: "left" }}>
                                 {editBio}

@@ -5,6 +5,7 @@
 //   - 아이디/비밀번호 입력 후 Express 백엔드(/login)로 POST 요청
 //   - 성공 시 부모(App.jsx)의 handleLogin 콜백 호출 → 홈("/")으로 이동
 //   - Enter 키로도 로그인 실행 가능 (onKeyDown 이벤트)
+//   - 닉네임+이메일 기반 아이디 찾기와 임시 비밀번호 발급 요청 처리
 //
 // Props:
 //   onLogin    - 로그인 성공 시 호출할 콜백 (App.jsx의 handleLogin)
@@ -69,16 +70,8 @@ function LoginPage({ onLogin, onGoSignup }) {
 
             if (result.success) {
                 alert("로그인 성공");
-                // [추가 2026-05-12 / frontend 머지 6/7]
-                // 출처: origin/frontend src/LoginPage.jsx (commit 8c9c6a2)
-                // 사유: 관리자 계정 로그인 시 별도 분기(/admin 라우트) 처리를 위한 role 신호 전달.
-                // 기대효과: id 가 "admin" 이면 onLogin("ADMIN") → App.jsx 가 navigate("/admin"),
-                //          일반 유저는 onLogin("USER") → 기존대로 "/".
-                // 장점:
-                //   - dev 의 백엔드 /login 검증을 그대로 거치므로 비밀번호도 DB 에 등록된 값이어야 통과
-                //     (frontend 의 하드코딩 "admin/1234" 보안 취약점 회피).
-                //   - 백엔드 응답에 result.user 가 오면 user.login_id 로도 폴백 판별.
-                //   - role 인자가 빠진 기존 호출 호환을 위해 App.jsx 의 handleLogin 도 기본값 처리 예정.
+                // 관리자 계정은 App.jsx가 /admin으로 이동할 수 있도록 role 신호를 전달한다.
+                // 실제 인증은 항상 Express /login과 DB 비밀번호 검증을 통과해야 한다.
                 const role =
                     id === "admin" || result.user?.login_id === "admin"
                         ? "ADMIN"
@@ -97,19 +90,8 @@ function LoginPage({ onLogin, onGoSignup }) {
         }
     };
 
-    // ────────────────────────────────────────────────────────────────────
-    // [수정 2026-05-20] 아이디/비번 찾기 Mock 제거 후 실제 백엔드 연결 (P0 #3)
-    // ────────────────────────────────────────────────────────────────────
-    // 오류 번호: P0 #3 (LoginPage Mock 하드코딩 → "홍길동/test@test.com" 만 동작)
-    // 날짜: 2026-05-20
-    // 기대 효과:
-    //   - 실제 회원이 아이디/임시비밀번호를 정상적으로 받을 수 있음
-    //   - 미일치 시 동일한 메시지로 사용자 정보 노출 차단
-    // 장점:
-    //   - 닉네임은 DB users.nickname 컬럼과 매칭 (실명 컬럼이 별도로 없음)
-    //   - 비밀번호 재설정 시 서버가 임시 비번을 즉시 발급 → 다음 로그인부터 사용 가능
-    //   - 이메일 발송 인프라 도입 시 응답에서 temp_password 만 제거하면 됨 (UI 변경 없음)
-    // ────────────────────────────────────────────────────────────────────
+    // 계정 찾기 흐름은 실제 백엔드 API를 사용한다.
+    // 닉네임은 users.nickname과 매칭하며, 임시 비밀번호는 서버가 해시 저장 후 1회 안내한다.
     const [findIdLoading, setFindIdLoading] = useState(false);
     const [findPwLoading, setFindPwLoading] = useState(false);
 

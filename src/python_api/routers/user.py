@@ -8,6 +8,9 @@
 #   GET    /user/session/{session_id}      : 세션 조회 (인증 미들웨어 역할)
 #   DELETE /user/session/{session_id}      : 세션 삭제 (로그아웃)
 #   PATCH  /user/password/{user_id}        : 비밀번호 해시 업데이트 (Lazy Migration 전용)
+#   PATCH  /user/profile/{user_id}         : 닉네임/bio 수정
+#   POST   /user/find-login-id             : 닉네임+이메일 기반 아이디 찾기
+#   POST   /user/verify-for-password-reset : 임시 비밀번호 발급 전 본인 확인
 #   GET    /user/check/login_id/{login_id} : 아이디 중복 확인
 #   GET    /user/check/nickname/{nickname} : 닉네임 중복 확인
 #

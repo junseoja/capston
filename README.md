@@ -138,18 +138,26 @@ pip install -r requirements.txt
 capston-main/
 ├── index.html                # HTML 진입점
 ├── start.sh                  # 전체 서버 한번에 실행
+├── start-docker.sh           # 개발용 Docker Compose 실행
+├── server.sh                 # cloudflared Named Tunnel 보조 실행 스크립트
 ├── .env                      # 프론트엔드 환경변수 (VITE_EXPRESS_URL)
+├── docs/                     # 아키텍처/배포/마이그레이션/성능 문서
 ├── src/
 │   ├── frontend/             # React 프론트엔드
 │   │   ├── main.jsx          # 앱 진입점 (BrowserRouter 포함)
-│   │   ├── App.jsx           # 루트 컴포넌트 (라우팅 + 전역 상태 관리)
+│   │   ├── App.jsx           # 라우팅 + 인증/루틴/공지 전역 상태
 │   │   ├── config.js         # 서버 URL 환경변수 중앙 관리
 │   │   ├── LoginPage.jsx     # 로그인 페이지
 │   │   ├── SignupPage.jsx    # 회원가입 페이지
-│   │   ├── HomePage.jsx      # 홈 페이지 (루틴 완료 체크)
+│   │   ├── HomePage.jsx      # 홈 페이지 (루틴 완료/상세 인증/공지 모달)
 │   │   ├── RoutinePage.jsx   # 루틴 관리 페이지 (CRUD)
-│   │   ├── FeedPage.jsx      # 피드 페이지
-│   │   └── MyPage.jsx        # 마이페이지
+│   │   ├── FeedPage.jsx      # 루틴/챌린지 통합 피드, 좋아요/댓글/신고
+│   │   ├── ChallengePage.jsx # 챌린지 목록/참여/인증
+│   │   ├── AdminPage.jsx     # 공지/신고/챌린지 관리자 화면
+│   │   ├── NoticeList.jsx    # 공지 목록
+│   │   ├── NoticeDetail.jsx  # 공지 상세
+│   │   ├── MyPage.jsx        # 마이페이지/프로필 수정/갤러리
+│   │   └── StatsPage.jsx     # 주간/월간 상세 통계
 │   │
 │   ├── css/                  # 스타일시트
 │   │   ├── App.css           # 전체 레이아웃 및 컴포넌트 스타일
@@ -159,28 +167,44 @@ capston-main/
 │   │   ├── app.js
 │   │   ├── database.js       # Express → FastAPI 연결 모듈
 │   │   ├── .env              # Express 환경변수 (PORT, PYTHON_API, FRONTEND_URL)
-│   │   ├── uploads/          # 피드 이미지/영상 업로드 저장소
+│   │   ├── uploads/          # 과거 로컬 업로드 자리표시자(.gitkeep). 신규 파일은 S3 저장
+│   │   ├── middleware/
+│   │   │   ├── requireAuth.js
+│   │   │   └── requireAdmin.js
 │   │   └── routes/
-│   │       ├── login.js      # 인증 라우터 (로그인/회원가입/세션/중복체크)
+│   │       ├── login.js      # 인증/프로필/아이디찾기/비밀번호재설정
 │   │       ├── routine.js    # 루틴 CRUD 라우터
 │   │       ├── completion.js # 완료 이력 라우터
-│   │       ├── feed.js       # 피드 라우터 (생성/조회/삭제, 이미지 업로드)
+│   │       ├── feed.js       # 피드 라우터 (S3 업로드, 조회, 삭제)
 │   │       ├── like.js       # 좋아요 라우터 (토글)
-│   │       └── comment.js    # 댓글 라우터 (작성/조회/삭제)
+│   │       ├── comment.js    # 댓글 라우터 (작성/조회/삭제)
+│   │       ├── mypage.js     # 마이페이지 통합/summary/gallery
+│   │       ├── stats.js      # 통계 라우터 + 짧은 TTL 캐시
+│   │       ├── notice.js     # 공지 CRUD
+│   │       ├── report.js     # 신고 접수/관리자 제재
+│   │       └── challenge.js  # 챌린지 참여/인증/관리
 │   │
 │   └── python_api/           # FastAPI 서버 (:8000)
 │       ├── app.py
-│       ├── database.py       # MySQL 커넥션 모듈
+│       ├── database.py       # PyMySQL 커넥션 풀 + slow SQL 로그
 │       ├── requirements.txt
 │       ├── .env              # DB 접속 정보 (DB_HOST, DB_USER 등)
 │       └── routers/
-│           ├── user.py       # 유저 API (회원가입/세션/중복체크)
+│           ├── user.py       # 유저/세션/프로필/계정찾기 API
 │           ├── routine.py    # 루틴 API
 │           ├── completion.py # 루틴 완료 기록 API
-│           ├── feed.py       # 피드 게시물 API
+│           ├── feed.py       # 루틴+챌린지 통합 피드 API
 │           ├── like.py       # 좋아요 API
-│           └── comment.py    # 댓글 API
+│           ├── comment.py    # 댓글 API
+│           ├── mypage.py     # 마이페이지 집계 API
+│           ├── stats.py      # 통계 집계 API
+│           ├── notice.py     # 공지 API
+│           ├── report.py     # 신고 API
+│           └── challenge.py  # 챌린지 API
 ```
+
+현재 기준의 모듈별 분석 결과는 `docs/code-review-current-state-2026-05-20.md`에 정리했습니다.
+아래 날짜별 작업 내역은 변경 히스토리 보존용이며, 서로 충돌하는 내용이 있으면 이 프로젝트 구조와 아키텍처 문서를 우선합니다.
 
 ---
 
@@ -221,6 +245,15 @@ INTERNAL_API_KEY=replace-with-a-long-random-shared-secret
 
 # React 프론트엔드 URL (CORS 허용 대상)
 FRONTEND_URL=http://localhost:5173
+
+# 배포/터널 환경에서는 HTTPS 쿠키를 위해 production 권장
+NODE_ENV=development
+
+# S3 업로드 설정 (피드/챌린지 인증 파일)
+AWS_REGION=ap-northeast-2
+AWS_S3_BUCKET=your-bucket-name
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
 ```
 
 ### 3. Python FastAPI `.env`
@@ -678,6 +711,8 @@ users ────────────────────────�
 
 ## 📡 API 명세
 
+브라우저는 원칙적으로 Express(:3000)만 호출합니다. FastAPI(:8000)는 Express가 `X-Internal-Api-Key`를 붙여 호출하는 내부 데이터 계층입니다.
+
 ### Express (:3000) — 인증
 
 | 메서드 | URL | 설명 |
@@ -685,7 +720,10 @@ users ────────────────────────�
 | POST | /signup | 회원가입 |
 | POST | /login | 로그인 (세션 쿠키 발급) |
 | GET | /me | 현재 로그인 유저 정보 조회 |
+| PATCH | /me/profile | 닉네임/자기소개 수정 |
 | POST | /logout | 로그아웃 |
+| POST | /find-id | 닉네임+이메일 기반 아이디 찾기 |
+| POST | /find-password | 닉네임+아이디+이메일 본인확인 후 임시 비밀번호 발급 |
 | GET | /check-duplicate | 아이디/닉네임 중복체크 |
 
 ### Express (:3000) — 루틴
@@ -694,7 +732,7 @@ users ────────────────────────�
 |---|---|---|
 | GET | /routine | 내 루틴 목록 조회 |
 | POST | /routine | 루틴 생성 |
-| DELETE | /routine/:id | 루틴 삭제 (화면 상태만이 아니라 DB `routines` 테이블에서도 실제 삭제) |
+| DELETE | /routine/:routine_id | 루틴 Soft Delete (세션 user_id 기준 소유권 검증) |
 
 ### Express (:3000) — 루틴 완료 기록
 
@@ -705,6 +743,52 @@ users ────────────────────────�
 | GET | /completion/history | 최근 완료 이력 조회 |
 | DELETE | /completion/:completion_id | 완료 기록 삭제/취소 |
 
+### Express (:3000) — 피드/좋아요/댓글
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| POST | /feed | S3 업로드 후 피드+이미지 N건 생성 |
+| GET | /feed?cursor=&limit= | 루틴/챌린지 통합 피드 목록 조회 |
+| DELETE | /feed/:feed_id | 피드 Soft Delete (작성자 검증) |
+| POST | /like | 좋아요 토글 |
+| POST | /comment | 댓글 작성 |
+| GET | /comment/:feed_id | 댓글 목록 조회 |
+| DELETE | /comment/:comment_id | 댓글 삭제 (작성자 검증) |
+
+### Express (:3000) — 마이페이지/통계
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| GET | /mypage | 유저+summary+gallery 통합 조회 |
+| GET | /mypage/summary | 핵심 지표 조회 |
+| GET | /mypage/gallery | 인증 갤러리 조회 |
+| GET | /stats?mode=&start=&end= | 주간/월간 상세 통계 조회 |
+
+### Express (:3000) — 공지/신고/챌린지
+
+| 메서드 | URL | 설명 |
+|---|---|---|
+| POST | /notice | 공지 작성 (관리자) |
+| GET | /notice | 공지 목록 |
+| GET | /notice/:notice_id | 공지 상세 |
+| PATCH | /notice/:notice_id | 공지 수정 (관리자) |
+| DELETE | /notice/:notice_id | 공지 Soft Delete (관리자) |
+| POST | /report | 게시글 신고 접수 |
+| GET | /report | 신고 목록/그룹 집계 조회 (관리자) |
+| GET | /report/:report_id | 신고 상세 (관리자) |
+| PATCH | /report/process | 신고 처리 + 피드 제재 Soft Delete (관리자) |
+| GET | /challenge | 전체 챌린지 목록 |
+| GET | /challenge/my | 내가 참여한 챌린지 |
+| GET | /challenge/proofs | 내 챌린지 인증 기록 |
+| POST | /challenge/:challenge_id/join | 챌린지 참여 |
+| POST | /challenge/:challenge_id/proof | 챌린지 인증 등록 (S3 업로드 N건) |
+| DELETE | /challenge/:challenge_id/proof/today | 오늘 챌린지 인증 취소 |
+| POST | /challenge | 챌린지 생성 (관리자) |
+| PATCH | /challenge/:challenge_id | 챌린지 수정 (관리자) |
+| DELETE | /challenge/:challenge_id | 챌린지 삭제 (관리자) |
+| GET | /challenge/:challenge_id/participants | 참여자 현황 (관리자) |
+| GET | /challenge/:challenge_id/proofs | 인증 현황 (관리자) |
+
 ### FastAPI (:8000) — 유저
 
 | 메서드 | URL | 설명 |
@@ -714,6 +798,10 @@ users ────────────────────────�
 | POST | /user/session | 세션 DB 저장 |
 | GET | /user/session/{session_id} | 세션 조회 |
 | DELETE | /user/session/{session_id} | 세션 삭제 |
+| PATCH | /user/password/{user_id} | 비밀번호 해시 업데이트 |
+| PATCH | /user/profile/{user_id} | 프로필 수정 |
+| POST | /user/find-login-id | 아이디 찾기 |
+| POST | /user/verify-for-password-reset | 비밀번호 재설정 본인확인 |
 | GET | /user/check/login_id/{login_id} | 아이디 중복체크 |
 | GET | /user/check/nickname/{nickname} | 닉네임 중복체크 |
 
@@ -723,7 +811,7 @@ users ────────────────────────�
 |---|---|---|
 | POST | /routine/ | 루틴 생성 |
 | GET | /routine/{user_id} | 유저 루틴 전체 조회 |
-| DELETE | /routine/{routine_id} | 루틴 삭제 (`WHERE routine_id = ? AND user_id = ?` 조건으로 DB에서 실제 삭제) |
+| DELETE | /routine/{routine_id} | 루틴 Soft Delete (`routine_id + user_id` 소유권 검증) |
 
 ### FastAPI (:8000) — 루틴 완료 기록
 
@@ -740,9 +828,10 @@ users ────────────────────────�
 |---|---|---|
 | POST | /feed/ | 피드 게시물 생성 |
 | POST | /feed/image | 피드 이미지 추가 |
-| GET | /feed/ | 전체 피드 목록 조회 (최신순) |
+| POST | /feed/with-images | 피드+이미지 N건 단일 트랜잭션 생성 |
+| GET | /feed/ | 루틴/챌린지 통합 피드 목록 조회 (커서 기반) |
 | GET | /feed/{feed_id} | 피드 상세 조회 (이미지+댓글 포함) |
-| DELETE | /feed/{feed_id} | 피드 삭제 |
+| DELETE | /feed/{feed_id} | 피드 Soft Delete |
 
 ### FastAPI (:8000) — 좋아요
 
@@ -760,6 +849,8 @@ users ────────────────────────�
 | GET | /comment/{feed_id} | 피드 댓글 목록 조회 |
 | DELETE | /comment/{comment_id} | 댓글 삭제 |
 
+FastAPI의 `/mypage`, `/stats`, `/notice`, `/report`, `/challenge` 엔드포인트는 Express와 같은 도메인 구조를 따르며 외부 직접 호출을 전제로 하지 않습니다.
+
 ---
 
 ## 🏗 아키텍처 흐름
@@ -768,10 +859,12 @@ users ────────────────────────�
 React (:5173)
     ↓ HTTP + 쿠키
 Express (:3000)  ← 세션 관리 (DB 저장 방식)
-    ↓ node-fetch
-FastAPI (:8000)  ← 실제 DB 쿼리
+    ↓ node-fetch + X-Internal-Api-Key
+FastAPI (:8000)  ← 실제 DB 쿼리/집계/소유권 검증
     ↓ pymysql
 AWS RDS MySQL
+
+Express (:3000)  → AWS S3 (피드/챌린지 인증 파일 업로드)
 ```
 
 ---
@@ -795,8 +888,13 @@ AWS RDS MySQL
 - [x] 피드 UI (인스타그램 스타일, 좋아요 토글)
 - [x] 루틴 완료 기록 / 피드 / 좋아요 / 댓글 FastAPI 라우터 구현
 - [x] 피드 / 좋아요 / 댓글 Express 라우터 구현 및 프론트엔드 연결
-- [x] 피드 이미지/영상 업로드 (multer + Express 정적 서빙)
+- [x] 피드 이미지/영상 업로드 (multer-s3 + AWS S3)
 - [x] 피드 목록 DB 기반 최신순 조회 (메모리 → DB 전환 완료)
+- [x] 마이페이지 summary/gallery 및 프로필 수정
+- [x] 주간/월간 상세 통계
+- [x] 공지사항 CRUD 및 홈/목록/상세 화면
+- [x] 게시글 신고 접수, 관리자 신고 처리, 피드 제재 Soft Delete
+- [x] 챌린지 목록/참여/인증/관리자 CRUD 및 피드 통합
 
 
 ---

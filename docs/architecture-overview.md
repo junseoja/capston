@@ -2,7 +2,7 @@
 
 이 문서는 현재 `Routine Mate` 프로젝트를 팀 내부에서 설명할 때 바로 사용할 수 있는 전공자용 아키텍처 문서다.
 
-기준 시점은 **2026-05-11 현재 워크스페이스 코드**이며, `README.md`의 2026-05-10 작업 내역까지 반영한다. 핵심 구조는 계속 **React -> Express -> FastAPI -> MySQL** 이고, 이 구조를 갈아엎지 않는 방향으로 보안/통계/성능 개선을 추가했다.
+기준 시점은 **2026-05-20 현재 워크스페이스 코드**다. 핵심 구조는 계속 **React -> Express -> FastAPI -> MySQL** 이며, 여기에 S3 파일 저장, 공지/신고 관리자 기능, 챌린지 도메인, 프로필 수정/계정 찾기 흐름이 추가되어 있다.
 
 ## 1. Project Summary
 
@@ -22,6 +22,10 @@ Routine Mate는 사용자의 루틴을 생성/조회/삭제하고, 하루 단위
 - 상세 통계 weekly / monthly 실제 데이터 조회
 - FastAPI 내부 호출 인증 헤더
 - FastAPI MySQL 커넥션 풀, slow request / slow SQL 로그
+- 공지사항 CRUD + 홈/목록/상세 화면
+- 게시글 신고 접수 + 관리자 제재 처리
+- 챌린지 목록/참여/인증/관리자 CRUD
+- 프로필 수정, 아이디 찾기, 임시 비밀번호 재설정
 
 ## 2. Runtime Architecture
 
@@ -33,20 +37,20 @@ flowchart LR
     FE --> EX["Express Server :3000"]
     EX --> FA["FastAPI Server :8000"]
     FA --> DB["MySQL (AWS RDS)"]
-    EX --> S3["AWS S3 (feed media)"]
+    EX --> S3["AWS S3 (feed + challenge media)"]
 ```
 
-현재 구조는 **Frontend -> Express -> FastAPI -> DB** 의 2단 백엔드 구조다. Express는 사용자 인증, 세션 쿠키, S3 업로드, FastAPI 브리지 역할을 하고, FastAPI는 실제 DB CRUD/집계/소유권 검증을 담당한다.
+현재 구조는 **Frontend -> Express -> FastAPI -> DB** 의 2단 백엔드 구조다. Express는 사용자 인증, 세션 쿠키, 관리자 가드, S3 업로드, FastAPI 브리지 역할을 하고, FastAPI는 실제 DB CRUD/집계/소유권 검증을 담당한다.
 
 ### 2-2. Responsibility Split
 
 | Layer | Main Responsibility |
 |---|---|
 | React | 화면 렌더링, 라우팅, 입력 처리, 로컬 UI 상태 관리, API 호출 |
-| Express | CORS, httpOnly 세션 쿠키, `requireAuth`, FastAPI 프록시, S3 multipart 업로드, 짧은 `/stats` 캐시, 글로벌 JSON 에러 처리 |
+| Express | CORS, httpOnly 세션 쿠키, `requireAuth`, `requireAdmin`, FastAPI 프록시, S3 multipart 업로드, 짧은 `/stats` 캐시, 글로벌 JSON 에러 처리 |
 | FastAPI | 실제 DB CRUD, 소유권 검증, 마이페이지/통계 집계, 내부 인증 헤더 검증 |
 | MySQL (AWS RDS) | 사용자/루틴/완료/피드/좋아요/댓글 영속 저장 |
-| AWS S3 | 피드 이미지/영상 바이너리 저장 |
+| AWS S3 | 피드/챌린지 인증 이미지·영상 바이너리 저장 |
 
 ### 2-3. Internal FastAPI Guard
 
@@ -79,8 +83,12 @@ capston-main/
 │   ├── App.jsx                 로그인/루틴 전역 상태 + 라우팅
 │   ├── HomePage.jsx            오늘 루틴 / 완료 / 상세 인증
 │   ├── RoutinePage.jsx         루틴 CRUD 화면
-│   ├── FeedPage.jsx            피드 목록 / 좋아요 / 댓글 모달
-│   ├── MyPage.jsx              마이페이지 실제 summary/gallery 표시
+│   ├── FeedPage.jsx            루틴+챌린지 통합 피드 / 좋아요 / 댓글 / 신고
+│   ├── ChallengePage.jsx       챌린지 목록 / 참여 / 인증 등록·취소
+│   ├── AdminPage.jsx           공지 / 신고 / 챌린지 관리
+│   ├── NoticeList.jsx          공지 목록
+│   ├── NoticeDetail.jsx        공지 상세
+│   ├── MyPage.jsx              마이페이지 summary/gallery + 프로필 수정
 │   ├── StatsPage.jsx           weekly/monthly 상세 통계 표시
 │   └── config.js               Express URL 중앙 관리
 ├── src/css/                    전역/페이지 스타일
@@ -88,34 +96,42 @@ capston-main/
 │   ├── app.js                  서버 진입점, slow request 로그, 라우터 등록
 │   ├── database.js             Express -> FastAPI 브리지 + 내부 인증 헤더
 │   ├── middleware/
-│   │   └── requireAuth.js      세션 인증 미들웨어
+│   │   ├── requireAuth.js      세션 인증 미들웨어
+│   │   └── requireAdmin.js     관리자 권한 미들웨어
 │   └── routes/
-│       ├── login.js            인증 / 회원가입 / 중복체크
+│       ├── login.js            인증 / 회원가입 / 중복체크 / 프로필 / 계정 찾기
 │       ├── routine.js          루틴 CRUD
 │       ├── completion.js       완료 생성/오늘조회/이력/취소
 │       ├── feed.js             S3 업로드 / 피드 조회 / 피드 삭제
 │       ├── like.js             좋아요 토글
 │       ├── comment.js          댓글 작성/조회/삭제
 │       ├── mypage.js           마이페이지 통합/summary/gallery
-│       └── stats.js            상세 통계 + 짧은 TTL 캐시
+│       ├── stats.js            상세 통계 + 짧은 TTL 캐시
+│       ├── notice.js           공지 CRUD
+│       ├── report.js           신고 접수/관리자 처리
+│       └── challenge.js        챌린지 참여/인증/관리
 ├── src/python_api/             FastAPI 서버
 │   ├── app.py                  내부 인증 미들웨어 + slow request 로그 + 라우터 등록
 │   ├── database.py             PyMySQL 커넥션 풀 + slow SQL 로그
 │   └── routers/
-│       ├── user.py             유저/세션/중복체크/password lazy migration
+│       ├── user.py             유저/세션/중복체크/프로필/password lazy migration
 │       ├── routine.py          루틴 CRUD
 │       ├── completion.py       완료 기록 + 소유권 검증
-│       ├── feed.py             피드 CRUD + 소유권 검증 + 페이지네이션
+│       ├── feed.py             피드 CRUD + 챌린지 통합 + 페이지네이션
 │       ├── like.py             좋아요 토글
 │       ├── comment.py          댓글 CRUD
 │       ├── mypage.py           마이페이지 summary/gallery/overview
-│       └── stats.py            주간/월간/시간대/카테고리 통계
+│       ├── stats.py            주간/월간/시간대/카테고리 통계
+│       ├── notice.py           공지 CRUD
+│       ├── report.py           신고/제재 트랜잭션
+│       └── challenge.py        챌린지/인증/관리자 집계
 └── docs/
     ├── architecture-overview.md
+    ├── code-review-current-state-2026-05-20.md
     └── performance-indexes-2026-05-10.sql
 ```
 
-`src/backend/uploads/`는 과거 로컬 업로드 저장소의 흔적이며, 현재 신규 피드 파일은 S3에 저장된다. `/uploads` 정적 서빙도 제거되어 있다.
+`src/backend/uploads/`는 과거 로컬 업로드 저장소의 흔적이며, 현재 신규 피드/챌린지 파일은 S3에 저장된다. `/uploads` 정적 서빙도 제거되어 있다.
 
 ## 4. Frontend Architecture
 
@@ -129,8 +145,12 @@ capston-main/
 | `src/frontend/SignupPage.jsx` | 회원가입 + 실시간 유효성 검사 + 중복체크 |
 | `src/frontend/HomePage.jsx` | 오늘 루틴 목록 / 완료 / 상세 인증 / 피드 업로드 선택 |
 | `src/frontend/RoutinePage.jsx` | 루틴 CRUD 화면 |
-| `src/frontend/FeedPage.jsx` | 커서 기반 피드 목록 / 좋아요 / 댓글 모달 |
-| `src/frontend/MyPage.jsx` | `GET /mypage` 기반 유저 정보 + summary + gallery |
+| `src/frontend/FeedPage.jsx` | 커서 기반 루틴+챌린지 통합 피드 / 좋아요 / 댓글 / 신고 |
+| `src/frontend/ChallengePage.jsx` | 챌린지 목록 / 참여 / 인증 등록·취소 |
+| `src/frontend/AdminPage.jsx` | 공지 CRUD / 신고 처리 / 챌린지 관리 |
+| `src/frontend/NoticeList.jsx` | 공지 목록 검색/필터/읽음 표시 |
+| `src/frontend/NoticeDetail.jsx` | 공지 상세 표시 |
+| `src/frontend/MyPage.jsx` | `GET /mypage` 기반 유저 정보 + summary + gallery + 프로필 수정 |
 | `src/frontend/StatsPage.jsx` | `GET /stats` 기반 weekly/monthly 상세 분석 |
 
 ### 4-2. State Ownership
@@ -142,6 +162,9 @@ flowchart TD
     ROUTINES --> HOME["HomePage"]
     ROUTINES --> ROUTINE["RoutinePage via onRoutineChange"]
     APP --> FEED["FeedPage (currentUser only)"]
+    APP --> CHAL["ChallengePage"]
+    APP --> NOTICE["NoticeList / NoticeDetail"]
+    APP --> ADMIN["AdminPage (admin only)"]
     APP --> MY["MyPage (GET /mypage)"]
     APP --> STATS["StatsPage (GET /stats)"]
 ```
@@ -153,6 +176,8 @@ flowchart TD
 - `RoutinePage`는 루틴 추가/삭제 후 `onRoutineChange()`를 호출해 `App.jsx` 상태를 다시 동기화한다.
 - `MyPage`는 화면 단위 통합 API인 `GET /mypage`를 한 번 호출한다.
 - `StatsPage`는 선택한 weekly/monthly 날짜 범위로 `GET /stats`를 호출한다.
+- `ChallengePage`는 `/challenge` 계열 API를 직접 호출해 참여/인증 상태를 관리한다.
+- `AdminPage`는 신고/챌린지 데이터를 직접 조회하고, 공지는 `App.jsx`의 `fetchNotices()`로 다시 동기화한다.
 
 ## 5. Backend Architecture
 
@@ -164,12 +189,13 @@ Express는 다음 책임을 가진다.
 2. JSON body 파싱
 3. 세션 쿠키 파싱
 4. `requireAuth`를 통한 보호 라우트 인증
-5. `database.js`를 통한 FastAPI 호출
-6. `X-Internal-Api-Key` 헤더를 FastAPI 호출에 자동 주입
-7. `multer-s3`를 통한 S3 multipart 업로드
-8. `/stats` 짧은 TTL 메모리 캐시
-9. slow request 로그
-10. 글로벌 에러 핸들러로 JSON 에러 응답 통일
+5. `requireAdmin`을 통한 관리자 라우트 보호
+6. `database.js`를 통한 FastAPI 호출
+7. `X-Internal-Api-Key` 헤더를 FastAPI 호출에 자동 주입
+8. `multer-s3`를 통한 S3 multipart 업로드
+9. `/stats` 짧은 TTL 메모리 캐시
+10. slow request 로그
+11. 글로벌 에러 핸들러로 JSON 에러 응답 통일
 
 ### 5-2. Express Internal Flow
 
@@ -191,7 +217,7 @@ flowchart TD
 
 | Router | Public Express Routes |
 |---|---|
-| `routes/login.js` | `/signup`, `/login`, `/me`, `/logout`, `/check-duplicate` |
+| `routes/login.js` | `/signup`, `/login`, `/me`, `/me/profile`, `/logout`, `/find-id`, `/find-password`, `/check-duplicate` |
 | `routes/routine.js` | `/routine`, `/routine/:routine_id` |
 | `routes/completion.js` | `/completion`, `/completion/today`, `/completion/history`, `/completion/:completion_id` |
 | `routes/feed.js` | `/feed`, `/feed/:feed_id` |
@@ -199,6 +225,9 @@ flowchart TD
 | `routes/comment.js` | `/comment`, `/comment/:feed_id`, `/comment/:comment_id` |
 | `routes/mypage.js` | `/mypage`, `/mypage/summary`, `/mypage/gallery` |
 | `routes/stats.js` | `/stats` |
+| `routes/notice.js` | `/notice`, `/notice/:notice_id` |
+| `routes/report.js` | `/report`, `/report/process`, `/report/:report_id` |
+| `routes/challenge.js` | `/challenge`, `/challenge/my`, `/challenge/proofs`, `/challenge/:id/join`, `/challenge/:id/proof`, `/challenge/:id/proof/today`, 관리자 CRUD/현황 |
 
 ### 5-4. FastAPI Layer
 
@@ -206,14 +235,17 @@ FastAPI는 DB CRUD/집계 계층으로 쓰인다.
 
 | Router | Role |
 |---|---|
-| `user.py` | 회원가입, 유저 조회, 세션 저장/조회/삭제, 중복체크, password lazy migration |
+| `user.py` | 회원가입, 유저 조회, 세션 저장/조회/삭제, 중복체크, 프로필 수정, 아이디 찾기, password lazy migration |
 | `routine.py` | 루틴 생성/조회/soft delete |
 | `completion.py` | 완료 기록 생성/오늘 조회/이력 조회/soft delete, 완료 생성 전 루틴 소유권 검증 |
-| `feed.py` | 피드 생성/이미지 저장/목록 조회/상세 조회/삭제, 피드 생성 전 completion/routine/user 관계 검증 |
+| `feed.py` | 피드 생성/이미지 저장/목록 조회/상세 조회/삭제, 챌린지 인증 피드 통합, 피드 생성 전 completion/routine/user 관계 검증 |
 | `like.py` | 좋아요 토글/조회 |
 | `comment.py` | 댓글 생성/조회/삭제 |
 | `mypage.py` | 유저 + summary + gallery 통합 조회, summary/gallery 단독 조회 |
 | `stats.py` | weekly/monthly 통계, 시간대별 루틴 달성률, 카테고리 달성률, streak 계산 |
+| `notice.py` | 공지 작성/목록/상세/수정/Soft Delete |
+| `report.py` | 신고 접수, feed_id 단위 그룹 집계, 관리자 제재 트랜잭션 |
+| `challenge.py` | 챌린지 목록/참여/인증/취소, 관리자 CRUD, 참여자/인증 현황 |
 
 ### 5-5. Database Connection Pool
 

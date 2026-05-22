@@ -9,15 +9,16 @@
 //   Express 라우터 → 이 모듈의 함수 → HTTP fetch → FastAPI 라우터 → MySQL
 //
 // 함수 분류:
-//   유저 관련   : findUser, createUser
+//   유저 관련   : findUser, createUser, updateUserProfile, findLoginIdByProfile, verifyForPasswordReset
 //   세션 관련   : createSession, findSession, deleteSession
 //   루틴 관련   : createRoutine, getRoutines, deleteRoutine
 //   완료 관련   : createCompletion, getTodayCompletions, getCompletionHistory, deleteCompletion
-//   피드 관련   : createFeed, addFeedImage, getFeeds, getFeedDetail, deleteFeed
+//   피드 관련   : createFeed, createFeedWithImages, addFeedImage, getFeeds, getFeedDetail, deleteFeed
 //   좋아요 관련 : toggleLike, checkLike
 //   댓글 관련   : createComment, getComments, deleteComment
-//   마이페이지   : getMypageSummary, getMypageGallery
+//   마이페이지   : getMypageOverview, getMypageSummary, getMypageGallery
 //   통계 관련   : getStats
+//   관리자/운영 : notice, report, challenge 계열 helper
 //
 // 모든 FastAPI 호출은 fetchJson()을 통과한다.
 // 네트워크 실패, HTTP 에러, JSON 파싱 실패를 FastApiError로 표준화해
@@ -159,17 +160,7 @@ async function updateUserPassword(user_id, hashed_password) {
     });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// [추가 2026-05-20] 프로필 수정 helper (P0 #2)
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: P0 #2 (MyPage handleSaveProfile 백엔드 미연결)
-// 날짜: 2026-05-20
-// 기대 효과:
-//   - Express PATCH /me/profile 가 FastAPI PATCH /user/profile/{user_id} 로 정확히 중계
-// 장점:
-//   - 다른 user 도메인 helper 와 동일한 fetchJson 패턴 → 에러 표준화/내부 인증 헤더 자동 부착
-//   - profile 필드(nickname/bio) 추가 시 본 helper 만 수정하면 됨
-// ────────────────────────────────────────────────────────────────────
+/** 프로필 수정. Express PATCH /me/profile -> FastAPI PATCH /user/profile/{user_id}. */
 async function updateUserProfile(user_id, profile) {
     return await fetchJson(`${PYTHON_API}/user/profile/${encodeURIComponent(user_id)}`, {
         method: "PATCH",
@@ -178,17 +169,7 @@ async function updateUserProfile(user_id, profile) {
     });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// [추가 2026-05-20] 아이디 찾기 / 비번 재설정 본인 확인 helper (P0 #3)
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: P0 #3 (LoginPage Mock 하드코딩)
-// 날짜: 2026-05-20
-// 기대 효과:
-//   - Express /find-id / /find-password 가 FastAPI 본인 확인 엔드포인트로 정확히 중계
-// 장점:
-//   - 다른 user helper 와 동일한 fetchJson 패턴 (내부 인증 헤더 자동 부착)
-//   - login_id 만 노출하거나 user_id 만 노출하는 최소 PII 응답
-// ────────────────────────────────────────────────────────────────────
+/** 닉네임+이메일로 로그인 아이디를 찾는다. */
 async function findLoginIdByProfile(nickname, email) {
     return await fetchJson(`${PYTHON_API}/user/find-login-id`, {
         method: "POST",
@@ -197,6 +178,7 @@ async function findLoginIdByProfile(nickname, email) {
     });
 }
 
+/** 임시 비밀번호 발급 전 닉네임+아이디+이메일 조합을 검증한다. */
 async function verifyForPasswordReset(nickname, login_id, email) {
     return await fetchJson(`${PYTHON_API}/user/verify-for-password-reset`, {
         method: "POST",
@@ -569,18 +551,9 @@ async function processReport(processData) {
     });
 }
 
-// ────────────────────────────────────────────────────────────────────
-// [추가 2026-05-20] 챌린지 관련 함수 (frontend-cy 7dd5535 이식)
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
-// 날짜: 2026-05-20
-// 기대효과:
-//   - Express challenge.js 라우터가 FastAPI /challenge/* 호출 시 단일 진입점 사용
-//   - 다른 도메인(feed/like/comment)과 동일한 fetchJson 에러 표준화 적용
-// 장점:
-//   - 라우터는 try/catch 만 부착하면 FastApiError 일관 처리 가능
-//   - URL 인코딩(encodeURIComponent) 을 한 곳에서 보장 → 라우터별 누락 위험 제거
-// ────────────────────────────────────────────────────────────────────
+// ─── 챌린지 관련 함수 ───────────────────────────────────────────────────────
+// 모든 챌린지 호출도 fetchJson을 통해 내부 인증 헤더, JSON 파싱, FastApiError
+// 표준화를 동일하게 적용받는다.
 
 /** 전체 챌린지 목록 조회 (FastAPI GET /challenge/) */
 async function getChallenges() {
@@ -633,18 +606,7 @@ async function cancelTodayChallengeProof(challenge_id, user_id) {
     );
 }
 
-// ────────────────────────────────────────────────────────────────────
-// [추가 2026-05-20] 관리자 챌린지 CRUD + 참여자/인증 helper (5종)
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: P1 (AdminPage 챌린지 관리 mock state → 백엔드 연결)
-// 날짜: 2026-05-20
-// 기대 효과:
-//   - Express POST/PATCH/DELETE /challenge 와 GET 참여자/인증 모달이
-//     FastAPI 와 표준 fetchJson 패턴으로 통신
-// 장점:
-//   - 다른 도메인과 동일한 에러 표준화 / 내부 인증 헤더 자동 부착
-//   - encodeURIComponent 일괄 처리로 라우터 누락 방지
-// ────────────────────────────────────────────────────────────────────
+// ─── 관리자 챌린지 CRUD + 참여자/인증 현황 ──────────────────────────────────
 async function createChallenge(challengeData) {
     return await fetchJson(`${PYTHON_API}/challenge/`, {
         method: "POST",
@@ -730,14 +692,14 @@ module.exports = {
     listReports,
     getReport,
     processReport,
-    // [추가 2026-05-20] 챌린지 함수 6종 (frontend-cy 7dd5535 이식)
+    // 사용자 챌린지 helper
     getChallenges,
     getMyChallenges,
     getChallengeProofs,
     joinChallenge,
     createChallengeProof,
     cancelTodayChallengeProof,
-    // [추가 2026-05-20] 관리자 챌린지 CRUD + 참여자/인증 (5종)
+    // 관리자 챌린지 helper
     createChallenge,
     updateChallenge,
     deleteChallenge,

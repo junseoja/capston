@@ -2,49 +2,29 @@
 // FeedPage.jsx - 피드 페이지 컴포넌트
 // ============================================================
 // 역할:
-//   - DB에서 전체 피드 목록을 최신순으로 조회하여 표시
+//   - DB에서 루틴 인증 피드와 챌린지 인증 피드를 최신순으로 통합 조회하여 표시
 //   - 인스타그램 스타일 카드 UI (닉네임, 루틴 제목, 인증 글, 사진/영상)
 //   - 좋아요 토글 (POST /like API 연결)
 //   - 댓글 모달 (작성: POST /comment, 삭제: DELETE /comment)
-//   - 피드 이미지는 Express /uploads/ 경로에서 정적 서빙
+//   - 일반 피드 신고 접수 (POST /report)
+//   - 피드/챌린지 미디어는 S3 URL을 그대로 사용하며, 과거 /uploads 경로도 호환 처리
 //
 // Props:
 //   currentUser - 현재 로그인한 유저 정보 ({ user_id, nickname, ... })
 // ============================================================
 
 // ────────────────────────────────────────────────────────────────────
-// [수정 2026-05-20] frontend-cy(7dd5535) 챌린지 백엔드 통합 — useMemo 제거
-// ────────────────────────────────────────────────────────────────────
-// 오류 번호: 머지 작업 (frontend-cy → dev 챌린지 통합)
-// 날짜: 2026-05-20
-// 기대효과:
-//   - 챌린지 피드가 백엔드 GET /feed/ 의 challenge_proofs 통합 결과에 포함되어
-//     별도 mock 머지가 필요 없어짐 → useMemo / extraMockPosts 제거
-// 장점:
-//   - 데이터 소스가 단일화(SSOT) → 매 렌더 정렬·dedup 부담 0
-//   - App.jsx 의 challengeMockFeedPosts 상태도 함께 제거 가능
-// ────────────────────────────────────────────────────────────────────
+// 현재 GET /feed 응답은 FastAPI feed.py에서 routine feeds + challenge proofs를
+// created_at DESC 기준으로 합친 결과다. 따라서 프론트는 별도 mock 병합 없이
+// source_type 메타만 보고 신고/댓글/좋아요 가능 여부를 구분한다.
 import { useEffect, useState, useCallback, useRef } from "react";
 import { EXPRESS_URL } from "./config";
 
 // [수정 2026-05-03] 한 번에 가져올 페이지 크기 — FastAPI Query(limit) 와 동일한 의미
 const PAGE_SIZE = 20;
 
-// [추가 2026-05-12 / frontend 머지 2/7]
-// 출처: origin/frontend commit c261988 "feat(Feed): 인스타그램 스타일 상세 모달 및 실시간 댓글 연동"
-// 사유: 게시물 신고 기능을 dev FeedPage 에 추가. dev 는 이미 인스타 스타일/모달/댓글/좋아요/멀티미디어 슬라이더가
-//        구현된 상태였고, frontend 신기능 중 미구현이었던 신고 기능만 선별 머지.
-// 기대효과: 카드 및 모달에서 🚩 신고 버튼 클릭 → 사유 입력 → 상위 onReportPost 콜백으로 전달.
-// 장점: dev 의 백엔드 API 연결(POST /like, /comment 등)을 100% 보존하면서 UX 통일성 유지.
-// ────────────────────────────────────────────────────────────────────
-// [수정 2026-05-20] extraMockPosts props 제거
-// ────────────────────────────────────────────────────────────────────
-// 기대효과:
-//   - 챌린지 피드는 백엔드 통합(feed.py GET /feed/) 에서 source_type='challenge'
-//     로 함께 반환되므로 부모로부터 mock 주입을 받을 필요가 없어짐
-// 장점:
-//   - props 표면 축소 → 컴포넌트 책임이 "백엔드 피드 렌더"로 단일화
-// ────────────────────────────────────────────────────────────────────
+// onReportPost는 App.jsx가 Express /report로 연결한다.
+// Challenge 인증 게시물은 source_type === "challenge"로 내려오므로 신고 메뉴를 숨긴다.
 function FeedPage({ currentUser, onReportPost }) {
   // 피드 목록 (DB에서 조회, 최신순) — 페이지가 로드될 때마다 누적
   const [feedPosts, setFeedPosts] = useState([]);
@@ -469,13 +449,15 @@ function FeedPage({ currentUser, onReportPost }) {
 
   /**
    * getImageUrl - 이미지 URL을 Express 서버 기준으로 변환
-   * DB에 저장된 /uploads/xxx.jpg → http://localhost:3000/uploads/xxx.jpg
+   * 미디어 URL 정규화.
+   * - 현재 S3 URL(https://...)은 그대로 사용
+   * - 과거 DB에 남은 /uploads/xxx.jpg는 Express 기준 절대 URL로 보정
+   * - blob: URL은 로컬 미리보기/과거 mock 호환을 위해 그대로 사용
    */
   const getImageUrl = (fileUrl) => {
     if (!fileUrl) return "";
-    // [수정 2026-05-13 / frontend-cy 머지 (a5075ce)]
-    // 사유: 챌린지 mock 피드 게시물은 file_url 이 blob: 로컬 URL → 그대로 사용해야 함.
-    // 장점: 한 함수가 백엔드 URL(/uploads/...), 절대 URL(http...), mock URL(blob:) 셋 다 처리.
+    // S3 절대 URL과 브라우저 blob 미리보기 URL은 그대로 렌더링한다.
+    // "/uploads/..." 형태의 과거 레코드만 Express origin을 붙여 보정한다.
     if (fileUrl.startsWith("http") || fileUrl.startsWith("blob:")) return fileUrl;
     return `${EXPRESS_URL}${fileUrl}`;
   };
@@ -537,8 +519,7 @@ function FeedPage({ currentUser, onReportPost }) {
     );
   }
 
-  // [수정 2026-05-13 / frontend-cy 머지 (a5075ce)] mergedFeedPosts 기준으로 빈 상태 판정
-  // 사유: 자체 피드 0건이어도 챌린지 mock 피드가 있으면 빈 상태로 표시하면 안 됨.
+  // 루틴 피드와 챌린지 인증 피드가 모두 없는 경우에만 빈 상태를 표시한다.
   if (!mergedFeedPosts || mergedFeedPosts.length === 0) {
     return (
       <div className="feed-page instagram-feed-page">
@@ -570,11 +551,10 @@ function FeedPage({ currentUser, onReportPost }) {
         </div>
 
         <div className="instagram-feed-list">
-          {/* [수정 2026-05-13 / frontend-cy 머지 (a5075ce)] mergedFeedPosts 로 렌더링 — 챌린지 mock 피드 포함 */}
+          {/* FastAPI가 병합해 준 루틴/챌린지 통합 피드 목록 */}
           {mergedFeedPosts.map((post) => {
-            // [추가 2026-05-13 / frontend-cy 머지 (a5075ce)]
-            // 사유: 챌린지 게시물 판별 — source_type 메타 필드로 확인.
-            // 기대효과: 챌린지 배지 표시 + 좋아요/댓글 버튼 비활성 처리에 사용.
+            // source_type 메타로 챌린지 인증 게시물을 구분한다.
+            // 현재 챌린지 게시물은 일반 피드 신고/좋아요/댓글 흐름에서 제외한다.
             const isChallengePost = post.source_type === "challenge";
             const currentMediaIndex = getCurrentMediaIndex(
               post.feed_id,
@@ -599,7 +579,7 @@ function FeedPage({ currentUser, onReportPost }) {
                         {post.category}
                       </span>
                     )}
-                    {/* [추가 2026-05-13 / frontend-cy 머지 (a5075ce)] 챌린지 인증 배지 */}
+                    {/* 챌린지 인증 배지 */}
                     {isChallengePost && (
                       <span className="instagram-feed-info-badge">
                         챌린지 인증
@@ -607,10 +587,7 @@ function FeedPage({ currentUser, onReportPost }) {
                     )}
                   </div>
 
-                  {/* [수정형 인스타그램식 더보기 드롭다운 메뉴 적용]
-                      [수정 2026-05-20] frontend-cy(7dd5535) 챌린지 통합
-                      기대효과: 챌린지 인증 게시물에는 신고 메뉴 비노출
-                      장점: 챌린지 도메인은 자체 검수 절차가 있어 일반 피드 신고 흐름과 분리 */}
+                  {/* 챌린지 인증 게시물과 내 게시물에는 신고 메뉴를 노출하지 않는다. */}
                   {!isChallengePost && post.user_id !== currentUser?.user_id && (
                     <div style={{ position: "relative" }}>
                       <button
@@ -699,10 +676,7 @@ function FeedPage({ currentUser, onReportPost }) {
                     {post.content || "오늘 루틴 인증 완료!"}
                   </p>
 
-                  {/* 좋아요 / 댓글 버튼
-                      [수정 2026-05-13 / frontend-cy 머지 (a5075ce)]
-                      사유: 챌린지 mock 피드는 백엔드 좋아요/댓글 API 가 없으므로 버튼 비활성화 + tooltip 안내.
-                      장점: 사용자가 클릭해서 404 응답 보지 않도록 사전 차단. */}
+                  {/* 좋아요/댓글은 현재 루틴 피드 전용 API라 챌린지 항목에서는 비활성화한다. */}
                   <div className="instagram-feed-action-row">
                     <button
                       type="button"
@@ -711,7 +685,7 @@ function FeedPage({ currentUser, onReportPost }) {
                       disabled={isChallengePost}
                       title={
                         isChallengePost
-                          ? "챌린지 mock 피드의 좋아요 기능은 추후 연동 예정입니다."
+                          ? "챌린지 인증 게시물의 좋아요 기능은 추후 연동 예정입니다."
                           : undefined
                       }
                     >
@@ -728,7 +702,7 @@ function FeedPage({ currentUser, onReportPost }) {
                       disabled={isChallengePost}
                       title={
                         isChallengePost
-                          ? "챌린지 mock 피드의 댓글 기능은 추후 연동 예정입니다."
+                          ? "챌린지 인증 게시물의 댓글 기능은 추후 연동 예정입니다."
                           : undefined
                       }
                     >
@@ -759,7 +733,7 @@ function FeedPage({ currentUser, onReportPost }) {
             </p>
           )}
 
-          {/* [수정 2026-05-13 / frontend-cy 머지 (a5075ce)] mergedFeedPosts 기준 (챌린지 mock 포함) */}
+          {/* 통합 피드 목록을 끝까지 본 상태 */}
           {!hasMore && mergedFeedPosts.length > 0 && (
             <p
               style={{ textAlign: "center", color: "#9ca3af", padding: "12px" }}
