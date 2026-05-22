@@ -2365,23 +2365,27 @@ textarea::placeholder {
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
+    max-height: none;
   }
 
   .nav {
     width: 100%;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
   }
+
+  .page-container {
+    width: calc(100% - 20px);
+    margin: 190px auto 70px;
+  }
+
 
   .nav button {
     text-align: center;
     padding: 10px 8px;
   }
 
-  .page-container {
-    width: calc(100% - 20px);
-    margin-top: 22px;
-  }
 
   .week {
     gap: 6px;
@@ -2457,6 +2461,9 @@ textarea::placeholder {
 @media (max-width: 520px) {
   .nav {
     grid-template-columns: repeat(2, 1fr);
+  }
+.page-container {
+    margin-top: 245px;
   }
 
   .time-tabs {
