@@ -4462,7 +4462,7 @@ ON challenge_proofs (share_to_feed, deleted_at, created_at);
 - [ ] `src/backend/package.json` 에 `dev`/`start` 스크립트 추가 — 2026-05-11 신규 (Minor)
 - [ ] `login.js` `/check-duplicate` 의 `fetchJson` 헬퍼 통일 — 2026-05-11 신규 (Minor)
 - [ ] 세션 비활성 타임아웃 (`last_activity` 갱신) — 2026-05-11 신규 (#13 LRU 캐시와 함께)
-- [ ] `mypage.py _load_gallery` Soft Delete 필터 누락 (`f.deleted_at IS NULL`) — 2026-05-19 신규 P0
+- [x] ~~`mypage.py _load_gallery` Soft Delete 필터 누락 (`f.deleted_at IS NULL`) — 2026-05-19 신규 P0~~ ✅ 2026-05-23 완료 (1줄 추가)
 - [ ] `comment.py` 댓글 작성자 INNER JOIN → LEFT JOIN + COALESCE 전환 — 2026-05-19 신규 P0 (회원 탈퇴 도입 직전 필수)
 - [ ] `feed.py add_feed_image` ownership 검증 — 2026-05-19 신규 P0
 - [ ] LoginPage 아이디/비번 찾기 하드코딩 제거 — 2026-05-19 신규 P1
@@ -4474,6 +4474,110 @@ ON challenge_proofs (share_to_feed, deleted_at, created_at);
 - [ ] FeedPage 좋아요 응답 무검증 — 2026-05-19 신규 P3
 - [ ] Soft Delete 영구 삭제 배치 정책 수립 (30일) — 2026-05-19 신규 P3
 - [ ] `database.js addFeedImage` dead code 제거 — 2026-05-19 신규 (Minor)
+- [x] ~~프로필 사진(아바타) 업로드 백엔드 연결 — 2026-05-20 P0 #2 잔여 (사진 부분)~~ ✅ 2026-05-23 완료 (`PATCH /me/profile` multipart 통합 + `lib/s3.js` 공용 모듈)
+
+---
+
+## 🔧 2026-05-23 작업 내역 (프로필 아바타 업로드 백엔드 연결)
+
+> 5/20 P0 #2 에서 닉네임/자기소개만 백엔드 연결하고 프로필 사진은 "S3 인프라 확장 작업 필요" 사유로 미뤘던 잔여분을 완료. `PATCH /me/profile` 한 엔드포인트로 닉네임/bio/사진을 동시에 저장하는 옵션 A 채택.
+
+### 1) 6하원칙 요약
+
+| 항목 | 내용 |
+|---|---|
+| **누가 (Who)** | enterausername1230 (캡스톤 백엔드 담당) |
+| **언제 (When)** | 2026-05-23 (KST) |
+| **어디서 (Where)** | `src/backend/lib/s3.js` (신규), `src/backend/routes/{login,feed}.js`, `src/python_api/routers/user.py`, `src/frontend/MyPage.jsx` |
+| **무엇을 (What)** | (1) S3 공용 모듈 신설 (2) `PATCH /me/profile` 을 multipart/form-data 도 받게 확장 + `uploadAvatar` multer-s3 + 이전 사진 비동기 삭제 (3) FastAPI 에 `profile_img` 필드 + `previous_profile_img` 응답 (4) MyPage 가 FormData 전송 + blob URL 누수 방지 |
+| **어떻게 (How)** | feed.js 의 S3Client/extractS3Key/deleteS3Object 를 `lib/s3.js` 로 추출 → login.js 가 동일 인프라 재사용 → multer 미들웨어가 multipart 일 때만 동작하는 특성을 이용해 기존 JSON 호출자 무영향 → `node -c` × 3 / `python ast` × 1 / `vite build` 4단 검증 |
+| **왜 (Why)** | (a) MyPage 의 `handleFileChange` 가 `URL.createObjectURL` 로 로컬 blob 프리뷰만 만들고 백엔드 호출이 0건 (b) `fetchMyInfo` 가 `data.user.profile_img` 를 `previewAvatar` 로 매핑 안 해 이미 저장된 사진도 표시 안 됨 (c) blob URL revoke 누락 (2026-05-11 HomePage 동일 패턴) — 3가지 누락을 한 번에 해소 |
+
+---
+
+### 2) 작업별 상세
+
+#### 2-1) S3 공용 모듈 `src/backend/lib/s3.js` 신설
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 담당 |
+| 언제 | 2026-05-23 |
+| 어디서 | `src/backend/lib/s3.js` (신규 102줄), `src/backend/routes/feed.js` (-110줄 이관) |
+| 무엇을 | S3Client / `AWS_S3_BUCKET` / `AWS_REGION` / `ALLOWED_S3_KEY_PREFIXES` / `extractS3Key` / `deleteS3Object` 공용화 |
+| 어떻게 | feed.js 인라인 코드를 그대로 lib 으로 이관 → feed.js 는 `require("../lib/s3")` 한 줄로 대체 → login.js 도 동일 import 로 재사용 |
+| 왜 | login.js 에 동일한 키 검증/삭제 로직을 인라인하면 ~55줄 중복 + 보안 정책(hostname 정확 매칭, path traversal 방어, prefix 화이트리스트) 회귀 위험 발생. 한 곳에서 관리해야 다음 라우트(예: 챌린지 인증 사진 별도 prefix) 추가 시에도 동일 정책 자동 상속 |
+
+#### 2-2) `PATCH /me/profile` multipart 통합 (Express)
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 담당 |
+| 언제 | 2026-05-23 |
+| 어디서 | `src/backend/routes/login.js` (uploadAvatar multer + 라우트 +30줄) |
+| 무엇을 | `uploadAvatar` = multer-s3 with `profile/<ts>-<rand>.<ext>` 키, 5MB 제한, image/* 필터. `PATCH /me/profile` 에 `uploadAvatar.single("avatar")` 미들웨어 추가 + `req.file.location` 을 payload.profile_img 로 사용 + FastAPI 응답의 `previous_profile_img` 로 이전 S3 객체 비동기 삭제 |
+| 어떻게 | multer 가 Content-Type 이 multipart 가 아니면 silently next() → 기존 JSON 호출자(닉네임만 수정) 코드 변경 없이 그대로 호환. FastAPI 가 실패하면 방금 업로드된 사진을 즉시 deleteS3Object 로 정리해 고아 객체 방지 |
+| 왜 | 옵션 B(별도 `POST /me/avatar`) 는 사진만 올리고 닉네임 저장 안 하고 뒤로가기 시 사진만 바뀐 어색한 상태가 됨. 옵션 A 단일 PATCH 가 5/20 UX(저장 버튼 1개)와 일관 |
+
+#### 2-3) FastAPI `update_profile` 확장
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 담당 |
+| 언제 | 2026-05-23 |
+| 어디서 | `src/python_api/routers/user.py` (ProfileUpdate / update_profile) |
+| 무엇을 | `ProfileUpdate.profile_img: Optional[str] = None` 추가 / UPDATE 동적 분기에 profile_img 추가 / 사진 변경 케이스에만 SELECT 로 `previous_profile_img` 캡처 후 응답에 포함 / 두 SELECT 결과에 profile_img 컬럼 노출 |
+| 어떻게 | profile_img 가 변경되지 않는 케이스(닉네임/bio 만) 는 추가 SELECT 비용 0. 변경 케이스만 트랜잭션 내에서 이전 값 캡처 → UPDATE → 응답 → Express 가 비동기 deleteS3Object |
+| 왜 | Express 에서 이전 S3 키를 알아야 옛 객체를 삭제할 수 있는데, FastAPI 가 한 응답에 같이 내려주는 게 가장 단순. GET /user/profile_img 별도 라우트 추가하는 것보다 호출 1회 절감 |
+
+#### 2-4) MyPage 프론트 통합
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 프론트 담당 |
+| 언제 | 2026-05-23 |
+| 어디서 | `src/frontend/MyPage.jsx` (+60줄) |
+| 무엇을 | (1) `avatarFile` state + `blobUrlRef` ref 추가 (2) `fetchMyInfo` 에서 `data.user.profile_img` 를 `previewAvatar` 로 초기 매핑 (3) `handleFileChange` 가 이전 blob revoke 후 File 보관 (4) `handleSaveProfile` 가 `avatarFile` 유무로 FormData/JSON 분기 (5) 저장 성공 시 blob URL revoke 후 S3 URL 로 교체 (6) `handleCancelProfile` 가 blob revoke + 저장된 S3 URL 로 복구 (7) 언마운트 useEffect cleanup |
+| 어떻게 | 2026-05-11 HomePage 의 `objectUrlsRef` 패턴 그대로 적용 — ref 는 리렌더 트리거 없이 revoke 대상만 추적, state 는 화면 표시용 URL 만 담당 |
+| 왜 | (a) 기존엔 사진 선택해도 백엔드 호출 0건, 새로고침 시 휘발 (b) DB 에 이미 사진 있어도 화면에 표시 안 됨 (c) 동일 세션에서 여러 번 파일 선택 시 blob URL 누적 누수. 세 결함을 한 번에 처리 |
+
+---
+
+### 3) 변경 파일 / 라인 요약
+
+| 파일 | 변경 | 용도 |
+|---|---|---|
+| `src/backend/lib/s3.js` | 신규 102줄 | S3Client + extractS3Key + deleteS3Object 공용 |
+| `src/backend/routes/feed.js` | -110 / +20 (순감) | 인라인 S3 코드 제거 → lib import 1줄 |
+| `src/backend/routes/login.js` | +60 | uploadAvatar multer + PATCH /me/profile multipart 분기 + 이전 사진 비동기 삭제 |
+| `src/python_api/routers/user.py` | +30 | profile_img 필드 + previous_profile_img 응답 + SELECT 에 profile_img |
+| `src/frontend/MyPage.jsx` | +60 | avatarFile/blobUrlRef + FormData 분기 + 누수 방지 cleanup |
+
+---
+
+### 4) 검증
+
+| 단계 | 결과 |
+|---|---|
+| `node -c src/backend/lib/s3.js` | ✅ |
+| `node -c src/backend/routes/{login,feed}.js` | ✅ |
+| `python3 -c "import ast; ast.parse(...)" user.py` | ✅ |
+| `npm run build` (vite 8) | ✅ 367.99 kB / gzip 105.09 kB (+1 kB) |
+| multer × express.json() 호환성 (Content-Type 분기) | ✅ multer 는 multipart 일 때만 동작, JSON 호출자 무영향 |
+
+> 런타임 테스트(실제 S3 업로드 + AWS 콘솔에서 옛 객체 삭제 확인 + 닉네임만/사진만/셋다 3 시나리오)는 별도 진행 필요.
+
+---
+
+### 5) 5/20 P0 #3 (아이디/비번 찾기) 후속 점검 결과
+
+5/20 작업 내역(README #4355-4364) 에 따르면 다음은 이미 백엔드 연결 완료 상태:
+- FastAPI `POST /user/find-login-id` / `POST /user/verify-for-password-reset`
+- Express `POST /find-id` / `POST /find-password` (임시 비번 12자 발급)
+- LoginPage 가 Mock → 실제 fetch 호출 전환
+
+런타임 테스트가 안 됐을 가능성이 있어 5/23 후속으로 동작 점검 + 누락 케이스 보강 예정.
+
 ---
 
 ## 👥 팀원

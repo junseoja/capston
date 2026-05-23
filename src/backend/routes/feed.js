@@ -17,7 +17,6 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const multerS3 = require("multer-s3");
-const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const {
     createFeed,
     addFeedImage,
@@ -27,31 +26,25 @@ const {
     deleteFeed,
 } = require("../database");
 const requireAuth = require("../middleware/requireAuth");
-
-// ── S3 클라이언트 초기화 ─────────────────────────────────────────────────────
-// 환경변수 4개(.env): AWS_REGION, AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
-// 누락 시 서버 기동은 되지만 첫 업로드/삭제에서 실패 → 부팅 시 경고만 출력.
-const AWS_REGION = process.env.AWS_REGION || "ap-northeast-2";
-const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET;
-
-if (!AWS_S3_BUCKET || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-    console.warn(
-        "⚠️  [feed] AWS S3 환경변수 누락. .env 에 AWS_S3_BUCKET / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 설정 필요."
-    );
-}
-
-const s3 = new S3Client({
-    region: AWS_REGION,
-    credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    },
-});
+// ────────────────────────────────────────────────────────────────────
+// [수정 2026-05-23] S3 공용 모듈로 이관 (프로필 사진 업로드 P0)
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+// 날짜: 2026-05-23
+// 기대 효과:
+//   - feed.js / login.js 양쪽에서 동일한 S3Client 인스턴스와
+//     동일한 키 검증 정책(hostname 정확 매칭, path traversal 방어,
+//     prefix 화이트리스트)을 공유하도록 통합
+// 장점:
+//   - 신규 라우트(프로필 사진)에서 검증 누락 가능성 차단
+//   - 검증 정책 변경 시 lib/s3.js 한 곳만 수정하면 됨
+// ────────────────────────────────────────────────────────────────────
+const { s3, AWS_S3_BUCKET, extractS3Key, deleteS3Object } = require("../lib/s3");
 
 // ── multer 설정 (S3 직접 업로드) ─────────────────────────────────────────────
 // 키(파일 경로) 규칙: feed/<timestamp>-<랜덤숫자>.<확장자>
 // - 파일명 충돌 방지
-// - "feed/" prefix 로 다른 용도 객체와 구분 (향후 프로필 사진 등 추가 시 분리 용이)
+// - "feed/" prefix 로 다른 용도 객체와 구분
 
 const upload = multer({
     storage: multerS3({
@@ -75,76 +68,6 @@ const upload = multer({
         }
     },
 });
-
-// ── 헬퍼: S3 객체 삭제 ────────────────────────────────────────────────────────
-/**
- * S3 버킷에서 객체 1개 삭제. 멱등성 있음(이미 없는 객체에 대해서도 200 반환).
- * 실패해도 throw 하지 않고 false 반환 — 호출 측에서 일괄 정리 시 일부 실패가
- * 다른 정리를 막지 않도록 함.
- */
-async function deleteS3Object(key) {
-    if (!key) return false;
-    try {
-        await s3.send(new DeleteObjectCommand({ Bucket: AWS_S3_BUCKET, Key: key }));
-        return true;
-    } catch (err) {
-        console.warn(`[S3 delete] key=${key} 실패:`, err?.message || err);
-        return false;
-    }
-}
-
-// multer-s3 의 key 생성 규칙(`feed/<timestamp>-...`)과 일치.
-// 향후 프로필 사진 등이 추가되면 prefix 만 늘리면 됨.
-const ALLOWED_S3_KEY_PREFIXES = ["feed/", "profile/"];
-
-/**
- * S3 퍼블릭 URL 에서 객체 키만 추출 (강화된 검증).
- *
- *   입력: https://${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/feed/123-456.jpg
- *   반환: feed/123-456.jpg
- *
- * 다음 중 하나라도 어긋나면 null 반환 → 호출자가 삭제 대상에서 제외:
- *   1) URL 파싱 실패
- *   2) hostname 이 정확히 "${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com" 가 아님
- *   3) 추출된 key 가 비어 있음 / "/" 만으로 구성됨
- *   4) key 에 ".." 시퀀스 또는 백슬래시 포함 (path traversal 방어)
- *   5) key 가 ALLOWED_S3_KEY_PREFIXES 중 어느 것으로도 시작하지 않음
- */
-function extractS3Key(fileUrl) {
-    if (!fileUrl || typeof fileUrl !== "string") return null;
-
-    // 환경변수가 없으면 정확 매칭 자체가 불가능 → 보수적으로 null
-    if (!AWS_S3_BUCKET || !AWS_REGION) return null;
-
-    let parsed;
-    try {
-        parsed = new URL(fileUrl);
-    } catch {
-        return null;
-    }
-
-    // (2) hostname 정확 매칭 — Virtual-hosted-style 만 허용
-    const expectedHost = `${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com`;
-    if (parsed.hostname !== expectedHost) return null;
-
-    // (3) pathname → key 변환
-    const key = parsed.pathname.startsWith("/")
-        ? parsed.pathname.slice(1)
-        : parsed.pathname;
-    if (!key) return null;
-
-    // (4) path traversal 시퀀스 방어
-    //     S3 키 자체는 ".." 를 허용하지만, 우리 코드 흐름에선 정상 키에 ".." 가 들어올 일이
-    //     없으므로 거부하는 편이 안전. 백슬래시(\\) 도 비표준 인코딩 시도로 간주하고 차단.
-    if (key.includes("..") || key.includes("\\")) return null;
-
-    // (5) 화이트리스트 prefix 강제
-    if (!ALLOWED_S3_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) {
-        return null;
-    }
-
-    return key;
-}
 
 // ── 피드 생성 (POST /feed) ───────────────────────────────────────────────────
 

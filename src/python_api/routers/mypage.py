@@ -139,6 +139,19 @@ def _load_summary(cursor, user_id: str):
     }
 
 
+# ────────────────────────────────────────────────────────────────────
+# [수정 2026-05-23] 갤러리 Soft Delete 필터 추가 (P0)
+# ────────────────────────────────────────────────────────────────────
+# 오류 번호: P0 #5/19 신규 (`_load_gallery` Soft Delete 필터 누락)
+# 날짜: 2026-05-23
+# 기대 효과:
+#   - DELETE /feed/:feed_id 로 삭제된(=deleted_at NOT NULL) 피드가
+#     마이페이지 갤러리에 노출되던 데이터 무결성 버그 해소
+# 장점:
+#   - 1줄 추가로 해결 — 다른 라우터(/feed GET, /stats 등)는 이미 동일
+#     필터를 적용해 둔 패턴과 일치
+#   - 인덱스 사용 영향 없음 (f.user_id 기존 인덱스 그대로 활용)
+# ────────────────────────────────────────────────────────────────────
 def _load_gallery(cursor, user_id: str, limit: int):
     cursor.execute(
         """SELECT
@@ -151,6 +164,7 @@ def _load_gallery(cursor, user_id: str, limit: int):
         FROM feeds f
         JOIN feed_images fi ON f.feed_id = fi.feed_id
         WHERE f.user_id = %s
+          AND f.deleted_at IS NULL
         ORDER BY f.created_at DESC, fi.created_at ASC
         LIMIT %s""",
         (user_id, limit)

@@ -61,11 +61,43 @@ function MyPage({ onLogout }) {
     const [editBio, setEditBio] = useState(DEFAULT_BIO);
     // 저장 진행 중 플래그 — 중복 저장 클릭 방지
     const [savingProfile, setSavingProfile] = useState(false);
-    const [previewAvatar, setPreviewAvatar] = useState(null); // 프리뷰 아바타 이미지 주소
+    const [previewAvatar, setPreviewAvatar] = useState(null); // 프리뷰 아바타 이미지 주소(blob URL 또는 S3 URL)
     const fileInputRef = useRef(null); // 파일 탐색기 트리거용 Ref
+    // ────────────────────────────────────────────────────────────────────
+    // [추가 2026-05-23] 아바타 파일 업로드 상태 + blob URL 누수 방지 ref
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+    // 날짜: 2026-05-23
+    // 기대 효과:
+    //   - 사용자가 선택한 File 객체를 보관해 handleSaveProfile 에서 FormData 로 전송
+    //   - 블롭 URL 을 ref 로 추적해 새 선택/취소/언마운트 시 revoke → 메모리 누수 방지
+    // 장점:
+    //   - File 을 state 에 따로 보관해 previewAvatar(URL 문자열)와 책임 분리
+    //   - blobUrlRef 는 setState 와 동기화 필요 없는 cleanup 전용 → 리렌더 트리거 안 함
+    //   - 2026-05-11 HomePage 의 objectUrlsRef 패턴과 동일하게 useEffect cleanup 까지 일관성 유지
+    // ────────────────────────────────────────────────────────────────────
+    const [avatarFile, setAvatarFile] = useState(null);
+    const blobUrlRef = useRef(null);
 
     useEffect(() => {
         fetchMyInfo();
+    }, []);
+
+    // ────────────────────────────────────────────────────────────────────
+    // [추가 2026-05-23] 언마운트 시 blob URL revoke
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+    // 날짜: 2026-05-23
+    // 기대 효과: 사용자가 사진 선택 후 저장 안 하고 페이지 이탈해도 메모리 회수
+    // 장점: ref 기반이라 컴포넌트 state 변경과 무관하게 한 번만 실행
+    // ────────────────────────────────────────────────────────────────────
+    useEffect(() => {
+        return () => {
+            if (blobUrlRef.current) {
+                URL.revokeObjectURL(blobUrlRef.current);
+                blobUrlRef.current = null;
+            }
+        };
     }, []);
 
     const fetchMyInfo = async () => {
@@ -95,6 +127,16 @@ function MyPage({ onLogout }) {
                     setEditBio(data.user.bio);
                 } else {
                     setEditBio(DEFAULT_BIO);
+                }
+                // ────────────────────────────────────────────────────────
+                // [추가 2026-05-23] 저장된 프로필 사진을 프리뷰로 노출 (P0)
+                // 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+                // 날짜: 2026-05-23
+                // 기대 효과: 이미 사진을 저장한 회원이 페이지 진입 시 본인 사진 노출
+                // 장점: profile_img 가 null/빈문자열이면 그라데이션 폴백 유지 → UI 일관성
+                // ────────────────────────────────────────────────────────
+                if (data.user?.profile_img) {
+                    setPreviewAvatar(data.user.profile_img);
                 }
             }
         } catch (error) {
@@ -183,12 +225,29 @@ function MyPage({ onLogout }) {
         fileInputRef.current.click();
     };
 
+    // ────────────────────────────────────────────────────────────────────
+    // [수정 2026-05-23] 파일 선택 시 blob URL 누수 방지 + File 보관
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+    // 날짜: 2026-05-23
+    // 기대 효과:
+    //   - 동일 세션에서 여러 번 다른 사진을 골라도 이전 blob URL 메모리 회수
+    //   - 선택된 File 을 보관해 handleSaveProfile 에서 multipart 전송 가능
+    // 장점:
+    //   - blobUrlRef 만 revoke 대상으로 추적 → 서버 URL(S3) 은 절대 revoke 안 됨
+    //   - File 객체와 미리보기 URL 분리 → React state 책임 명확
+    // ────────────────────────────────────────────────────────────────────
     const handleFileChange = (e) => {
         const file = e.target.files[0];
-        if (file) {
-            const imageUrl = URL.createObjectURL(file);
-            setPreviewAvatar(imageUrl); // 가상 프리뷰 데이터 반영
+        if (!file) return;
+        if (blobUrlRef.current) {
+            URL.revokeObjectURL(blobUrlRef.current);
+            blobUrlRef.current = null;
         }
+        const imageUrl = URL.createObjectURL(file);
+        blobUrlRef.current = imageUrl;
+        setPreviewAvatar(imageUrl);
+        setAvatarFile(file);
     };
 
     // ────────────────────────────────────────────────────────────────────
@@ -219,17 +278,19 @@ function MyPage({ onLogout }) {
             return;
         }
 
-        const payload = {};
+        // 변경된 텍스트 필드 추출 (사진은 별도 처리)
+        const textPayload = {};
         if (trimmedNickname !== (user?.nickname ?? "")) {
-            payload.nickname = trimmedNickname;
+            textPayload.nickname = trimmedNickname;
         }
         if (editBio !== (user?.bio ?? DEFAULT_BIO)) {
             // user.bio 가 null 인 미설정 회원이 DEFAULT_BIO 그대로 두면 굳이 저장하지 않는다.
             // 사용자가 명시적으로 다른 값으로 바꿨거나 비웠을 때만 백엔드 호출.
-            payload.bio = editBio;
+            textPayload.bio = editBio;
         }
 
-        if (Object.keys(payload).length === 0) {
+        const hasFile = avatarFile !== null;
+        if (Object.keys(textPayload).length === 0 && !hasFile) {
             setIsProfileEdit(false);
             return;
         }
@@ -237,12 +298,33 @@ function MyPage({ onLogout }) {
         if (savingProfile) return;
         setSavingProfile(true);
         try {
-            const res = await fetch(`${EXPRESS_URL}/me/profile`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify(payload),
-            });
+            // ────────────────────────────────────────────────────────────
+            // [수정 2026-05-23] 파일 첨부 시 FormData, 아니면 기존 JSON
+            // ────────────────────────────────────────────────────────────
+            // 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+            // 날짜: 2026-05-23
+            // 기대 효과: 사진 + 텍스트를 한 호출로 저장 / 사진 없으면 기존 동작 그대로
+            // 장점: Express 의 multer-s3 가 multipart 일 때만 동작 → 호환성 유지
+            // ────────────────────────────────────────────────────────────
+            let res;
+            if (hasFile) {
+                const formData = new FormData();
+                if (textPayload.nickname !== undefined) formData.append("nickname", textPayload.nickname);
+                if (textPayload.bio !== undefined) formData.append("bio", textPayload.bio);
+                formData.append("avatar", avatarFile);
+                res = await fetch(`${EXPRESS_URL}/me/profile`, {
+                    method: "PATCH",
+                    credentials: "include",
+                    body: formData,
+                });
+            } else {
+                res = await fetch(`${EXPRESS_URL}/me/profile`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(textPayload),
+                });
+            }
             const data = await res.json();
             if (!res.ok || !data.success) {
                 alert(data.message || "프로필 저장에 실패했습니다.");
@@ -253,11 +335,21 @@ function MyPage({ onLogout }) {
                 ...prev,
                 ...(data.user?.nickname !== undefined ? { nickname: data.user.nickname } : {}),
                 ...(data.user?.bio !== undefined ? { bio: data.user.bio } : {}),
+                ...(data.user?.profile_img !== undefined ? { profile_img: data.user.profile_img } : {}),
             }));
             if (data.user?.nickname) setEditNickname(data.user.nickname);
             if (data.user?.bio !== undefined && data.user?.bio !== null) {
                 setEditBio(data.user.bio);
             }
+            // 사진이 새로 저장된 경우: blob URL 회수 + previewAvatar 를 S3 URL 로 교체
+            if (data.user?.profile_img) {
+                if (blobUrlRef.current) {
+                    URL.revokeObjectURL(blobUrlRef.current);
+                    blobUrlRef.current = null;
+                }
+                setPreviewAvatar(data.user.profile_img);
+            }
+            setAvatarFile(null);
             setIsProfileEdit(false);
             alert("프로필 정보 변경이 성공적으로 저장되었습니다.");
         } catch (error) {
@@ -268,12 +360,28 @@ function MyPage({ onLogout }) {
         }
     };
 
+    // ────────────────────────────────────────────────────────────────────
+    // [수정 2026-05-23] 취소 시 blob URL revoke + 저장된 S3 URL 로 복구
+    // ────────────────────────────────────────────────────────────────────
+    // 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+    // 날짜: 2026-05-23
+    // 기대 효과:
+    //   - 사진 변경 후 취소 시 메모리 누수 없이 원래 저장된 사진(또는 폴백)으로 복귀
+    // 장점:
+    //   - blob URL 만 revoke → S3 URL 은 보존 (다음 진입에서도 노출 유지)
+    //   - 빈 user.profile_img 회원은 null 로 리셋되어 그라데이션 폴백 표시
+    // ────────────────────────────────────────────────────────────────────
     const handleCancelProfile = () => {
         setIsProfileEdit(false);
         setEditNickname(user.nickname);
         // 저장된 bio 가 있으면 그 값으로, 없으면 기본 안내 문구로 되돌린다.
         setEditBio(user?.bio ?? DEFAULT_BIO);
-        setPreviewAvatar(null); // 프리뷰 데이터 리셋
+        if (blobUrlRef.current) {
+            URL.revokeObjectURL(blobUrlRef.current);
+            blobUrlRef.current = null;
+        }
+        setAvatarFile(null);
+        setPreviewAvatar(user?.profile_img || null);
     };
 
     if (loading) return <div className="mypage">로딩 중...</div>;

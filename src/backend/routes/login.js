@@ -19,6 +19,9 @@
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs"); // 비밀번호 단방향 해싱 라이브러리
+const multer = require("multer");
+const multerS3 = require("multer-s3");
+const path = require("path");
 const {
     findUser,
     createUser,
@@ -32,6 +35,41 @@ const {
 const crypto = require("crypto"); // [추가 2026-05-20] 임시 비밀번호 안전 난수 생성
 const { v4: uuidv4 } = require("uuid"); // 세션 ID 생성용 UUID v4
 const requireAuth = require("../middleware/requireAuth");
+// ────────────────────────────────────────────────────────────────────
+// [추가 2026-05-23] 프로필 아바타 업로드 (S3) 통합
+// ────────────────────────────────────────────────────────────────────
+// 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+// 날짜: 2026-05-23
+// 기대 효과:
+//   - PATCH /me/profile 이 multipart/form-data 도 받아 닉네임/bio/사진을
+//     한 번의 호출로 저장
+// 장점:
+//   - feed.js 의 S3 인프라(공용 lib/s3.js)와 동일한 검증/삭제 정책 자동 적용
+//   - "profile/" prefix 로 키 격리 → 버킷 정책/수명주기 분리 용이
+//   - 5MB 제한 + image/* MIME 만 허용 → 악성 업로드 차단
+// ────────────────────────────────────────────────────────────────────
+const { s3, AWS_S3_BUCKET, extractS3Key, deleteS3Object } = require("../lib/s3");
+
+const uploadAvatar = multer({
+    storage: multerS3({
+        s3,
+        bucket: AWS_S3_BUCKET,
+        contentType: multerS3.AUTO_CONTENT_TYPE,
+        key: (req, file, cb) => {
+            const ext = path.extname(file.originalname);
+            const uniqueName = `profile/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+            cb(null, uniqueName);
+        },
+    }),
+    limits: { fileSize: 5 * 1024 * 1024 }, // 아바타 1장 최대 5MB
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith("image/")) {
+            cb(null, true);
+        } else {
+            cb(new Error("이미지 파일만 업로드 가능합니다."), false);
+        }
+    },
+});
 
 const PYTHON_API = process.env.PYTHON_API || "http://localhost:8000"; // FastAPI 서버 주소
 const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY; // FastAPI 내부 호출 인증 키
@@ -279,19 +317,21 @@ router.get("/me", requireAuth, async (req, res, next) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// [추가 2026-05-20] 프로필 수정 (PATCH /me/profile) — P0 #2
+// [수정 2026-05-23] 프로필 수정 (PATCH /me/profile) — 아바타 업로드 통합
 // ────────────────────────────────────────────────────────────────────
-// 오류 번호: P0 #2 (MyPage handleSaveProfile 백엔드 미연결로 새로고침 시 휘발)
-// 날짜: 2026-05-20
+// 오류 번호: P0 프로필 사진 업로드 (5/23 신규) — 5/20 P0 #2 후속
+// 날짜: 2026-05-23
 // 기대 효과:
-//   - 인스타 스타일 프로필 편집 UI 가 누른 저장이 실제 DB 에 반영됨
-//   - GET /me 응답의 nickname/bio 가 즉시 갱신값으로 응답
+//   - 닉네임/자기소개/프로필 사진을 한 호출로 저장 (UX 일관성)
+//   - 사진 교체 시 이전 S3 객체를 자동 삭제 → 비용/오브젝트 누적 방지
 // 장점:
-//   - requireAuth 미들웨어로 본인만 자기 프로필 수정 가능 (req.user.user_id 사용)
-//   - 클라이언트가 보낸 user_id 는 무시 → IDOR 공격 차단
-//   - 닉네임 trim + 길이 검증을 Express 단에서 차단 → FastAPI/DB 까지 가지 않음
+//   - multer-s3 가 multipart 일 때만 동작 → 기존 JSON 호출자(예: 닉네임만 변경)
+//     코드 변경 없이 그대로 호환
+//   - req.file.location (S3 URL) 만 신뢰 → 클라이언트가 보낸 profile_img 문자열은 무시
+//   - 사진 업로드 실패 시 FastAPI 에 도달하지 않음 → DB 와 S3 정합성 유지
+//   - 이전 사진은 FastAPI 응답의 previous_profile_img 로 받아 비동기 삭제 (응답 지연 0)
 // ────────────────────────────────────────────────────────────────────
-router.patch("/me/profile", requireAuth, async (req, res, next) => {
+router.patch("/me/profile", requireAuth, uploadAvatar.single("avatar"), async (req, res, next) => {
     try {
         const { nickname, bio } = req.body || {};
 
@@ -322,6 +362,11 @@ router.patch("/me/profile", requireAuth, async (req, res, next) => {
             payload.bio = bio;
         }
 
+        // 아바타 파일이 multer-s3 로 이미 S3 에 업로드된 상태. req.file.location 만 신뢰.
+        if (req.file) {
+            payload.profile_img = req.file.location;
+        }
+
         if (Object.keys(payload).length === 0) {
             return res.status(400).json({ success: false, message: "변경할 항목이 없습니다." });
         }
@@ -329,14 +374,28 @@ router.patch("/me/profile", requireAuth, async (req, res, next) => {
         const result = await updateUserProfile(req.user.user_id, payload);
 
         if (!result?.success) {
+            // FastAPI 가 실패했는데 사진은 이미 업로드된 경우 → 고아 객체 즉시 정리
+            if (req.file?.location) {
+                const orphanKey = extractS3Key(req.file.location);
+                if (orphanKey) deleteS3Object(orphanKey).catch(() => {});
+            }
             return res.status(400).json({
                 success: false,
                 message: result?.message || "프로필 수정에 실패했습니다.",
             });
         }
 
+        // 이전 사진이 있고 신규 사진으로 교체된 경우 → 이전 S3 객체 비동기 삭제
+        const previousUrl = result.previous_profile_img;
+        if (req.file && previousUrl && previousUrl !== req.file.location) {
+            const prevKey = extractS3Key(previousUrl);
+            if (prevKey) deleteS3Object(prevKey).catch(() => {});
+        }
+
         return res.json({ success: true, user: result.user });
     } catch (error) {
+        // multer 가 거부(파일 크기/MIME) 한 경우 next(error) 로 글로벌 핸들러 위임
+        // multer-s3 가 이미 업로드한 경우는 multer 단계 내부에서 처리됨
         return next(error);
     }
 });

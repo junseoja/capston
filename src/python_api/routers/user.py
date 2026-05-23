@@ -92,10 +92,17 @@ class PasswordUpdate(BaseModel):
 class ProfileUpdate(BaseModel):
     """프로필 수정 요청 데이터 스키마
 
-    프로필 사진(profile_img) 은 본 작업 범위 외 — 별도 S3 업로드 흐름에서 처리.
+    [수정 2026-05-23] profile_img 필드 추가 — Express 가 S3 업로드 후 URL 전달.
+    오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+    기대 효과:
+      - 닉네임/bio/사진을 한 endpoint 로 처리 → 클라이언트 호출 단순화
+    장점:
+      - profile_img 도 Optional 이라 단독 수정 가능
+      - Express 가 multer-s3 검증을 통과한 S3 URL 만 전달 → FastAPI 는 정책 검증 부담 없음
     """
-    nickname: Optional[str] = None  # 새 닉네임 (None 이면 변경 안 함)
-    bio: Optional[str] = None       # 새 자기소개 (빈 문자열 = 삭제, None = 변경 안 함)
+    nickname: Optional[str] = None     # 새 닉네임 (None 이면 변경 안 함)
+    bio: Optional[str] = None          # 새 자기소개 (빈 문자열 = 삭제, None = 변경 안 함)
+    profile_img: Optional[str] = None  # 새 프로필 사진 S3 URL (None = 변경 안 함)
 
 # ────────────────────────────────────────────────────────────────────
 # [추가 2026-05-20] 아이디 찾기 / 비밀번호 재설정 요청 스키마 (P0 #3)
@@ -427,6 +434,18 @@ def update_profile(user_id: str, body: ProfileUpdate):
         HTTPException 409: 닉네임 UNIQUE 제약 위반
         HTTPException 500: DB 오류
     """
+    # ────────────────────────────────────────────────────────────────────
+    # [수정 2026-05-23] profile_img 분기 + previous_profile_img 응답 추가
+    # ────────────────────────────────────────────────────────────────────
+    # 오류 번호: P0 프로필 사진 업로드 (5/23 신규)
+    # 날짜: 2026-05-23
+    # 기대 효과:
+    #   - 아바타 교체 시 Express 가 응답의 previous_profile_img 를 보고
+    #     이전 S3 객체를 삭제할 수 있게 됨 → 고아 객체 누적 방지
+    # 장점:
+    #   - UPDATE 전 SELECT 로 이전 값 캡처 → 트랜잭션 내 일관성 확보
+    #   - profile_img 가 변경되지 않는 케이스(닉네임만 수정)는 SELECT 생략 → 추가 비용 0
+    # ────────────────────────────────────────────────────────────────────
     fields = []
     values: list = []
     if body.nickname is not None:
@@ -438,6 +457,10 @@ def update_profile(user_id: str, body: ProfileUpdate):
         # (NULL/'' 구분이 필요한 사용 사례가 생기면 그때 분기)
         fields.append("bio = %s")
         values.append(body.bio)
+    if body.profile_img is not None:
+        # Express 가 multer-s3 검증을 통과한 S3 URL 만 전달함
+        fields.append("profile_img = %s")
+        values.append(body.profile_img)
 
     if not fields:
         return {"success": False, "message": "변경할 필드가 없습니다."}
@@ -447,6 +470,17 @@ def update_profile(user_id: str, body: ProfileUpdate):
 
     conn = get_connection()
     try:
+        # 사진 교체인 경우에만 이전 URL 캡처 (다른 케이스는 비용 절약)
+        previous_profile_img = None
+        if body.profile_img is not None:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT profile_img FROM users WHERE user_id = %s AND deleted_at IS NULL",
+                    (user_id,)
+                )
+                prev_row = cursor.fetchone()
+                previous_profile_img = prev_row["profile_img"] if prev_row else None
+
         with conn.cursor() as cursor:
             cursor.execute(sql, tuple(values))
             affected = cursor.rowcount
@@ -456,22 +490,22 @@ def update_profile(user_id: str, body: ProfileUpdate):
             # 동일값 UPDATE 도 rowcount 0 이 될 수 있어 별도 SELECT 로 존재 여부 확인
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT user_id, nickname, bio FROM users WHERE user_id = %s AND deleted_at IS NULL",
+                    "SELECT user_id, nickname, bio, profile_img FROM users WHERE user_id = %s AND deleted_at IS NULL",
                     (user_id,)
                 )
                 row = cursor.fetchone()
             if not row:
                 return {"success": False, "message": "존재하지 않는 user_id 입니다."}
-            return {"success": True, "user": row}
+            return {"success": True, "user": row, "previous_profile_img": previous_profile_img}
 
         # 갱신 결과를 다시 읽어 응답에 포함 — 프론트가 그대로 user state 에 반영 가능
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT user_id, nickname, bio FROM users WHERE user_id = %s",
+                "SELECT user_id, nickname, bio, profile_img FROM users WHERE user_id = %s",
                 (user_id,)
             )
             row = cursor.fetchone()
-        return {"success": True, "user": row}
+        return {"success": True, "user": row, "previous_profile_img": previous_profile_img}
     except pymysql.err.IntegrityError:
         try:
             conn.rollback()
