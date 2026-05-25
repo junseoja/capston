@@ -321,6 +321,7 @@ DB 인덱스 권장안은 `docs/performance-indexes-2026-05-10.sql`에 정리되
 | `Dockerfile.backend.prod` | self-contained Express prod 이미지 |
 | `Dockerfile.python_api.prod` | self-contained FastAPI prod 이미지 |
 | `server.sh` | cloudflared Named Tunnel 공개 서빙 보조 스크립트 |
+| `docs/windows-hosting-guide.md` | Windows 팀원 PC를 `routimate.com` 호스팅 서버로 전환하는 절차 |
 
 ### 1. 공통 사전 준비
 
@@ -444,6 +445,7 @@ docker compose -f docker-compose.prod.yml up --build
 - 팀원 환경 통일 + hot reload: `docker compose up`
 - 배포 전 이미지 검증: `docker compose -f docker-compose.prod.yml up --build`
 - 실제 배포: `docs/deploy.md` 의 prod Dockerfile 기준 절차 사용
+- Windows 팀원 PC가 `routimate.com` 호스트가 되는 경우: `docs/windows-hosting-guide.md`
 
 ---
 
@@ -4577,6 +4579,111 @@ ON challenge_proofs (share_to_feed, deleted_at, created_at);
 - LoginPage 가 Mock → 실제 fetch 호출 전환
 
 런타임 테스트가 안 됐을 가능성이 있어 5/23 후속으로 동작 점검 + 누락 케이스 보강 예정.
+
+---
+
+## 🔧 2026-05-23 후속 작업 (전체 기능 종합 점검 + P0 1건 + dev-clone 머지)
+
+> 프로필 아바타 업로드 완료 직후 "프로젝트 전체 기능이 다 구현되어 있는지" 종합 점검을 돌리고, 발견된 P0 1건을 즉시 수정. 추가로 dev-clone 의 반응형 수정 커밋을 cherry-pick 으로 통합.
+
+### 1) 6하원칙 요약
+
+| 항목 | 내용 |
+|---|---|
+| **누가 (Who)** | enterausername1230 |
+| **언제 (When)** | 2026-05-23 (KST), 5/23 1차 작업 직후 |
+| **어디서 (Where)** | `src/python_api/routers/mypage.py`, `src/css/App.css`, `README.md` 백로그 |
+| **무엇을 (What)** | (1) 52개 기능 4단계 체인(프론트→Express→FastAPI→DB) 종합 점검 → 정상 구현률 92% 확인 (2) `_load_gallery` Soft Delete 필터 P0 1줄 수정 (3) dev-clone `4ac9128 "반응형 수정"` cherry-pick |
+| **어떻게 (How)** | Explore 서브에이전트로 라우트·페이지·DB 매칭 일괄 검증 → P0 발견 → `mypage.py:153` 에 `AND f.deleted_at IS NULL` 1줄 추가 → README 백로그 P0 마킹 → `git cherry-pick 4ac9128` (자동 머지 0충돌) → `vite build` 통과 |
+| **왜 (Why)** | (a) README 의 "✅ 완료" 표기와 실제 코드 상태가 일치하는지 검증 필요 — 5/19 신규 P0 3건 중 갤러리 필터만 실제 미수정 상태로 잔존 (b) dev-clone 의 4ac9128 을 merge 로 가져오면 9194f59 (이미 dev/8da1d0f 에 흡수) 가 끌려와 MyPage.jsx 75줄 충돌 발생 — cherry-pick 이 정답 |
+
+---
+
+### 2) 작업별 상세
+
+#### 2-1) 전체 기능 종합 점검 (Explore 서브에이전트)
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 담당 |
+| 언제 | 2026-05-23 |
+| 어디서 | 전체 코드베이스 |
+| 무엇을 | 7개 카테고리(인증/루틴/피드/마이페이지/챌린지/관리자/인프라) 52개 기능에 대해 프론트 fetch → Express 라우트 → FastAPI 핸들러 → DB 컬럼 4단계 체인 매칭 |
+| 어떻게 | 라우트 정의·페이지 fetch 호출·DB SELECT 컬럼을 교차 검증 → README 백로그의 "✅ 완료" 표기와 실제 코드 일치 여부 확인 |
+| 왜 | 5/22 "반응형 병합" 이후 회귀 없는지 / 5/19 P0 잔여 3건 실제 처리됐는지 / 7975cb9 의 프로필 통합이 올바르게 동작하는지 한 번에 검증 |
+
+**점검 결과:**
+- 정상 구현률 **92% (48/52)**
+- 5/22 반응형 병합 회귀 0건 (AdminPage 실 API, ChallengePage 실 fetch 모두 정상)
+- 5/19 P0 잔여 3건 중 **갤러리 Soft Delete 필터만 실제 미수정**
+  - `comment.py` LEFT JOIN ✅ 5/20 작업으로 수정 완료 확인
+  - `feed.py add_feed_image` ownership ✅ 수정 확인
+  - `mypage.py _load_gallery` ❌ 여전히 누락 → 본 작업 2-2 에서 수정
+- 미구현 P1 잔여: 비밀번호 변경 / 회원 탈퇴 (README 백로그에 이미 표기됨)
+
+#### 2-2) P0 갤러리 Soft Delete 필터 1줄 수정
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 담당 |
+| 언제 | 2026-05-23 |
+| 어디서 | `src/python_api/routers/mypage.py:142-158` (`_load_gallery`) |
+| 무엇을 | `WHERE f.user_id = %s` 뒤에 `AND f.deleted_at IS NULL` 1줄 추가 |
+| 어떻게 | DELETE /feed/:feed_id 가 Soft Delete 만 수행하므로 SELECT 시점에 명시적으로 필터링 필요. 다른 라우터(`/feed` GET, `/stats`, `/comment` 등) 가 이미 사용 중인 동일 패턴을 그대로 따름 |
+| 왜 | 사용자가 본인 인증 피드를 삭제해도 마이페이지 갤러리에는 계속 노출되던 **P0 데이터 무결성 버그**. 5/19 종합 리뷰에서 발견됐으나 5/20·5/22 작업 동안 우선순위에서 밀려 잔존했음 |
+
+#### 2-3) dev-clone `4ac9128` cherry-pick
+
+| 항목 | 내용 |
+|---|---|
+| 누가 | 백엔드 담당 |
+| 언제 | 2026-05-23 |
+| 어디서 | `src/css/App.css` (+11/-4 줄) |
+| 무엇을 | dev-clone 의 5/22 18:48 커밋(반응형 미디어 쿼리 보강 — `.page-container` margin, `.nav gap`, `max-height: none`) 을 dev 로 가져옴 |
+| 어떻게 | 일반 `git merge origin/dev-clone` 은 9194f59(이미 dev/8da1d0f 에 흡수된 반응형 변경) 까지 끌어와 MyPage.jsx 75줄 + App.jsx 2청크 + App.css 5청크 충돌 발생. **`git cherry-pick 4ac9128` 으로 단일 커밋만 적용** → App.css 1파일 자동 머지 (충돌 0건) |
+| 왜 | dev 의 8da1d0f 가 9194f59 의 내용을 **수동으로 재작성** 한 형태라 git 이 별개 변경으로 인식. cherry-pick 이 아니었다면 오늘 7975cb9 의 프로필 편집 백엔드 통합이 75줄 충돌 해소 과정에서 손실될 위험 있었음 |
+
+---
+
+### 3) 변경 파일 / 라인 요약
+
+| 파일 | 변경 | 용도 |
+|---|---|---|
+| `src/python_api/routers/mypage.py` | +14 (주석 포함) / -0 SQL | 갤러리 Soft Delete 필터 |
+| `src/css/App.css` | +11 / -4 (cherry-pick) | 반응형 미디어 쿼리 보강 |
+| `README.md` 백로그 | P0 항목 완료 마킹 | 5/19 신규 P0 ✅ 처리 |
+
+---
+
+### 4) 검증
+
+| 단계 | 결과 |
+|---|---|
+| `python3 -c "import ast; ast.parse(mypage.py)"` | ✅ |
+| `git cherry-pick 4ac9128` 자동 머지 | ✅ 충돌 0건 |
+| `npm run build` (vite 8) | ✅ CSS 38.57 kB (+0.06), JS 367.99 kB 동일 |
+
+---
+
+### 5) 신규 dev 커밋 히스토리
+
+| 커밋 | 메시지 | 비고 |
+|---|---|---|
+| `0cc650e` | 반응형 수정 (cherry-pick from 4ac9128) | 원 작성자 junseoja 보존, App.css 1 파일 |
+| `7975cb9` | feat: 마이페이지 백앤드 추가 | 5/23 1차 작업 (lib/s3.js + 프로필 multipart) |
+
+원격 푸시(`git push origin dev`) 는 사용자가 직접 진행.
+
+---
+
+### 6) 남은 후속 작업 우선순위
+
+| 항목 | 비고 |
+|---|---|
+| 비밀번호 변경 엔드포인트 | P1 — `PATCH /me/password` (현재 비번 검증 + 정책 검증 + bcrypt 재해시) + MyPage UI |
+| 회원 탈퇴 엔드포인트 | 백로그 — login_id UNIQUE 정책 결정 선행 필요 |
+| 아이디/비번 찾기 런타임 테스트 | 코드는 완성 — 회원 1명 생성 후 실제 흐름 검증 |
+| Rate limiting 도입 | 아이디/비번 찾기 brute-force 방어 (express-rate-limit) |
 
 ---
 
