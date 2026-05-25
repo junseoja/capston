@@ -1,35 +1,32 @@
 // ============================================================
-// main.jsx - React 앱 진입점 (Entry Point)
+// main.jsx - React 진입점
 // ============================================================
 // 역할:
-//   - 브라우저의 #root 엘리먼트에 React 앱을 마운트
-//   - BrowserRouter로 앱을 감싸 URL 기반 라우팅 활성화
-//   - StrictMode로 감싸 개발 환경에서 잠재적 문제 감지
-//
-// BrowserRouter:
-//   - 브라우저의 History API를 사용해 URL 변경 감지
-//   - 이 안에 있는 모든 컴포넌트에서 useNavigate, useLocation 등 라우터 훅 사용 가능
-//   - 뒤로가기/앞으로가기 버튼 동작 지원
-//
-// StrictMode:
-//   - 개발 모드에서만 동작 (프로덕션 빌드에는 영향 없음)
-//   - 컴포넌트를 두 번 렌더링하여 부작용(side effect) 감지
-//   - 더 이상 사용되지 않는 API 경고 표시
+//   - #root 요소에 React 앱을 마운트합니다.
+//   - BrowserRouter로 URL 기반 라우팅을 활성화합니다.
+//   - PWA 서비스 워커를 등록해 설치 가능 웹앱으로 동작하게 합니다.
 // ============================================================
 
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
-import '../css/index.css'
-import App from './App.jsx'
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import { registerSW } from "virtual:pwa-register";
+import "../css/index.css";
+import App from "./App.jsx";
 
-// public/index.html의 <div id="root"> 엘리먼트를 React 앱의 루트로 사용
-createRoot(document.getElementById('root')).render(
-    <StrictMode>
-        {/* BrowserRouter: URL 경로 기반 라우팅 활성화
-            App.jsx의 Routes, Route 컴포넌트가 이 안에서 동작 */}
-        <BrowserRouter>
-            <App />
-        </BrowserRouter>
-    </StrictMode>,
-)
+// PWA 서비스 워커를 자동 업데이트 모드로 등록합니다.
+// 새 배포가 올라오면 최신 캐시를 더 빠르게 받도록 도와줍니다.
+registerSW({
+  immediate: true,
+  onRegisterError(error) {
+    console.error("PWA 서비스 워커 등록에 실패했습니다.", error);
+  },
+});
+
+createRoot(document.getElementById("root")).render(
+  <StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </StrictMode>,
+);
