@@ -13,7 +13,7 @@ flowchart LR
       API[🐍 Python API<br/>FastAPI<br/>:8000]
     end
     RDS[(🗄 AWS RDS<br/>MySQL 8)]
-    S3[(🪣 AWS S3<br/>feed/ profile/)]
+    S3[(🪣 AWS S3<br/>feed/ profile/ challenge/)]
 
     User -- HTTPS --> CF
     CF --> FE
@@ -34,7 +34,7 @@ flowchart LR
 
 ### 2.2.1 BFF 가 하는 일
 
-- **세션 발급 / 검증** (`express-session` + httpOnly Cookie)
+- **세션 발급 / 검증** (DB `sessions` 테이블 + `sessionId` httpOnly Cookie)
 - **권한 가드** (`requireAuth`, `requireAdmin`)
 - **S3 업로드 게이트키퍼** (multer-s3, 5MB / 50MB 제한, MIME 화이트리스트)
 - **신뢰 경계 변환**: 외부 토큰 → 내부 `X-Internal-Api-Key`
@@ -65,7 +65,7 @@ capston-main/
 │   └── report/                ← (본 폴더)
 │
 └── src/
-    ├── frontend/              # React 18 + Vite
+    ├── frontend/              # React 19 + Vite
     │   ├── App.jsx            # Router
     │   ├── LoginPage.jsx / SignupPage.jsx
     │   ├── HomePage.jsx / RoutinePage.jsx
@@ -101,9 +101,9 @@ capston-main/
 
 | 화면 | Express 라우트 (`src/backend/routes/*.js`) | FastAPI 라우트 (`src/python_api/routers/*.py`) |
 |------|--------------------------------------------|-----------------------------------------------|
-| 로그인/회원가입 | `login.js` `POST /signup` `POST /login` `GET /me/profile` `PATCH /me/profile` `POST /find-id` `POST /find-password` | `user.py` `POST /user` `GET /user/profile/{id}` `PATCH /user/profile` `POST /user/find-id` `POST /user/find-password` |
-| 루틴 | `routine.js` `/routines/*` | `routine.py` `/routine/*` |
-| 완료 체크 | `completion.js` `/completions/*` | `completion.py` `/completion/*` |
+| 로그인/회원가입 | `login.js` `POST /signup` `POST /login` `GET /me` `PATCH /me/profile` `POST /find-id` `POST /find-password` | `user.py` `POST /user/signup` `GET /user/{login_id}` `POST/GET/DELETE /user/session` `PATCH /user/profile/{user_id}` |
+| 루틴 | `routine.js` `GET/POST /routine`, `DELETE /routine/:routine_id` | `routine.py` `/routine/*` |
+| 완료 체크 | `completion.js` `POST /completion`, `GET /completion/today`, `GET /completion/history`, `DELETE /completion/:completion_id` | `completion.py` `/completion/*` |
 | 피드 | `feed.js` `/feed/*` (multer-s3) | `feed.py` `/feed/*` |
 | 댓글 / 좋아요 | `comment.js`, `like.js` | `comment.py`, `like.py` |
 | 마이페이지 | `mypage.js` | `mypage.py` `/mypage/{id}`, `/summary/{id}`, `/gallery/{id}` |
@@ -124,7 +124,7 @@ sequenceDiagram
     participant DB as MySQL (RDS)
 
     U->>FE: 액션 (예: 루틴 완료)
-    FE->>BE: fetch(POST /completions)<br/>credentials: include
+    FE->>BE: fetch(POST /completion)<br/>credentials: include
     BE->>BE: requireAuth (세션 검증)
     BE->>API: POST /completion<br/>X-Internal-Api-Key
     API->>API: 미들웨어 1차 차단

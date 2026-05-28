@@ -23,19 +23,18 @@ erDiagram
     CHALLENGES ||--o{ CHALLENGE_PARTICIPANTS : "has"
     CHALLENGES ||--o{ CHALLENGE_PROOFS : "tracks"
     CHALLENGE_PROOFS ||--o{ CHALLENGE_PROOF_FILES : "has"
-    CHALLENGE_PROOFS ||--o| FEEDS : "shared to"
+    USERS ||--o{ SESSIONS : "has"
 
     USERS {
         CHAR(36) user_id PK
         VARCHAR login_id UK
-        VARCHAR password_hash
+        VARCHAR password
         VARCHAR nickname
         VARCHAR email
         CHAR gender
         DATE birth_date
         VARCHAR profile_img
         TEXT bio
-        TINYINT is_admin
         DATETIME created_at
         DATETIME deleted_at
     }
@@ -61,7 +60,6 @@ erDiagram
         CHAR(36) feed_id PK
         CHAR(36) user_id FK
         TEXT content
-        CHAR(36) challenge_id FK "nullable"
         DATETIME created_at
         DATETIME deleted_at
     }
@@ -109,14 +107,15 @@ erDiagram
         CHAR(36) proof_id PK
         CHAR(36) challenge_id FK
         CHAR(36) user_id FK
-        CHAR(36) feed_id FK "nullable"
-        TEXT memo
+        TEXT content
+        DATE proof_date
+        TINYINT share_to_feed
         DATETIME created_at
         DATETIME deleted_at
     }
 
     CHALLENGE_PROOF_FILES {
-        CHAR(36) file_id PK
+        CHAR(36) proof_file_id PK
         CHAR(36) proof_id FK
         VARCHAR file_url
         ENUM file_type
@@ -139,16 +138,24 @@ erDiagram
         ENUM status "pending|resolved|rejected"
         DATETIME created_at
     }
+
+    SESSIONS {
+        VARCHAR session_id PK
+        CHAR(36) user_id FK
+        DATETIME expires_at
+        DATETIME created_at
+    }
 ```
 
 ## 3.2 테이블별 책임
 
 | 테이블 | 역할 | 핵심 인덱스 |
 |--------|------|------------|
-| `users` | 계정 / 프로필 / 권한 | `UNIQUE(login_id)` |
+| `users` | 계정 / 프로필 | `UNIQUE(login_id)` |
+| `sessions` | 로그인 세션 저장 / 만료 관리 | `session_id`, `expires_at` |
 | `routines` | 사용자별 시간대 루틴 | `(user_id, time_slot, deleted_at)` |
 | `routine_completions` | 일자별 완료 기록 | `(user_id, completed_at)`, `(routine_id, completed_at)` |
-| `feeds` | 인증 게시글 본문 | `(user_id, created_at)`, `(challenge_id)` |
+| `feeds` | 루틴 인증 게시글 본문 | `(user_id, created_at)` |
 | `feed_images` | 게시글 파일 (S3 URL) | `(feed_id, created_at)` |
 | `comments` / `likes` | 게시글 소셜 액션 | `(feed_id)` |
 | `challenges` | 관리자 챌린지 | `(deleted_at, start_date)` |
@@ -201,14 +208,14 @@ WHERE f.deleted_at IS NULL
 | `migrations-2026-05-10-performance-indexes.sql` (= `performance-indexes-*.sql`) | 핵심 조회 인덱스 추가 |
 | `migrations-2026-05-13-admin-challenge.sql` | 챌린지·공지·신고 테이블 신설 |
 | `migrations-2026-05-17-feeds-soft-delete.sql` | feeds 테이블 Soft Delete 컬럼 도입 |
-| `migrations-2026-05-20-challenge-feed-share.sql` | 챌린지 인증 → 피드 자동 공유 (`feeds.challenge_id`) |
+| `migrations-2026-05-20-challenge-feed-share.sql` | 챌린지 인증 → 피드 목록 병합용 `share_to_feed` 컬럼/인덱스 |
 | `migrations-2026-05-20-users-bio.sql` | 자기소개(bio) 컬럼 추가 |
 
 모든 마이그레이션은 `idempotent` (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS) 로 작성되어 재실행 안전.
 
 ## 3.5 커넥션 풀 (`src/python_api/database.py`)
 
-- PyMySQL + `DBUtils.PooledDB` 기반.
+- PyMySQL 기반 커스텀 커넥션 풀.
 - 풀 누수 방지를 위해 모든 라우터에서:
 
 ```python

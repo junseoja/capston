@@ -18,14 +18,13 @@ flowchart LR
       direction TB
       Compose["docker-compose.prod.yml"]
       subgraph DC["docker network"]
-        FE2[frontend<br/>nginx + Vite build<br/>:5173]
+        FE2[frontend<br/>serve + Vite build<br/>:5173]
         BE2[backend<br/>node<br/>:3000]
         API2[python_api<br/>uvicorn<br/>:8000]
       end
       Compose --> FE2 & BE2 & API2
     end
 
-    BE2 -- TLS:3306 --> RDS[(AWS RDS<br/>MySQL 8)]
     BE2 -- AWS SDK --> S3
     API2 -- TLS:3306 --> RDS
     FE2 -. 정적 미디어 GET .-> S3[(AWS S3)]
@@ -36,7 +35,7 @@ flowchart LR
 | 파일 | 용도 | 차이 |
 |------|------|------|
 | `docker-compose.yml` | 로컬 개발 | `vite dev`, hot-reload, MySQL 컨테이너 동봉 가능 |
-| `docker-compose.prod.yml` | 운영 | `vite build` 결과를 정적 서빙, 외부 RDS 사용, 환경 변수는 호스트 `.env` 주입 |
+| `docker-compose.prod.yml` | 운영 | `vite build` 결과를 `serve` 로 정적 서빙, 외부 RDS 사용, 환경 변수는 각 서비스 `.env` 주입 |
 
 운영 컴포즈 핵심 (요약):
 
@@ -50,14 +49,14 @@ services:
   backend:
     build: { dockerfile: Dockerfile.backend.prod }
     ports: ["3000:3000"]
-    env_file: [.env.prod]            # SESSION_SECRET, INTERNAL_API_KEY, AWS, RDS
+    env_file: [./src/backend/.env]   # INTERNAL_API_KEY, AWS, FRONTEND_URL
     depends_on: [python_api]
     restart: unless-stopped
 
   python_api:
     build: { dockerfile: Dockerfile.python_api.prod }
     ports: ["8000:8000"]
-    env_file: [.env.prod]            # INTERNAL_API_KEY, RDS
+    env_file: [./src/python_api/.env] # INTERNAL_API_KEY, DB_*
     restart: unless-stopped
 ```
 
@@ -65,20 +64,21 @@ services:
 
 | 파일 | 베이스 | 빌드 단계 | 비고 |
 |------|--------|----------|------|
-| `Dockerfile.frontend.prod` | `node:20-alpine` → `nginx:alpine` (멀티 스테이지) | `npm ci && npm run build` → `dist/` 를 nginx 로 서빙 | 정적 자산만 노출 |
+| `Dockerfile.frontend.prod` | `node:20-alpine` 멀티 스테이지 | `npm ci && npm run build` → `dist/` 를 `serve` 로 서빙 | 정적 자산만 노출 |
 | `Dockerfile.backend.prod` | `node:20-alpine` | `npm ci --omit=dev` | Express 만 노출, FastAPI 호출은 내부 DNS (`http://python_api:8000`) |
-| `Dockerfile.python_api.prod` | `python:3.11-slim` | `pip install -r requirements.txt`, `uvicorn app:app --host 0.0.0.0 --port 8000` | 외부 미노출, INTERNAL_API_KEY 만 통과 |
+| `Dockerfile.python_api.prod` | `python:3.12-slim` | `pip install -r requirements.txt`, `uvicorn app:app --host 0.0.0.0 --port 8000` | 외부 미노출, INTERNAL_API_KEY 만 통과 |
 
 ## 7.4 환경 변수 정리
 
 | 변수 | 사용 위치 | 설명 |
 |------|----------|------|
-| `SESSION_SECRET` | backend | express-session 서명 키 |
 | `INTERNAL_API_KEY` | backend + python_api | 내부 통신 게이트 |
-| `RDS_HOST/PORT/USER/PASSWORD/DB` | backend + python_api | MySQL 접속 |
+| `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` | python_api | MySQL 접속 |
+| `PYTHON_API` | backend | Express 가 호출할 FastAPI URL |
+| `FRONTEND_URL` | backend | CORS 허용 origin 목록 |
 | `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` | backend | multer-s3 / S3 SDK. 가능하면 EC2 IAM Role 권장. |
 | `AWS_S3_BUCKET` / `AWS_REGION` | backend | 업로드 대상 |
-| `PUBLIC_HOST` | backend | 쿠키 domain 결정 (cloudflared 도메인) |
+| `NODE_ENV` | backend | 운영 쿠키 옵션(`secure`, `sameSite`) 결정 |
 
 ## 7.5 Cloudflared Tunnel 도입 이유
 

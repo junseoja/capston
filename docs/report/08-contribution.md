@@ -146,4 +146,4 @@ sequenceDiagram
 
 ---
 
-이전: [07. 배포 환경](./07-deployment.md) · 처음으로: [README](./README.md)
+이전: [07. 배포 환경](./07-deployment.md) · 다음: [09. 한계 및 개선 방향](./09-limitations-improvements.md)

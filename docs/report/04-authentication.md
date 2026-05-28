@@ -4,9 +4,9 @@
 
 | 단계 | 사용 기술 | 비고 |
 |------|----------|------|
-| 비밀번호 저장 | `bcrypt` salt round 10 | 평문 / 단방향 해시 X |
-| 세션 유지 | `express-session` + `httpOnly` 쿠키 | JS 에서 읽기 불가 → XSS 토큰 탈취 방어 |
-| 권한 가드 | `requireAuth` / `requireAdmin` 미들웨어 | `is_admin = 1` 만 관리자 라우트 진입 |
+| 비밀번호 저장 | `bcryptjs` salt round 10 | 회원가입/임시 비밀번호 발급 시 단방향 해시 저장 |
+| 세션 유지 | DB `sessions` 테이블 + `sessionId` httpOnly 쿠키 | JS 에서 읽기 불가 → XSS 토큰 탈취 방어 |
+| 권한 가드 | `requireAuth` / `requireAdmin` 미들웨어 | 현재는 `login_id === "admin"` 기준 |
 | 내부 통신 | `X-Internal-Api-Key` 헤더 | FastAPI 미들웨어가 1차 차단 |
 
 ## 4.2 회원가입 흐름
@@ -21,15 +21,16 @@ sequenceDiagram
 
     FE->>BE: POST /signup<br/>{ login_id, password, nickname, ... }
     BE->>BE: 입력 검증<br/>(빈값, 길이, 이메일 형식)
-    BE->>API: POST /user<br/>X-Internal-Api-Key
+    BE->>API: GET /user/{login_id}<br/>X-Internal-Api-Key
     API->>DB: SELECT login_id WHERE login_id = ?
     alt 중복
         DB-->>API: row
-        API-->>BE: 409 Conflict
+        API-->>BE: existing user
         BE-->>FE: 409
     else 통과
-        API->>API: bcrypt.hash(password)
-        API->>DB: INSERT users (uuidv7, ...)
+        BE->>BE: bcrypt.hash(password, 10)
+        BE->>API: POST /user/signup<br/>X-Internal-Api-Key
+        API->>DB: INSERT users (uuidv7, bcrypt hash)
         DB-->>API: OK
         API-->>BE: 201 { user_id }
         BE-->>FE: 201
@@ -38,7 +39,7 @@ sequenceDiagram
 
 핵심 검증 포인트:
 - `login_id` UNIQUE 인덱스 + Express 사전 검증의 **이중화** → 동시 가입 레이스에서도 안전.
-- 비밀번호는 FastAPI 진입 후 해시 → Express 로그에도 평문이 남지 않음.
+- 비밀번호는 Express 에서 해시한 뒤 FastAPI 로 전달되며, FastAPI/DB 에는 해시 문자열만 저장된다.
 
 ## 4.3 로그인 / 세션 발급
 
@@ -46,22 +47,23 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant FE as React<br/>LoginPage.jsx
-    participant BE as Express<br/>login.js + session
+    participant BE as Express<br/>login.js + DB session
     participant API as FastAPI
     participant DB as MySQL
 
     FE->>BE: POST /login<br/>{ login_id, password }
-    BE->>API: POST /user/login<br/>X-Internal-Api-Key
+    BE->>API: GET /user/{login_id}<br/>X-Internal-Api-Key
     API->>DB: SELECT * WHERE login_id<br/>AND deleted_at IS NULL
     DB-->>API: row(user)
-    API->>API: bcrypt.compare(password, hash)
+    API-->>BE: row(user)
+    BE->>BE: bcrypt.compare(password, hash)
     alt 실패
-        API-->>BE: 401
         BE-->>FE: 401 "아이디 또는 비밀번호가 일치하지 않습니다."
     else 성공
-        API-->>BE: 200 { user_id, nickname, is_admin }
-        BE->>BE: req.session.user = { ... }<br/>Set-Cookie httpOnly
-        BE-->>FE: 200 { user }<br/>+ Cookie
+        BE->>BE: UUID v4 sessionId 생성
+        BE->>API: POST /user/session<br/>{ session_id, user_id }
+        API->>DB: INSERT sessions<br/>expires_at = NOW()+1 DAY
+        BE-->>FE: 200 + Set-Cookie sessionId httpOnly
     end
 
     note over FE,BE: 이후 모든 요청에 fetch(credentials:include)<br/>=> 동일 도메인의 httpOnly 쿠키가 자동 첨부
@@ -69,9 +71,9 @@ sequenceDiagram
 
 쿠키 옵션 (운영):
 - `httpOnly: true`
-- `sameSite: "lax"`
+- 로컬 `sameSite: "lax"`, 운영 `sameSite: "none"`
 - `secure: true` (HTTPS only, Cloudflared 종단 사용)
-- `maxAge: 7d`
+- `maxAge: 1d`
 
 ## 4.4 권한 가드 (`requireAuth` / `requireAdmin`)
 
@@ -81,7 +83,7 @@ flowchart LR
     A -- No --> X1[401 Unauthorized]
     A -- Yes --> B{admin 라우트?}
     B -- No --> P[다음 핸들러]
-    B -- Yes --> C{is_admin = 1?}
+    B -- Yes --> C{login_id == "admin"?}
     C -- No --> X2[403 Forbidden]
     C -- Yes --> P
 ```
@@ -97,7 +99,7 @@ FastAPI 는 외부에 직접 노출되지 않지만, 동일 EC2 내에서 우회
 @app.middleware("http")
 async def internal_api_key_guard(request, call_next):
     if request.headers.get("X-Internal-Api-Key") != INTERNAL_API_KEY:
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
     return await call_next(request)
 ```
 

@@ -10,13 +10,13 @@ flowchart TB
     B -- No --> X1[401]
     B -- Yes --> C{requireAdmin?}
     C -- No 통과 --> D
-    C -- Admin --> CA{is_admin=1}
+    C -- Admin --> CA{login_id == "admin"}
     CA -- No --> X2[403]
     CA -- Yes --> D
     D[파일 업로드 검증<br/>MIME · 크기 · 프리픽스] --> E[S3 키 추출<br/>호스트 · 경로 traversal 차단]
     E --> F[X-Internal-Api-Key]
     F --> G{FastAPI 미들웨어}
-    G -- 불일치 --> X3[401]
+    G -- 불일치 --> X3[403]
     G -- OK --> H[라우터 try]
     H --> I[BEGIN → Query]
     I -->|예외| R[rollback + finally close]
@@ -27,9 +27,9 @@ flowchart TB
 
 | 정책 | 적용 위치 |
 |------|----------|
-| `bcrypt` salt round 10 단방향 해시 | `user.py` 생성 / 비밀번호 변경 시 |
-| 평문 로그 금지 | Express 요청 로깅에서 `password`, `password_hash` 키 마스킹 |
-| 응답 페이로드에서 `password_hash` 컬럼 제거 | SELECT 명시 (별표 `*` 사용 시도 시 코드 리뷰에서 차단) |
+| `bcryptjs` salt round 10 단방향 해시 | `login.js` 회원가입 / 임시 비밀번호 변경 시 |
+| 평문 로그 금지 | Express 요청 로깅에서 `password` 키 출력 금지 |
+| 응답 페이로드에서 `password` 컬럼 제거 | `/me` 응답에서 비밀번호 해시 제외 |
 
 ## 6.3 세션 / 쿠키
 
@@ -37,8 +37,8 @@ flowchart TB
 |------|-----|------|
 | `httpOnly` | true | JS 가 `document.cookie` 로 읽을 수 없음 → XSS 토큰 탈취 차단 |
 | `secure` | true (운영) | HTTPS only — Cloudflared 종단 보장 |
-| `sameSite` | "lax" | 일반 사이트로부터의 CSRF 자동 차단 |
-| `maxAge` | 7d | 장기 세션이지만, 비밀번호 변경 시 세션 무효화 (보강 예정) |
+| `sameSite` | 로컬 `"lax"`, 운영 `"none"` | 개발 편의와 운영 크로스 도메인 HTTPS 쿠키 전송을 분리 |
+| `maxAge` | 1d | DB 세션 만료와 쿠키 만료를 맞춤. 비밀번호 변경 시 세션 무효화는 보강 예정. |
 
 ## 6.4 내부 API Key 게이트 (FastAPI)
 
@@ -46,7 +46,7 @@ flowchart TB
 @app.middleware("http")
 async def internal_api_key_guard(request, call_next):
     if request.headers.get("X-Internal-Api-Key") != INTERNAL_API_KEY:
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
     return await call_next(request)
 ```
 
@@ -54,9 +54,9 @@ async def internal_api_key_guard(request, call_next):
 - 환경 변수에서만 주입 → 코드/이미지에 포함되지 않음.
 - 운영 / 개발 키 분리.
 
-## 6.5 S3 키 검증 (`src/backend/lib/s3.js`)
+## 6.5 S3 키 검증 (`src/backend/lib/s3.js`, `challenge.js`)
 
-업로드 / 삭제 모두 동일한 `extractS3Key` 함수를 통과해야 한다.
+피드/프로필 업로드 삭제는 공용 `extractS3Key` 함수를 통과하고, 챌린지 인증 파일은 `challenge.js` 의 동일한 형태의 검증 함수를 통과한다.
 
 ```mermaid
 flowchart TB
@@ -69,7 +69,7 @@ flowchart TB
     E --> F[decodeURIComponent]
     F --> G{경로 traversal<br/>(.. , \\, % 인코딩)?}
     G -- Yes --> X3[reject]
-    G -- No --> H{프리픽스 화이트리스트<br/>feed/ 또는 profile/?}
+    G -- No --> H{프리픽스 화이트리스트<br/>feed/ profile/ challenge/?}
     H -- No --> X4[reject]
     H -- Yes --> Y[S3 key 반환 → 삭제 가능]
 ```
@@ -78,7 +78,7 @@ flowchart TB
 - **타 사용자 파일 삭제 시도**: `previous_profile_img` 를 클라이언트가 변조해 보내도, FastAPI 가 DB 에서 자체 조회한 값만 신뢰.
 - **S3 외부 객체 삭제 유도**: 우리 버킷이 아닌 호스트는 1차 차단.
 - **경로 traversal**: `profile/../../../prod-backup/...` 같은 시도는 디코딩 후 정규화 단계에서 차단.
-- **임의 프리픽스 업로드**: `random/`, `admin-secret/` 등은 multer-s3 의 key 함수에서 강제 `feed/` 또는 `profile/` 만 허용.
+- **임의 프리픽스 업로드**: `random/`, `admin-secret/` 등은 multer-s3 의 key 함수에서 강제 `feed/`, `profile/`, `challenge/` 계열만 허용.
 
 ## 6.6 업로드 제한
 
@@ -150,6 +150,7 @@ finally:
 - 비밀번호 찾기 → 이메일 송신 기반 토큰 재설정.
 - Helmet 헤더 (CSP, X-Frame-Options) 강화.
 - Audit log 테이블 (관리자 행위 추적).
+- 관리자 권한을 `login_id === "admin"` 문자열 정책에서 `users.role` 컬럼 기반 정책으로 전환.
 
 ---
 

@@ -14,13 +14,13 @@ sequenceDiagram
     participant DB as MySQL
 
     U->>FE: "운동 30분" + time_slot=morning 입력
-    FE->>BE: POST /routines
+    FE->>BE: POST /routine
     BE->>API: POST /routine
     API->>DB: INSERT routines (uuidv7, ...)
     API-->>FE: 201
 
     U->>FE: 체크박스 ✓
-    FE->>BE: POST /completions { routine_id }
+    FE->>BE: POST /completion { routine_id }
     BE->>API: POST /completion
     API->>DB: BEGIN<br/>SELECT 오늘 동일 routine_id 완료 행<br/>없으면 INSERT routine_completions<br/>COMMIT
     API-->>FE: 200 { completion_id }
@@ -132,28 +132,28 @@ sequenceDiagram
     participant DB as MySQL
 
     A->>FE: 챌린지 제목/기간 입력
-    FE->>BE: POST /admin/challenge
+    FE->>BE: POST /challenge
     BE->>BE: requireAdmin
-    BE->>API: POST /challenge (admin)
+    BE->>API: POST /challenge
     API->>DB: INSERT challenges
     API-->>FE: 201
 
     U->>FE: "참가" 버튼
     FE->>BE: POST /challenge/{id}/join
-    BE->>API: POST /challenge/{id}/participants
+    BE->>API: POST /challenge/{id}/join
     API->>DB: INSERT challenge_participants
 
     U->>FE: 인증 사진 업로드
     FE->>BE: POST /challenge/{id}/proof (multipart)
-    BE->>S3: PUT feed/<uuid>.jpg
-    BE->>API: POST /challenge/proof<br/>{ files, memo, share_to_feed }
-    API->>DB: BEGIN<br/>INSERT challenge_proofs<br/>INSERT challenge_proof_files<br/>(share_to_feed=true 시)<br/>INSERT feeds (challenge_id 세팅)<br/>INSERT feed_images<br/>COMMIT
+    BE->>S3: PUT challenge/<uuid>.jpg
+    BE->>API: POST /challenge/{id}/proof<br/>{ files, content, share_to_feed }
+    API->>DB: BEGIN<br/>INSERT challenge_proofs<br/>INSERT challenge_proof_files<br/>COMMIT
     API-->>FE: 201
 ```
 
 특이점:
-- **챌린지 인증 ↔ 피드 게시글 양방향 연결**: `feeds.challenge_id` 컬럼 + `challenge_proofs.feed_id` 컬럼.
-- 챌린지 페이지에서 인증을 올리면 동일 사진이 일반 피드에도 자동 공개 (선택 가능).
+- **챌린지 인증 → 피드 노출**: `challenge_proofs.share_to_feed = 1` 인 인증을 `GET /feed` 응답에서 일반 피드와 병합한다.
+- 챌린지 인증은 별도 `feeds` 행으로 복제하지 않고, 피드 조회 단계에서 `source_type="challenge"` 메타를 붙여 표시한다.
 
 ## 5.6 통계
 
@@ -175,7 +175,7 @@ flowchart LR
 
 | 흐름 | 비고 |
 |------|------|
-| 공지 작성 | `requireAdmin`. `AdminPage.jsx` → `POST /admin/notice`. |
+| 공지 작성 | `requireAdmin`. `AdminPage.jsx` → `POST /notice`. |
 | 공지 열람 | `NoticeList.jsx` 목록 + `NoticeDetail.jsx`. Soft Delete 필터 적용. |
 | 신고 작성 | `target_type` (feed / comment / user) 분기. 본인 게시물 신고 가드. |
 | 신고 처리 | Admin 이 `status` 를 `resolved` / `rejected` 로 갱신. |

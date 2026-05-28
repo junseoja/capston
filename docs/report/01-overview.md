@@ -28,7 +28,7 @@
 ```mermaid
 flowchart LR
     subgraph FE[Frontend]
-      A[React 18 + Vite]
+      A[React 19 + Vite]
     end
     subgraph BE[Backend BFF]
       B[Express + httpOnly Session]
@@ -38,7 +38,7 @@ flowchart LR
     end
     subgraph DATA[Data / Storage]
       D[(AWS RDS<br/>MySQL 8)]
-      E[(AWS S3<br/>feed/ + profile/)]
+      E[(AWS S3<br/>feed/ + profile/ + challenge/)]
     end
     A -- fetch credentials:include --> B
     B -- X-Internal-Api-Key --> C
@@ -48,11 +48,11 @@ flowchart LR
 
 | 계층 | 기술 |
 |------|------|
-| Frontend | React 18, Vite, Plain CSS (Tailwind 미사용) |
-| BFF | Node.js 20, Express 4, express-session, multer-s3, bcrypt |
-| Application API | Python 3.11, FastAPI, PyMySQL (Pool) |
+| Frontend | React 19, Vite, Plain CSS (Tailwind 미사용) |
+| BFF | Node.js 20, Express 5, DB 세션 쿠키, multer-s3, bcryptjs |
+| Application API | Python 3.12, FastAPI, PyMySQL (Pool) |
 | DB | MySQL 8 (AWS RDS) |
-| Storage | AWS S3 (`feed/`, `profile/` 프리픽스 분리) |
+| Storage | AWS S3 (`feed/`, `profile/`, `challenge/` 프리픽스 분리) |
 | 배포 | Docker Compose, Cloudflared Tunnel |
 | 인증 | httpOnly 세션 쿠키 + bcrypt |
 | ID 정책 | UUID v7 (`CHAR(36)`) |

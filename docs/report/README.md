@@ -15,6 +15,7 @@
 | 06 | [보안 정책](./06-security.md) | INTERNAL_API_KEY, S3 키 검증, 신고, Rate-limit, Soft Delete |
 | 07 | [배포 환경](./07-deployment.md) | Docker Compose, AWS (EC2 / RDS / S3), Cloudflared 터널 |
 | 08 | [본인 기여](./08-contribution.md) | 백엔드 / DB / 배포 / 프론트 통합 — 챌린지 제외 전체 |
+| 09 | [한계 및 개선 방향](./09-limitations-improvements.md) | 현재 코드 리뷰 기반 한계, 검증 결과, 향후 개선 로드맵 |
 
 ## 🗂 본 문서가 다루는 범위
 
@@ -26,6 +27,7 @@
 
 - 메인 README (작업 일지 / 백로그): [`../../README.md`](../../README.md)
 - 아키텍처 원본 노트: [`../architecture-overview.md`](../architecture-overview.md)
+- 현재 코드 리뷰 노트: [`../code-review-current-state-2026-05-20.md`](../code-review-current-state-2026-05-20.md)
 - 배포 노트: [`../deploy.md`](../deploy.md)
 - 마이그레이션 SQL: [`../migrations-*.sql`](../)
 
