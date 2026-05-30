@@ -21,7 +21,7 @@
 | 챌린지 | 관리자 등록 / 참가 / 인증 / 인증 피드 공유 | `ChallengePage.jsx`, `AdminPage.jsx` |
 | 통계 | 시간대별 / 주간 / 월간 달성률 차트 | `StatsPage.jsx` |
 | 공지 | 관리자 공지 / 사용자 열람 | `NoticeList.jsx`, `NoticeDetail.jsx` |
-| 신고 | 피드·댓글·유저 신고 | `FeedPage.jsx` 내 모달 |
+| 신고 | 피드 신고(카테고리 6종 + 상세 사유) / 관리자 제재 처리 | `FeedPage.jsx` 내 모달, `AdminPage.jsx` |
 
 ## 1.4 기술 스택
 
@@ -61,7 +61,7 @@ flowchart LR
 ## 1.5 비기능 요구사항 (NFR)
 
 - **보안**: FastAPI 는 외부에 직접 노출되지 않고 `X-Internal-Api-Key` 미들웨어로 1차 차단.
-- **무결성**: 모든 도메인 테이블에 `deleted_at` 컬럼을 두고 모든 SELECT 에서 `IS NULL` 필터.
+- **무결성**: 주요 도메인 테이블에 `deleted_at` 컬럼을 두고 해당 테이블 SELECT 에서 `IS NULL` 필터 (`feed_comments`·`feed_likes` 는 Hard Delete 예외).
 - **회복력**: 라우터마다 `try / except + rollback + finally close` 패턴 강제, 커넥션 풀 누수 방지.
 - **이식성**: 개발(`docker-compose.yml`) / 운영(`docker-compose.prod.yml`) 분리.
 - **외부 노출**: 클라우드플레어 터널을 통해 EC2 외부 IP 노출 없이 HTTPS 종단.

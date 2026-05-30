@@ -56,7 +56,11 @@ async def internal_api_key_guard(request, call_next):
 
 ## 6.5 S3 키 검증 (`src/backend/lib/s3.js`, `challenge.js`)
 
-피드/프로필 업로드 삭제는 공용 `extractS3Key` 함수를 통과하고, 챌린지 인증 파일은 `challenge.js` 의 동일한 형태의 검증 함수를 통과한다.
+검증기는 **두 개로 분리**되어 있고 정책 형태는 동일하다.
+- **피드 / 프로필**: 공용 `src/backend/lib/s3.js` 의 `extractS3Key` — 화이트리스트 `["feed/", "profile/"]`.
+- **챌린지 인증**: `src/backend/routes/challenge.js` 의 자체 `extractS3Key` — 화이트리스트 `["challenge/"]`.
+
+두 함수 모두 (1) URL 파싱 (2) 호스트 정확 매칭 (3) `..`·백슬래시 차단 (4) 프리픽스 화이트리스트라는 동일한 4단계를 거친다. 즉 S3 버킷은 `feed/` · `profile/` · `challenge/` 세 프리픽스로 분리되지만, 검증 로직은 도메인별로 나뉘어 있다.
 
 ```mermaid
 flowchart TB
@@ -67,9 +71,9 @@ flowchart TB
     D -- No --> X2[reject - 외부 도메인]
     D -- Yes --> E[pathname 추출]
     E --> F[decodeURIComponent]
-    F --> G{경로 traversal<br/>(.. , \\, % 인코딩)?}
+    F --> G{경로 traversal<br/>(.. , \\)?}
     G -- Yes --> X3[reject]
-    G -- No --> H{프리픽스 화이트리스트<br/>feed/ profile/ challenge/?}
+    G -- No --> H{프리픽스 화이트리스트<br/>feed·profile 검증기: feed/ profile/<br/>challenge 검증기: challenge/?}
     H -- No --> X4[reject]
     H -- Yes --> Y[S3 key 반환 → 삭제 가능]
 ```
@@ -94,9 +98,9 @@ flowchart TB
 
 | 시나리오 | 처리 |
 |---------|------|
-| 사용자가 본인 게시글 삭제 | `feeds.deleted_at = NOW()`. 댓글·좋아요는 그대로 두되 조회 시 필터. |
+| 사용자가 본인 게시글 삭제 | `feeds.deleted_at = NOW()` (Soft Delete). 피드가 가려지면 `feed_comments` · `feed_likes`(Hard Delete 테이블)는 조회 시 피드 단위 필터로 함께 노출되지 않음. |
 | 사용자 탈퇴 | `users.deleted_at = NOW()`. 작성 글은 `LEFT JOIN + COALESCE` 로 "(탈퇴 사용자)" 로 표시. |
-| 관리자 강제 삭제 | 동일하게 Soft Delete + `reports.status = "resolved"`. |
+| 관리자 강제 삭제 | 동일하게 Soft Delete + 해당 피드의 모든 신고 `reports.status = "completed"` 로 일괄 처리. |
 | 데이터 무결성 사고 | `deleted_at` 만 NULL 로 되돌리면 즉시 복구 가능. |
 
 **모든 SELECT 에서 `deleted_at IS NULL` 필터 누락 = P0 버그**.
@@ -129,10 +133,11 @@ finally:
 
 | 규칙 | 적용 위치 |
 |------|----------|
-| 본인 피드 신고 금지 | `report.js` 에서 `user_id === target_owner_id` 차단 |
-| 챌린지 게시물 신고 가드 | 챌린지 인증 글은 일반 피드와 동일 신고 흐름, 본인 인증 신고는 차단 |
-| 본인 글 좋아요 무한 토글 방지 | `likes` 테이블 PK `(feed_id, user_id)` 로 1회만 허용 |
-| 댓글 작성자 본인만 수정/삭제 | FastAPI 에서 `comments.user_id` 와 세션 user_id 비교 |
+| 신고자 위조 방지 | `report.js` 가 `reporter_user_id` 를 클라이언트 값이 아닌 **세션 user_id** 로 주입. 신고 대상(`target_user_id`)도 FastAPI 가 `feed_id` 로 작성자를 자체 조회해 확정 ([report.py](../../src/python_api/routers/report.py)). |
+| 중복 신고 차단 | 같은 사용자 + 같은 피드 + `pending` 신고가 이미 있으면 409 ([report.py:135-149](../../src/python_api/routers/report.py)). *(현재 자기 글 신고를 막는 가드는 없음 — 백로그)* |
+| 챌린지 인증 신고 | 챌린지 인증 글(`source_type="challenge"`)은 **프론트에서 신고 메뉴를 숨김** ([FeedPage.jsx](../../src/frontend/FeedPage.jsx)). reports 테이블은 `feed_id` 전용이라 챌린지 인증은 신고 대상에 포함되지 않음. |
+| 중복 좋아요 방지 | `feed_likes` 의 `UNIQUE(feed_id, user_id)` 제약. INSERT 충돌(IntegrityError) 시 DELETE 로 토글 ([like.py:61-80](../../src/python_api/routers/like.py)). |
+| 댓글 작성자 본인만 삭제 | FastAPI 가 `DELETE ... WHERE comment_id = ? AND user_id = ?` 로 소유자 검증 ([comment.py:173](../../src/python_api/routers/comment.py)). (별도 수정 엔드포인트는 없음.) |
 
 ## 6.10 비밀 관리
 

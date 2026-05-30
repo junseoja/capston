@@ -1,6 +1,7 @@
 # 03. 데이터 모델 (DB)
 
-> MySQL 8 (AWS RDS) 기반. 모든 PK 는 `CHAR(36) UUID v7`, 모든 도메인 테이블은 `deleted_at DATETIME NULL` 컬럼으로 **Soft Delete** 패턴 통일.
+> MySQL 8 (AWS RDS) 기반. 모든 PK 는 `CHAR(36) UUID v7`. 주요 도메인 테이블(`users`, `routines`, `routine_completions`, `feeds`, `challenges`, `challenge_proofs`, `notices`, `reports`)은 `deleted_at DATETIME NULL` 컬럼으로 **Soft Delete** 패턴을 따른다.
+> 단, **`feed_comments` · `feed_likes` 는 Hard Delete** (댓글은 작성자 본인 `DELETE`, 좋아요는 토글 시 `DELETE`) 로 예외다.
 
 ## 3.1 ER 다이어그램
 
@@ -9,16 +10,17 @@ erDiagram
     USERS ||--o{ ROUTINES : "owns"
     USERS ||--o{ ROUTINE_COMPLETIONS : "completes"
     USERS ||--o{ FEEDS : "writes"
-    USERS ||--o{ COMMENTS : "writes"
-    USERS ||--o{ LIKES : "presses"
+    USERS ||--o{ FEED_COMMENTS : "writes"
+    USERS ||--o{ FEED_LIKES : "presses"
     USERS ||--o{ CHALLENGE_PARTICIPANTS : "joins"
     USERS ||--o{ CHALLENGE_PROOFS : "submits"
     USERS ||--o{ REPORTS : "reports"
 
     ROUTINES ||--o{ ROUTINE_COMPLETIONS : "tracked by"
     FEEDS ||--o{ FEED_IMAGES : "has"
-    FEEDS ||--o{ COMMENTS : "has"
-    FEEDS ||--o{ LIKES : "has"
+    FEEDS ||--o{ FEED_COMMENTS : "has"
+    FEEDS ||--o{ FEED_LIKES : "has"
+    FEEDS ||--o{ REPORTS : "reported by"
 
     CHALLENGES ||--o{ CHALLENGE_PARTICIPANTS : "has"
     CHALLENGES ||--o{ CHALLENGE_PROOFS : "tracks"
@@ -72,18 +74,18 @@ erDiagram
         DATETIME created_at
     }
 
-    COMMENTS {
+    FEED_COMMENTS {
         CHAR(36) comment_id PK
         CHAR(36) feed_id FK
         CHAR(36) user_id FK
         TEXT content
         DATETIME created_at
-        DATETIME deleted_at
     }
 
-    LIKES {
-        CHAR(36) feed_id PK,FK
-        CHAR(36) user_id PK,FK
+    FEED_LIKES {
+        CHAR(36) like_id PK
+        CHAR(36) feed_id FK
+        CHAR(36) user_id FK
         DATETIME created_at
     }
 
@@ -131,12 +133,17 @@ erDiagram
 
     REPORTS {
         CHAR(36) report_id PK
-        CHAR(36) reporter_id FK
-        ENUM target_type "feed|comment|user"
-        CHAR(36) target_id
-        TEXT reason
-        ENUM status "pending|resolved|rejected"
+        CHAR(36) feed_id FK
+        CHAR(36) reporter_user_id FK
+        CHAR(36) target_user_id FK
+        ENUM report_category "욕설/비방|부적절한 홍보|도용/저작권|스팸/도배|음란/혐오|기타"
+        TEXT report_detail
+        ENUM status "pending|completed"
+        TEXT admin_comment
+        CHAR(36) processed_by FK
         DATETIME created_at
+        DATETIME processed_at
+        DATETIME deleted_at
     }
 
     SESSIONS {
@@ -157,12 +164,12 @@ erDiagram
 | `routine_completions` | 일자별 완료 기록 | `(user_id, completed_at)`, `(routine_id, completed_at)` |
 | `feeds` | 루틴 인증 게시글 본문 | `(user_id, created_at)` |
 | `feed_images` | 게시글 파일 (S3 URL) | `(feed_id, created_at)` |
-| `comments` / `likes` | 게시글 소셜 액션 | `(feed_id)` |
+| `feed_comments` / `feed_likes` | 게시글 소셜 액션 (둘 다 **Hard Delete** — 댓글은 작성자 본인만, 좋아요는 토글 시 DELETE) | `(feed_id)`, `feed_likes` 는 `UNIQUE(feed_id, user_id)` |
 | `challenges` | 관리자 챌린지 | `(deleted_at, start_date)` |
 | `challenge_participants` | 참여 매핑 (복합 PK) | PK 자체 |
 | `challenge_proofs` / `_files` | 인증 본문 + 파일 + 피드 공유 | `(challenge_id, user_id, created_at)` |
 | `notices` | 공지 | `(created_at)` |
-| `reports` | 사용자 신고 | `(target_type, target_id)` |
+| `reports` | 피드 신고 (피드 전용 — 댓글/유저 신고 없음) | `(status, deleted_at, created_at)`, `(feed_id, deleted_at)`, `(target_user_id, deleted_at)` |
 
 전체 인덱스 정의는 [`../performance-indexes-2026-05-10.sql`](../performance-indexes-2026-05-10.sql) 참고.
 
@@ -176,9 +183,9 @@ erDiagram
 
 ### 3.3.2 Soft Delete
 
-- 모든 도메인 테이블에 `deleted_at DATETIME NULL` 컬럼.
-- **하드 삭제 금지**. `UPDATE ... SET deleted_at = NOW()`.
-- 모든 SELECT 에서 `AND <table>.deleted_at IS NULL` 필수.
+- 주요 도메인 테이블에 `deleted_at DATETIME NULL` 컬럼 (예외: `feed_comments`, `feed_likes` 는 Hard Delete).
+- Soft Delete 테이블은 **하드 삭제 금지**. `UPDATE ... SET deleted_at = NOW()`.
+- Soft Delete 테이블의 모든 SELECT 에서 `AND <table>.deleted_at IS NULL` 필수.
 - 누락 = 데이터 무결성 P0 버그 (실제 사례: `mypage.py:_load_gallery` 2026-05-23 패치).
 
 ### 3.3.3 시간대

@@ -177,8 +177,8 @@ flowchart LR
 |------|------|
 | 공지 작성 | `requireAdmin`. `AdminPage.jsx` → `POST /notice`. |
 | 공지 열람 | `NoticeList.jsx` 목록 + `NoticeDetail.jsx`. Soft Delete 필터 적용. |
-| 신고 작성 | `target_type` (feed / comment / user) 분기. 본인 게시물 신고 가드. |
-| 신고 처리 | Admin 이 `status` 를 `resolved` / `rejected` 로 갱신. |
+| 신고 작성 | **피드 전용** 신고. 카테고리 6종 + 상세 사유. 신고 대상(`target_user_id`)은 클라이언트 값을 믿지 않고 FastAPI 가 `feed_id` 로 작성자를 자체 조회해 확정. 같은 사용자가 같은 피드를 또 신고(pending)하면 409 로 중복 차단. 챌린지 인증 글(`source_type="challenge"`)은 프론트에서 신고 메뉴 자체를 숨김. |
+| 신고 처리 | Admin 이 한 피드의 모든 `pending` 신고를 `completed` 로 일괄 전환 (`admin_comment` 기록). |
 
 ---
 

@@ -140,7 +140,7 @@ sequenceDiagram
 1. **Single Source of Truth (API_BASE)** — 프론트는 `config.js` 한 곳에서만 호스트 결정.
 2. **신뢰 경계 명확화** — 세션은 Express, 내부 키는 FastAPI, 둘 다 통과해야 DB 접근 가능.
 3. **풀 누수 0 정책** — FastAPI 모든 라우터: `conn = get_connection()` → `try / except rollback / finally conn.close()`.
-4. **모든 도메인 Soft Delete** — `deleted_at IS NULL` 누락 = P0 버그로 취급.
+4. **주요 도메인 Soft Delete** — Soft Delete 테이블(`users`/`feeds`/`routines`/`challenges` 등)에서 `deleted_at IS NULL` 누락 = P0 버그로 취급. 단 `feed_comments`·`feed_likes` 는 Hard Delete 예외.
 5. **수정 자국 4 요소 주석** — 모든 코드 수정에 `오류번호 / 날짜 / 기대효과 / 장점` 4 항목을 강제.
 
 ---
