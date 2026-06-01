@@ -2,7 +2,7 @@ const fs = require("fs");
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   AlignmentType, LevelFormat, HeadingLevel, BorderStyle, WidthType, ShadingType,
-  VerticalAlign, PageNumber, Header, Footer,
+  VerticalAlign, PageNumber, Header, Footer, ImageRun,
 } = require("docx");
 
 const FONT = "Apple SD Gothic Neo";
@@ -60,6 +60,18 @@ function triTable(headers, rows, cw, headColor) {
   return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cw, rows: [header, ...trows] });
 }
 const gap = () => new Paragraph({ spacing: { after: 80 }, children: [] });
+// 코드/명령 블록 (모노스페이스 + 연한 음영 + 좌측 강조선)
+function code(lines) {
+  const arr = Array.isArray(lines) ? lines : [lines];
+  return new Paragraph({
+    shading: { fill: "EEF3F2", type: ShadingType.CLEAR },
+    spacing: { before: 40, after: 120, line: 268 },
+    border: { left: { style: BorderStyle.SINGLE, size: 14, color: TEAL2, space: 8 } },
+    indent: { left: 120 },
+    children: arr.map((l, i) => new TextRun({ text: l, font: "Consolas", size: 18, color: INK, break: i > 0 ? 1 : 0 })),
+  });
+}
+const H1b = (text) => new Paragraph({ pageBreakBefore: true, heading: HeadingLevel.HEADING_1, children: [T(text, { size: 30, bold: true, color: DARK })], spacing: { before: 0, after: 160 }, border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: TEAL2, space: 4 } } });
 
 // ===== 데이터 =====
 const backendRows = [
@@ -154,6 +166,13 @@ children.push(bullet([T("참조 무결성 — ", { size: 22, bold: true, color: 
 children.push(H2("3.2.2 테이블 구성 (14개)"));
 children.push(triTable(["도메인", "테이블", "설명"], tableRows, [1500, 2400, 5460], TEAL));
 children.push(gap());
+// ERD 관계도 (그림)
+children.push(body("아래는 위 14개 테이블의 관계를 한눈에 보여주는 ERD다. 모든 PK는 UUID v7이며, 화살표는 외래키(FK) 관계를 나타낸다.", { spacing: { after: 60 } }));
+children.push(new Paragraph({
+  alignment: AlignmentType.CENTER, spacing: { after: 60 },
+  children: [new ImageRun({ type: "png", data: fs.readFileSync("erd.png"), transformation: { width: 470, height: 612 }, altText: { title: "Routine Mate ERD", description: "데이터베이스 관계도", name: "ERD" } })],
+}));
+children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 160 }, children: [T("[그림] Routine Mate ERD — 14개 테이블 · 5개 도메인 그룹 · FK 관계 24개 (dbdiagram.io 렌더)", { size: 17, italics: true, color: MUTE })] }));
 children.push(H2("3.2.3 파일 내용 구성 (프로젝트 디렉터리)"));
 children.push(body("프로젝트는 React(프론트) · Express(BFF) · FastAPI(API)의 3-Tier 구조를 디렉터리로 분리한다. 본인은 src/backend, src/python_api, 데이터베이스 스키마, 배포 구성을 담당하였다."));
 children.push(triTable(["경로", "담당", "설명"], dirRows, [3000, 1100, 5260], TEAL2));
@@ -198,6 +217,45 @@ children.push(bullet([T("권한 모델 고도화 — ", { size: 22, bold: true, 
 children.push(bullet([T("인증 보안 강화 — ", { size: 22, bold: true, color: DARK }), T("비밀번호 변경 시 전체 세션 무효화, 아이디/비밀번호 찾기 IP 기준 rate limit, 이메일 토큰 기반 재설정, Helmet/CSP 헤더 적용.", { size: 22, color: INK })]));
 children.push(bullet([T("운영 관측성 — ", { size: 22, bold: true, color: DARK }), T("slow request/SQL 로그를 CloudWatch·Grafana로 연동, 5xx 비율·커넥션 풀 대기 시간 알림, 관리자 행위 audit log 테이블 도입.", { size: 22, color: INK })]));
 children.push(bullet([T("성능·자동화 — ", { size: 22, bold: true, color: DARK }), T("이미지 압축·썸네일(WebP), 커넥션 풀 파라미터 튜닝, CI에서 lint/build/py_compile 자동 실행으로 회귀 차단, 무중단 롤링 배포.", { size: 22, color: INK })]));
+
+// 부록. 실행 방법 (Windows)
+children.push(H1b("부록. 실행 방법 (Windows)"));
+children.push(body("본 프로젝트는 React(프론트)·Express(BFF)·FastAPI(API) 3계층으로 구성되며, 데이터베이스(AWS RDS MySQL)와 파일 저장소(AWS S3)는 외부 인프라를 사용한다. 따라서 실행하려면 DB·S3·내부 통신 키 등의 환경변수 값이 필요하다(제출 시 별도 전달). 실행은 Docker(권장)와 수동 방식 두 가지가 있다."));
+children.push(H2("1. 사전 준비물"));
+children.push(bullet([T("공통 — ", { size: 22, bold: true, color: DARK }), T("Git", { size: 22, color: INK })]));
+children.push(bullet([T("Docker 방식(권장) — ", { size: 22, bold: true, color: DARK }), T("Docker Desktop (실행 중이어야 함)", { size: 22, color: INK })]));
+children.push(bullet([T("수동 방식 — ", { size: 22, bold: true, color: DARK }), T("Node.js 20 이상, Python 3.12 이상", { size: 22, color: INK })]));
+children.push(H2("2. 소스 코드 내려받기"));
+children.push(code(["git clone https://github.com/junseoja/capston.git", "cd capston", "git checkout dev"]));
+children.push(H2("3. 환경변수 파일 3개 생성"));
+children.push(body("저장소에는 실제 .env가 포함되어 있지 않으므로 예시 파일을 복사해 만들고, RDS·S3 자격증명과 INTERNAL_API_KEY를 팀에서 전달받은 실제 값으로 채운다."));
+children.push(code(["copy .env.example .env", "copy src\\backend\\.env.example src\\backend\\.env", "copy src\\python_api\\.env.example src\\python_api\\.env"]));
+children.push(bullet([T("루트 .env — ", { size: 22, bold: true, color: DARK }), T("VITE_EXPRESS_URL=http://localhost:3000", { size: 22, color: INK })]));
+children.push(bullet([T("src\\backend\\.env — ", { size: 22, bold: true, color: DARK }), T("NODE_ENV=development, INTERNAL_API_KEY, AWS_REGION/AWS_S3_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY", { size: 22, color: INK })]));
+children.push(bullet([T("src\\python_api\\.env — ", { size: 22, bold: true, color: DARK }), T("DB_HOST/DB_USER/DB_PASSWORD/DB_NAME/DB_PORT(RDS), 그리고 동일한 INTERNAL_API_KEY", { size: 22, color: INK })]));
+children.push(body("※ src\\backend\\.env와 src\\python_api\\.env의 INTERNAL_API_KEY는 반드시 같은 값이어야 한다(Express가 FastAPI를 호출할 때 이 키로 내부 인증).", { spacing: { after: 120 } }));
+children.push(H2("4. 방법 A — Docker로 실행 (권장)"));
+children.push(body("Docker Desktop이 실행 중인 상태에서 프로젝트 루트에서 아래를 실행하면 3개 서버가 한 번에 뜬다."));
+children.push(code(["docker compose up --build         # 종료: docker compose down", "docker compose up --build -d      # 백그라운드 실행", "docker compose logs -f            # 로그 보기"]));
+children.push(H2("5. 방법 B — Docker 없이 수동 실행 (대안)"));
+children.push(body("PowerShell 창 3개를 열어 각각 실행한다."));
+children.push(body("① FastAPI (8000)", { spacing: { after: 30 } }));
+children.push(code(["cd capston\\src\\python_api", "python -m venv venv", "venv\\Scripts\\activate", "pip install -r requirements.txt", "uvicorn app:app --reload --port 8000"]));
+children.push(body("② Express (3000)", { spacing: { after: 30 } }));
+children.push(code(["cd capston\\src\\backend", "npm install", "npm start"]));
+children.push(body("③ React (5173)", { spacing: { after: 30 } }));
+children.push(code(["cd capston", "npm install", "npm run dev"]));
+children.push(H2("6. 접속 확인"));
+children.push(body("브라우저에서 http://localhost:5173 으로 접속하면 실제 화면이 열린다(로그인·회원가입·루틴·피드 동작). Express(3000)와 FastAPI(8000/docs)는 내부 통신용이라 직접 접속하지 않는다."));
+children.push(H2("7. 자주 막히는 곳"));
+children.push(triTable(["증상", "원인", "해결"], [
+  ["화면은 뜨는데 API가 전부 실패", "DB(RDS) 자격증명 오타·미입력", "src\\python_api\\.env의 DB_HOST/USER/PASSWORD/PORT 확인"],
+  ["Express→FastAPI 호출 실패(500)", "두 .env의 INTERNAL_API_KEY 불일치", "두 값을 같은 문자열로 통일"],
+  ["CORS 에러", "FRONTEND_URL에 localhost:5173 없음", "src\\backend\\.env 확인 후 재시작"],
+  ["이미지 업로드 실패", "S3 자격증명·버킷명 오류", "src\\backend\\.env의 AWS_* 확인"],
+  ["docker compose 인식 안 됨", "Docker Desktop 미실행", "Docker Desktop 실행 후 재시도"],
+  ["포트 충돌(5173/3000/8000)", "다른 프로그램이 포트 점유", "해당 프로그램 종료 또는 포트 변경"],
+], [3000, 2700, 3660], TEAL));
 
 // ===== 문서 객체 =====
 const doc = new Document({

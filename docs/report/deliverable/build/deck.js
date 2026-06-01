@@ -6,6 +6,10 @@ pres.layout = "LAYOUT_16x9"; // 10 x 5.625
 pres.author = "Routine Mate Team";
 pres.title = "Routine Mate 캡스톤 결과보고서 — 본인 담당 파트";
 
+// 페이지 자동 카운터 (표지=1, 이후 슬라이드마다 ++) — 슬라이드 삽입 시 재번호 불필요
+let PAGE = 1;
+const pg = () => ++PAGE;
+
 // 카드(흰 박스 + 좌측 틸 바) 헬퍼
 function card(slide, x, y, w, h, barColor = C.teal) {
   slide.addShape(pres.shapes.RECTANGLE, {
@@ -34,7 +38,7 @@ function card(slide, x, y, w, h, barColor = C.teal) {
 
   s.addText([
     { text: "수록 섹션  ", options: { bold: true, color: C.mint } },
-    { text: "3.2 데이터베이스 구성  ·  3.3 소스 파일 구성  ·  3.4 메뉴별 기능  ·  3.7 느낀점  ·  4. 향후 과제", options: { color: "BFD8D2" } },
+    { text: "3.2 데이터베이스 구성  ·  3.3 소스 파일 구성  ·  3.4 메뉴별 기능  ·  3.7 느낀점  ·  4. 향후 과제  ·  부록 실행 방법", options: { color: "BFD8D2" } },
   ], { x: 0.7, y: 3.95, w: 8.6, h: 0.4, margin: 0, fontFace: FONT, fontSize: 12 });
 
   s.addShape(pres.shapes.RECTANGLE, { x: 0.7, y: 4.7, w: 8.6, h: 0.02, fill: { color: C.teal2 }, line: { type: "none" } });
@@ -47,7 +51,7 @@ function card(slide, x, y, w, h, barColor = C.teal) {
 /* ============== 3.2 ① 데이터베이스 개요 & 설계 원칙 ============== */
 (function dbOverview() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.2", title: "데이터베이스 구성 — 개요 및 설계 원칙", page: 2 });
+  header(s, pres, { tag: "3.2", title: "데이터베이스 구성 — 개요 및 설계 원칙", page: pg() });
 
   // 좌측: DBMS 환경 카드
   card(s, 0.5, 1.32, 3.5, 3.55, C.teal);
@@ -83,7 +87,7 @@ function card(slide, x, y, w, h, barColor = C.teal) {
 /* ============== 3.2 ② 테이블 구성 (도메인 5그룹) ============== */
 (function dbTables() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.2", title: "데이터베이스 구성 — 테이블 구성 (14개)", page: 3 });
+  header(s, pres, { tag: "3.2", title: "데이터베이스 구성 — 테이블 구성 (14개)", page: pg() });
 
   const groups = [
     ["계정 · 세션", C.teal, ["users — 계정/프로필(bio·아바타)", "sessions — 로그인 세션·만료 관리"]],
@@ -116,10 +120,82 @@ function card(slide, x, y, w, h, barColor = C.teal) {
   groupCard(5.05, y2, 4.45, 4);
 })();
 
+/* ============== 3.2 ②-2 ERD 관계도 ============== */
+(function erd() {
+  const s = pres.addSlide();
+  header(s, pres, { tag: "3.2", title: "데이터베이스 — ERD 관계도", page: pg() });
+  // 좌측: ERD 이미지 (원본 7648x9952, 비율 0.768)
+  const ih = 3.95, iw = ih * 0.768;
+  s.addImage({ path: "erd.png", x: 0.45, y: 1.2, w: iw, h: ih });
+  // 우측 패널
+  const px = 4.0, pw = 5.55;
+  s.addText("14개 테이블 · 5개 도메인 그룹 · FK 관계 24개", { x: px, y: 1.28, w: pw, h: 0.4, margin: 0, fontFace: FONT, fontSize: 14, bold: true, color: C.dark });
+  const legend = [
+    ["계정 · 세션", C.teal, "users, sessions"],
+    ["루틴", C.teal2, "routines, routine_completions"],
+    ["피드 (소셜)", "3E8E7E", "feeds, feed_images, feed_comments, feed_likes"],
+    ["챌린지", "5B8A72", "challenges, participants, proofs, proof_files"],
+    ["운영", C.accent, "notices, reports"],
+  ];
+  let ly = 1.85;
+  legend.forEach((g) => {
+    s.addShape(pres.shapes.RECTANGLE, { x: px, y: ly + 0.04, w: 0.22, h: 0.22, fill: { color: g[1] }, line: { type: "none" } });
+    s.addText(g[0], { x: px + 0.34, y: ly - 0.04, w: pw - 0.34, h: 0.3, margin: 0, fontFace: FONT, fontSize: 12, bold: true, color: C.dark });
+    s.addText(g[2], { x: px + 0.34, y: ly + 0.24, w: pw - 0.34, h: 0.3, margin: 0, fontFace: FONT, fontSize: 9.5, color: C.mute });
+    ly += 0.6;
+  });
+  // 하단 노트 카드
+  card(s, px, 4.78, pw, 0.5, C.accent);
+  s.addText([
+    { text: "PK = UUID v7", options: { bold: true, color: C.accent } },
+    { text: "  ·  주요 테이블 Soft Delete  ·  상세: dbdiagram.io + routine_mate.dbml", options: { color: C.ink } },
+  ], { x: px + 0.2, y: 4.78, w: pw - 0.3, h: 0.5, margin: 0, fontFace: FONT, fontSize: 9.5, valign: "middle" });
+})();
+
+/* ============== 3.2 ②-3 테이블 관계 (Cardinality) ============== */
+(function relationships() {
+  const s = pres.addSlide();
+  header(s, pres, { tag: "3.2", title: "데이터베이스 — 테이블 관계 (Cardinality)", page: pg() });
+  s.addText("대부분 부모 1 : 자식 N 관계이며, 좋아요·챌린지 참여는 중간 테이블을 둔 N : M 이다. (엄격한 1:1 관계는 없음)", {
+    x: 0.5, y: 1.16, w: 9, h: 0.32, margin: 0, fontFace: FONT, fontSize: 11, bold: true, color: C.teal,
+  });
+  const rows = [
+    ["users → sessions", "1 : N", "한 사용자가 여러 세션(로그인) 보유"],
+    ["users → routines", "1 : N", "한 사용자가 여러 루틴 등록"],
+    ["routines → routine_completions", "1 : N", "한 루틴에 여러 일자 완료 기록"],
+    ["users → feeds", "1 : N", "한 사용자가 여러 인증 피드 작성"],
+    ["feeds → feed_images", "1 : N", "한 피드에 여러 첨부 파일(S3)"],
+    ["feeds → feed_comments", "1 : N", "한 피드에 여러 댓글"],
+    ["feeds → feed_likes", "1 : N", "한 피드에 여러 좋아요"],
+    ["users ↔ feeds (좋아요)", "N : M", "feed_likes 중간 테이블로 다대다"],
+    ["challenges → challenge_proofs", "1 : N", "한 챌린지에 여러 인증"],
+    ["challenge_proofs → challenge_proof_files", "1 : N", "한 인증에 여러 첨부 파일"],
+    ["users ↔ challenges (참여)", "N : M", "challenge_participants 중간 테이블"],
+    ["feeds → reports", "1 : N", "한 피드에 여러 신고 누적"],
+    ["users → reports", "1 : N", "신고자·대상자·처리관리자(역할별)"],
+  ];
+  const head = ["관계", "유형", "설명"].map((t, i) => ({
+    text: t, options: { fill: { color: C.teal }, color: C.white, bold: true, fontSize: 11, align: i === 1 ? "center" : "left", valign: "middle" },
+  }));
+  const body = rows.map((r, i) => {
+    const zebra = i % 2 ? "EEF5F4" : "FFFFFF";
+    const tcol = r[1].includes("N : M") ? C.accent : C.teal;
+    return [
+      { text: r[0], options: { fill: { color: zebra }, color: C.ink, bold: true, fontSize: 10, align: "left", valign: "middle" } },
+      { text: r[1], options: { fill: { color: zebra }, color: tcol, bold: true, fontSize: 10.5, align: "center", valign: "middle" } },
+      { text: r[2], options: { fill: { color: zebra }, color: C.ink, fontSize: 10, align: "left", valign: "middle" } },
+    ];
+  });
+  s.addTable([head, ...body], {
+    x: 0.5, y: 1.56, w: 9.0, colW: [3.7, 1.1, 4.2], rowH: 0.0, autoPage: false,
+    border: { type: "solid", pt: 0.5, color: "D6E2E2" }, fontFace: FONT, valign: "middle", margin: [2, 5, 2, 5],
+  });
+})();
+
 /* ============== 3.2 ③ 파일(프로젝트 디렉터리) 내용 구성 ============== */
 (function fileStructure() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.2", title: "파일 내용 구성 — 프로젝트 디렉터리", page: 4 });
+  header(s, pres, { tag: "3.2", title: "파일 내용 구성 — 프로젝트 디렉터리", page: pg() });
 
   s.addText("React(프론트) · Express(BFF) · FastAPI(API) 3-Tier 구조를 디렉터리로 분리", {
     x: 0.5, y: 1.18, w: 9, h: 0.35, margin: 0, fontFace: FONT, fontSize: 12.5, bold: true, color: C.teal,
@@ -174,7 +250,7 @@ function card(slide, x, y, w, h, barColor = C.teal) {
 /* ============== 3.3 ① 소스 구성 한눈에 (통계) ============== */
 (function srcOverview() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.3", title: "소스 파일 구성 — 한눈에 보기", page: 5 });
+  header(s, pres, { tag: "3.3", title: "소스 파일 구성 — 한눈에 보기", page: pg() });
 
   // 3개 stat 콜아웃
   const stats = [
@@ -227,7 +303,7 @@ function fileTableSlide(tag, title, page, headerColor, rows) {
 }
 
 /* ============== 3.3 ② Frontend ============== */
-fileTableSlide("3.3", "소스 파일 구성 — Frontend (React 19) · 팀원 담당", 6, C.teal, [
+fileTableSlide("3.3", "소스 파일 구성 — Frontend (React 19) · 팀원 담당", pg(), C.teal, [
   ["App.jsx", 899, "팀원", "라우터 · 새로고침 세션 자동복원 · 전역 상태"],
   ["LoginPage.jsx", 338, "팀원", "로그인 · 아이디/비밀번호 찾기"],
   ["SignupPage.jsx", 628, "팀원", "회원가입 · 중복확인 · 입력 유효성 검사"],
@@ -243,7 +319,7 @@ fileTableSlide("3.3", "소스 파일 구성 — Frontend (React 19) · 팀원 �
 ]);
 
 /* ============== 3.3 ③ Backend (Express BFF) ============== */
-fileTableSlide("3.3", "소스 파일 구성 — Backend (Express BFF)", 7, C.teal2, [
+fileTableSlide("3.3", "소스 파일 구성 — Backend (Express BFF)", pg(), C.teal2, [
   ["app.js", 201, "본인", "미들웨어 · 세션 · CORS · 라우터 마운트"],
   ["database.js", 708, "본인", "FastAPI 호출 · fetchJson 헬퍼 · 세션 DB"],
   ["lib/s3.js", 104, "본인", "S3 키 검증 · 객체 삭제 (보안 가드)"],
@@ -260,7 +336,7 @@ fileTableSlide("3.3", "소스 파일 구성 — Backend (Express BFF)", 7, C.tea
 ]);
 
 /* ============== 3.3 ④ FastAPI ============== */
-fileTableSlide("3.3", "소스 파일 구성 — Application API (FastAPI)", 8, "3E8E7E", [
+fileTableSlide("3.3", "소스 파일 구성 — Application API (FastAPI)", pg(), "3E8E7E", [
   ["app.py", 120, "본인", "INTERNAL_API_KEY 게이트 · 라우터 마운트"],
   ["database.py", 200, "본인", "PyMySQL 커넥션 풀 · slow-SQL 로그"],
   ["user.py", 697, "본인", "회원가입 · 세션 · 프로필 수정"],
@@ -299,7 +375,7 @@ function pointsCard(s, y, h, title, points) {
 /* ============== 3.4 ① 메뉴 구성 맵 ============== */
 (function menuMap() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 화면 구성 맵", page: 9 });
+  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 화면 구성 맵", page: pg() });
   const menus = [
     ["회원가입 · 로그인", "계정 생성 · httpOnly 세션", C.teal],
     ["홈", "오늘의 루틴 · 인증 업로드", C.teal],
@@ -329,7 +405,7 @@ function pointsCard(s, y, h, title, points) {
 /* ============== 3.4 ② 인증 시나리오 ============== */
 (function authScenario() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 회원가입 · 로그인 시나리오", page: 10 });
+  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 회원가입 · 로그인 시나리오", page: pg() });
   pipeline(s, 1.45, 1.15, [
     { t: "회원가입 입력", s: "아이디·비번·닉네임", c: C.teal },
     { t: "중복 검사", s: "login_id UNIQUE", c: C.teal2 },
@@ -348,7 +424,7 @@ function pointsCard(s, y, h, title, points) {
 /* ============== 3.4 ③ 루틴 등록·완료 시나리오 ============== */
 (function routineScenario() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 루틴 등록 · 완료 체크", page: 11 });
+  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 루틴 등록 · 완료 체크", page: pg() });
   // 좌: 단계, 우: 규칙
   const steps = [
     ["1", "루틴 등록", "아침/점심/저녁 시간대 + 제목 입력 → routines INSERT"],
@@ -381,7 +457,7 @@ function pointsCard(s, y, h, title, points) {
 /* ============== 3.4 ④ 피드 시나리오 ============== */
 (function feedScenario() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 피드 작성 · 무한 스크롤", page: 12 });
+  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 피드 작성 · 무한 스크롤", page: pg() });
   pipeline(s, 1.45, 1.15, [
     { t: "사진 선택", s: "이미지/영상", c: C.teal },
     { t: "multer-s3", s: "S3 직접 PUT", c: C.teal2 },
@@ -400,7 +476,7 @@ function pointsCard(s, y, h, title, points) {
 /* ============== 3.4 ⑤ 마이페이지 · 통계 ============== */
 (function mypageScenario() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 마이페이지 · 통계 (단일 응답)", page: 13 });
+  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 마이페이지 · 통계 (단일 응답)", page: pg() });
   // 단일 호출 → 3블록 (출발 블록은 채워진 틸 박스)
   s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.5, y: 1.45, w: 2.5, h: 1.1, rectRadius: 0.08, fill: { color: C.teal }, line: { type: "none" }, shadow: shadow() });
   s.addText([{ text: "GET /mypage", options: { bold: true, color: C.white, breakLine: true } }, { text: "한 번의 호출", options: { color: "E6F2F0", fontSize: 10 } }],
@@ -424,7 +500,7 @@ function pointsCard(s, y, h, title, points) {
 /* ============== 3.4 ⑥ 공지 · 신고 · 챌린지 연동 ============== */
 (function noticeReportScenario() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 공지 · 신고 · 챌린지 연동", page: 14 });
+  header(s, pres, { tag: "3.4", title: "메뉴별 기능 — 공지 · 신고 · 챌린지 연동", page: pg() });
   // 좌: 신고 흐름 / 우: 공지·챌린지
   card(s, 0.5, 1.4, 4.5, 3.45, C.teal);
   s.addText("피드 신고", { x: 0.72, y: 1.54, w: 4.1, h: 0.34, margin: 0, fontFace: FONT, fontSize: 14, bold: true, color: C.teal });
@@ -464,7 +540,7 @@ function quadCards(s, items, startY, cardH) {
 /* ============== 3.7 프로젝트를 수행하며 배우고 느낀점 ============== */
 (function reflection() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "3.7", title: "프로젝트를 수행하며 배우고 느낀점", page: 15 });
+  header(s, pres, { tag: "3.7", title: "프로젝트를 수행하며 배우고 느낀점", page: pg() });
   quadCards(s, [
     { h: "설계로 체득한 것", c: C.teal, d: "3-Tier(BFF) 구조를 직접 설계하며 '왜 계층을 나누는가'를 코드로 이해했다. 세션·CORS·업로드는 Express가, 도메인 로직·DB는 FastAPI가 맡도록 신뢰 경계를 나누니 책임과 보안이 명확해졌다." },
     { h: "운영을 가정한 문제 해결", c: C.teal2, d: "커넥션 누수·S3 orphan 파일·분산 트랜잭션 같은 문제를 마주하며 풀 반환(try/finally), 보상 삭제, 커서 페이지네이션을 도입했다. PyMySQL 커넥션 풀을 의존성 없이 직접 구현하며 동시성·자원 관리를 깊이 배웠다." },
@@ -481,7 +557,7 @@ function quadCards(s, items, startY, cardH) {
 /* ============== 4. 향후 과제 (본인 담당 관점) ============== */
 (function future() {
   const s = pres.addSlide();
-  header(s, pres, { tag: "4", title: "향후 과제 — 백엔드 · DB · 인프라 관점", page: 16 });
+  header(s, pres, { tag: "4", title: "향후 과제 — 백엔드 · DB · 인프라 관점", page: pg() });
   s.addText("※ 향후 과제는 팀원별 각자 작성 — 아래는 본인 담당 영역(백엔드·DB·인프라)의 개선 로드맵", {
     x: 0.5, y: 1.16, w: 9, h: 0.32, margin: 0, fontFace: FONT, fontSize: 11, bold: true, color: C.teal,
   });
@@ -491,6 +567,28 @@ function quadCards(s, items, startY, cardH) {
     { h: "운영 관측성", c: "3E8E7E", d: "slow request/SQL 로그를 CloudWatch·Grafana로 연동, 5xx 비율·커넥션 풀 대기 알림, 관리자 행위 audit log 테이블 도입." },
     { h: "성능 · 자동화", c: C.accent, d: "이미지 압축·썸네일(WebP), 커넥션 풀 파라미터 튜닝, CI에서 lint/build/py_compile 자동 실행으로 배포 전 회귀 차단, 무중단 롤링 배포." },
   ], 1.55, 1.6);
+})();
+
+/* ============== 부록. 실행 방법 (Windows) ============== */
+(function runGuide() {
+  const s = pres.addSlide();
+  header(s, pres, { tag: "부록", title: "실행 방법 (Windows)", page: pg() });
+  s.addText("React + Express + FastAPI 3계층. DB(AWS RDS)·파일저장소(S3)는 외부 인프라 → 실행 시 자격증명(.env) 필요.", {
+    x: 0.5, y: 1.18, w: 9, h: 0.32, margin: 0, fontFace: FONT, fontSize: 11.5, bold: true, color: C.teal,
+  });
+  pipeline(s, 1.6, 1.12, [
+    { t: "① 사전 준비", s: "Git · Docker Desktop", c: C.teal },
+    { t: "② 소스 받기", s: "git clone · checkout dev", c: C.teal2 },
+    { t: "③ 환경변수", s: ".env 3개 작성", c: "3E8E7E" },
+    { t: "④ 실행", s: "docker compose up --build", c: C.teal },
+    { t: "⑤ 접속", s: "localhost:5173", c: C.dark },
+  ]);
+  pointsCard(s, 3.1, 1.95, "핵심 안내", [
+    "DB(AWS RDS)·파일저장소(S3)는 외부 인프라이므로 실행하려면 자격증명 .env가 필요하다(제출 시 별도 전달).",
+    "src\\backend\\.env 와 src\\python_api\\.env 의 INTERNAL_API_KEY 는 반드시 같은 값이어야 한다.",
+    "Docker 없이도 가능: PowerShell 3개에서 uvicorn app:app --port 8000 · npm start(backend) · npm run dev(루트).",
+    "접속은 http://localhost:5173 (Express 3000·FastAPI 8000은 내부 통신용).",
+  ]);
 })();
 
 pres.writeFile({ fileName: "RoutineMate_본인담당파트.pptx" }).then(f => console.log("WROTE:", f));

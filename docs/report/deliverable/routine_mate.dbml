@@ -1,0 +1,256 @@
+// ============================================================
+// Routine Mate — 데이터베이스 ERD (DBML)
+// 사용법: https://dbdiagram.io/d  → 좌측 편집창에 아래 전체를 붙여넣기
+// ============================================================
+// [설계 원칙 3가지]
+//  1) 식별자: 모든 PK는 CHAR(36) UUID v7.
+//     - v7은 앞부분이 시간값이라 B-Tree 인덱스에 순서대로 쌓여 성능에 유리하고,
+//       순차 정수처럼 다음 ID를 추측할 수 없어 보안에도 안전하다.
+//  2) 삭제 정책: 주요 도메인은 deleted_at 으로 "논리 삭제"(Soft Delete) → 복구 가능.
+//     - 예외: feed_comments, feed_likes 는 물리 삭제(Hard Delete). 토글/단순 액션이라 보존 불필요.
+//  3) 무결성: FK로 관계를 강제하고, 자주 쓰는 조회 컬럼에는 복합 인덱스/UNIQUE를 둔다.
+//     - 탈퇴 사용자의 글은 LEFT JOIN + COALESCE 로 "(탈퇴 사용자)"로 보존해 화면이 깨지지 않게 한다.
+// 환경: MySQL 8 (AWS RDS) / 시간대 KST(+09:00) / 문자셋 utf8mb4
+// ============================================================
+
+Project routine_mate {
+  database_type: 'MySQL'
+  Note: 'Routine Mate — 루틴 관리·인증 SNS. PK는 UUID v7, 주요 도메인은 Soft Delete(deleted_at).'
+}
+
+// ─────────── 계정 · 세션 ───────────
+// users: 계정·프로필의 중심 테이블. 거의 모든 테이블이 user_id로 이 테이블을 참조한다.
+// sessions: 로그인 시 발급한 세션을 DB에 저장하고 만료(expires_at)로 검증한다.
+//           세션ID는 httpOnly 쿠키로만 오가서 JS가 읽지 못한다(XSS 토큰 탈취 방어).
+Table users {
+  user_id     char(36)     [pk, note: 'UUID v7']
+  login_id    varchar(50)  [unique, not null]
+  password    varchar(255) [not null, note: 'bcrypt 해시']
+  nickname    varchar(50)  [not null]
+  email       varchar(255)
+  gender      char(1)
+  birth_date  date
+  profile_img varchar(500) [note: 'S3 URL']
+  bio         text         [note: '자기소개']
+  created_at  datetime
+  deleted_at  datetime     [note: 'Soft Delete']
+}
+
+Table sessions {
+  session_id char(36)  [pk, note: '세션 토큰']
+  user_id    char(36)  [not null]
+  expires_at datetime  [not null, note: '발급 + 1 DAY']
+  created_at datetime
+}
+
+// ─────────── 루틴 ───────────
+// routines: 사용자가 등록한 시간대(아침/점심/저녁)별 루틴.
+// routine_completions: 일자별 완료 기록. "오늘 완료"는 DATE(completed_at)=CURDATE() 기준,
+//                      하루에 여러 번 체크해도 routine_id 단위로 1회만 인정한다.
+//                      체크 해제는 행 삭제가 아니라 deleted_at(Soft Delete)로 처리한다.
+Table routines {
+  routine_id   char(36)    [pk, note: 'UUID v7']
+  user_id      char(36)    [not null]
+  title        varchar(100) [not null]
+  category     varchar(50)
+  time_slot    varchar(20) [note: 'morning | lunch | dinner']
+  routine_mode varchar(20)
+  goal         varchar(100)
+  repeat_cycle varchar(50)
+  description  text
+  created_at   datetime
+  deleted_at   datetime    [note: 'Soft Delete']
+}
+
+Table routine_completions {
+  completion_id char(36) [pk, note: 'UUID v7']
+  routine_id    char(36) [not null]
+  user_id       char(36) [not null]
+  proof_text    text
+  completed_at  datetime [note: '완료 시각 (DATE 기준 하루 1회 인정)']
+  deleted_at    datetime [note: 'Soft Delete (체크 해제)']
+}
+
+// ─────────── 피드 (소셜) ───────────
+// feeds: 루틴 인증 게시글 본문. routine_id/completion_id로 어떤 루틴 인증인지 연결할 수 있다(선택).
+// feed_images: 게시글 첨부 파일. 실제 파일은 S3에 두고 URL만 저장한다(1:N).
+// feed_comments: 댓글. Hard Delete(작성자 본인만 DELETE) → deleted_at 컬럼이 없다.
+// feed_likes: 좋아요. like_id가 PK이고 (feed_id,user_id) UNIQUE로 1인 1회를 강제한다.
+//             "좋아요 토글"은 INSERT가 UNIQUE 충돌하면 DELETE로 전환하는 방식이다.
+Table feeds {
+  feed_id       char(36) [pk, note: 'UUID v7']
+  user_id       char(36) [not null]
+  routine_id    char(36) [note: '연결된 루틴 (nullable)']
+  completion_id char(36) [note: '연결된 완료기록 (nullable)']
+  content       text
+  created_at    datetime
+  deleted_at    datetime [note: 'Soft Delete']
+}
+
+Table feed_images {
+  image_id   char(36)     [pk, note: 'UUID v7']
+  feed_id    char(36)     [not null]
+  file_url   varchar(500) [not null, note: 'S3 URL']
+  file_type  varchar(50)  [note: 'image | video']
+  created_at datetime
+}
+
+Table feed_comments {
+  comment_id char(36) [pk, note: 'UUID v7']
+  feed_id    char(36) [not null]
+  user_id    char(36) [not null]
+  content    text     [not null]
+  created_at datetime
+  Note: 'Hard Delete (작성자 본인만 삭제)'
+}
+
+Table feed_likes {
+  like_id    char(36) [pk, note: 'UUID v7']
+  feed_id    char(36) [not null]
+  user_id    char(36) [not null]
+  created_at datetime
+  indexes {
+    (feed_id, user_id) [unique, note: '중복 좋아요 방지 → 토글']
+  }
+}
+
+// ─────────── 챌린지 ───────────
+// challenges: 관리자가 등록하는 챌린지(기간/총일수).
+// challenge_participants: 참여 매핑. (challenge_id,user_id) UNIQUE로 중복 참여를 막는다.
+// challenge_proofs: 챌린지 인증. (challenge_id,user_id,proof_date) UNIQUE로 "하루 1회 인증"을 강제.
+//                   share_to_feed=1이면 일반 피드 조회 단계에서 함께 병합되어 노출된다.
+// challenge_proof_files: 인증 첨부 파일(S3 URL).
+// (챌린지 API 라우터는 팀원 담당, 테이블 스키마 설계는 본인 담당)
+Table challenges {
+  challenge_id      char(36)     [pk, note: 'UUID v7']
+  title             varchar(100) [not null]
+  description       text
+  category          varchar(50)
+  start_date        date         [not null]
+  end_date          date         [not null]
+  total_days        int          [not null]
+  participant_count int          [note: '참여자 수 캐시']
+  created_by        char(36)     [note: '관리자 user_id']
+  created_at        datetime
+  updated_at        datetime
+  deleted_at        datetime     [note: 'Soft Delete']
+}
+
+Table challenge_participants {
+  participant_id char(36) [pk, note: 'UUID v7']
+  challenge_id   char(36) [not null]
+  user_id        char(36) [not null]
+  joined_at      datetime
+  status         varchar(20) [note: 'ACTIVE | COMPLETED | STOPPED']
+  created_at     datetime
+  updated_at     datetime
+  indexes {
+    (challenge_id, user_id) [unique]
+  }
+}
+
+Table challenge_proofs {
+  proof_id      char(36) [pk, note: 'UUID v7']
+  challenge_id  char(36) [not null]
+  user_id       char(36) [not null]
+  content       text
+  proof_date    date     [not null, note: '하루 1회 인증 기준']
+  share_to_feed tinyint  [note: '1이면 피드 목록에 병합']
+  created_at    datetime
+  deleted_at    datetime [note: 'Soft Delete']
+  indexes {
+    (challenge_id, user_id, proof_date) [unique]
+  }
+}
+
+Table challenge_proof_files {
+  proof_file_id char(36)     [pk, note: 'UUID v7']
+  proof_id      char(36)     [not null]
+  file_url      varchar(500) [not null, note: 'S3 URL']
+  file_type     varchar(50)  [note: 'image/jpeg, video/mp4 등']
+  file_order    int          [note: '표시 순서']
+  created_at    datetime
+}
+
+// ─────────── 운영 (공지 · 신고) ───────────
+// notices: 관리자 공지. 사용자는 목록·상세만 열람한다.
+// reports: 신고. 신고 대상은 "피드 전용"이다(feed_id NOT NULL). 댓글/유저 신고는 없다.
+//          신고자(reporter)·대상자(target)·처리관리자(processed_by)가 모두 users를 참조해 FK가 4개다.
+//          대상자는 클라이언트 값을 믿지 않고 feed_id로 작성자를 서버가 직접 조회해 채운다(위조 방지).
+Table notices {
+  notice_id  char(36)     [pk, note: 'UUID v7']
+  category   varchar(20)  [not null, note: '일반 | 이벤트 | 점검 | 업데이트']
+  title      varchar(255) [not null]
+  content    text         [not null]
+  post_date  date         [not null]
+  created_by char(36)     [note: '관리자 user_id']
+  created_at datetime
+  updated_at datetime
+  deleted_at datetime     [note: 'Soft Delete']
+}
+
+Table reports {
+  report_id        char(36) [pk, note: 'UUID v7']
+  feed_id          char(36) [not null, note: '신고 대상 = 피드 전용']
+  reporter_user_id char(36) [not null, note: '신고자 (세션 주입)']
+  target_user_id   char(36) [not null, note: '피드 작성자']
+  report_category  varchar(30) [not null, note: '욕설/비방·부적절한 홍보·도용/저작권·스팸/도배·음란/혐오·기타']
+  report_detail    text
+  status           varchar(20) [note: 'pending | completed']
+  admin_comment    text
+  processed_by     char(36)    [note: '처리 관리자 user_id']
+  created_at       datetime
+  processed_at     datetime
+  deleted_at       datetime    [note: 'Soft Delete']
+}
+
+// ─────────── 관계 (Foreign Keys) ───────────
+Ref: sessions.user_id > users.user_id
+Ref: routines.user_id > users.user_id
+Ref: routine_completions.routine_id > routines.routine_id
+Ref: routine_completions.user_id > users.user_id
+Ref: feeds.user_id > users.user_id
+Ref: feeds.routine_id > routines.routine_id
+Ref: feeds.completion_id > routine_completions.completion_id
+Ref: feed_images.feed_id > feeds.feed_id
+Ref: feed_comments.feed_id > feeds.feed_id
+Ref: feed_comments.user_id > users.user_id
+Ref: feed_likes.feed_id > feeds.feed_id
+Ref: feed_likes.user_id > users.user_id
+Ref: challenges.created_by > users.user_id
+Ref: challenge_participants.challenge_id > challenges.challenge_id
+Ref: challenge_participants.user_id > users.user_id
+Ref: challenge_proofs.challenge_id > challenges.challenge_id
+Ref: challenge_proofs.user_id > users.user_id
+Ref: challenge_proof_files.proof_id > challenge_proofs.proof_id
+Ref: notices.created_by > users.user_id
+Ref: reports.feed_id > feeds.feed_id
+Ref: reports.reporter_user_id > users.user_id
+Ref: reports.target_user_id > users.user_id
+Ref: reports.processed_by > users.user_id
+
+// ─────────── 보기 좋게 그룹화 ───────────
+TableGroup "계정·세션" {
+  users
+  sessions
+}
+TableGroup "루틴" {
+  routines
+  routine_completions
+}
+TableGroup "피드" {
+  feeds
+  feed_images
+  feed_comments
+  feed_likes
+}
+TableGroup "챌린지" {
+  challenges
+  challenge_participants
+  challenge_proofs
+  challenge_proof_files
+}
+TableGroup "운영" {
+  notices
+  reports
+}
