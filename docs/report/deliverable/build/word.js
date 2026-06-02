@@ -72,6 +72,41 @@ function code(lines) {
   });
 }
 const H1b = (text) => new Paragraph({ pageBreakBefore: true, heading: HeadingLevel.HEADING_1, children: [T(text, { size: 30, bold: true, color: DARK })], spacing: { before: 0, after: 160 }, border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: TEAL2, space: 4 } } });
+// 관계(Cardinality) 표: [관계, 유형, 설명] — 유형은 N:M이면 주황, 1:N이면 틸
+function relTable(rows) {
+  const cw = [3400, 1100, 4860];
+  const header = new TableRow({ tableHeader: true, children: [
+    cell("관계", cw[0], { head: true, fill: TEAL }),
+    cell("유형", cw[1], { head: true, fill: TEAL, align: AlignmentType.CENTER }),
+    cell("설명", cw[2], { head: true, fill: TEAL }),
+  ]});
+  const trows = rows.map((r, i) => {
+    const fill = i % 2 ? ZEBRA : "FFFFFF";
+    const tcol = r[1].includes("N : M") ? ACCENT : TEAL;
+    return new TableRow({ children: [
+      cell(r[0], cw[0], { fill, bold: true }),
+      cell(r[1], cw[1], { fill, align: AlignmentType.CENTER, color: tcol, bold: true }),
+      cell(r[2], cw[2], { fill }),
+    ]});
+  });
+  return new Table({ width: { size: CW, type: WidthType.DXA }, columnWidths: cw, rows: [header, ...trows] });
+}
+const relRows = [
+  ["users → sessions", "1 : N", "한 사용자가 여러 세션(로그인) 보유"],
+  ["users → routines", "1 : N", "한 사용자가 여러 루틴 등록"],
+  ["routines → routine_completions", "1 : N", "한 루틴에 여러 일자 완료 기록"],
+  ["users → feeds", "1 : N", "한 사용자가 여러 인증 피드 작성"],
+  ["feeds → feed_images", "1 : N", "한 피드에 여러 첨부 파일(S3)"],
+  ["feeds → feed_comments", "1 : N", "한 피드에 여러 댓글"],
+  ["feeds → feed_likes", "1 : N", "한 피드에 여러 좋아요"],
+  ["users ↔ feeds (좋아요)", "N : M", "feed_likes 중간 테이블로 다대다"],
+  ["challenges → challenge_participants", "1 : N", "한 챌린지에 여러 참여자"],
+  ["challenges → challenge_proofs", "1 : N", "한 챌린지에 여러 인증"],
+  ["challenge_proofs → challenge_proof_files", "1 : N", "한 인증에 여러 첨부 파일"],
+  ["users ↔ challenges (참여)", "N : M", "challenge_participants 중간 테이블"],
+  ["feeds → reports", "1 : N", "한 피드에 여러 신고 누적"],
+  ["users → reports", "1 : N", "신고자·대상자·처리관리자(역할별)"],
+];
 
 // ===== 데이터 =====
 const backendRows = [
@@ -173,7 +208,11 @@ children.push(new Paragraph({
   children: [new ImageRun({ type: "png", data: fs.readFileSync("erd.png"), transformation: { width: 470, height: 612 }, altText: { title: "Routine Mate ERD", description: "데이터베이스 관계도", name: "ERD" } })],
 }));
 children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 160 }, children: [T("[그림] Routine Mate ERD — 14개 테이블 · 5개 도메인 그룹 · FK 관계 24개 (dbdiagram.io 렌더)", { size: 17, italics: true, color: MUTE })] }));
-children.push(H2("3.2.3 파일 내용 구성 (프로젝트 디렉터리)"));
+children.push(H2("3.2.3 테이블 관계 (Cardinality)"));
+children.push(body("테이블 간 관계는 대부분 부모 1 : 자식 N 구조다. 좋아요와 챌린지 참여만 중간(매핑) 테이블을 둔 N : M 관계이며, 엄격한 1:1 관계는 없다."));
+children.push(relTable(relRows));
+children.push(gap());
+children.push(H2("3.2.4 파일 내용 구성 (프로젝트 디렉터리)"));
 children.push(body("프로젝트는 React(프론트) · Express(BFF) · FastAPI(API)의 3-Tier 구조를 디렉터리로 분리한다. 본인은 src/backend, src/python_api, 데이터베이스 스키마, 배포 구성을 담당하였다."));
 children.push(triTable(["경로", "담당", "설명"], dirRows, [3000, 1100, 5260], TEAL2));
 
